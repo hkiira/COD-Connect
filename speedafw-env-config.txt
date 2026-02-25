@@ -1,0 +1,28 @@
+# Speedaf WooCommerce Integration Configuration
+# Add these to your .env file
+
+# Speedaf API Credentials (provided by Speedaf)
+# Customer: STARSHOP
+SPEEDAF_APPCODE=880056
+SPEEDAF_SECRETKEY=ab7cdf72c043665566bbc706c87965bc
+SPEEDAF_CUSTOMERCODE=MA003286
+
+# Speedaf API URLs
+SPEEDAF_BASE_URL=https://apis.speedaf.com/
+SPEEDAF_VIP_URL=https://csp.speedaf.com/
+
+# Default Sender Information
+SPEEDAF_SENDER_NAME="STARSHOP"
+SPEEDAF_SENDER_ADDRESS="Your Complete Address"
+SPEEDAF_SENDER_PHONE="0123456789"
+SPEEDAF_SENDER_CITY="Casablanca"
+SPEEDAF_SENDER_COUNTRY="MA"
+
+# Debug Mode (use test environment)
+SPEEDAF_DEBUG=false
+
+# Test Environment (only if SPEEDAF_DEBUG=true)
+SPEEDAF_TEST_APPCODE=TT660085
+SPEEDAF_TEST_SECRETKEY=qz4CWUEC
+SPEEDAF_TEST_BASE_URL=http://8.214.27.92:8480/
+SPEEDAF_TEST_VIP_URL=http://8.214.27.92:8093/

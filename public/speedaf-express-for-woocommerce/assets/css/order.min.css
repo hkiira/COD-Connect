@@ -1,0 +1,197 @@
+
+#spf-create-order {
+    margin-top: 1rem;
+}
+.spf-create-order {
+    background-color: #fff;
+  
+   
+}
+.spf-create-order .header-title {
+    display: flex;
+    margin: 1rem 0;
+}
+.spf-create-order .header-title .goback{
+   width: 8rem;
+}
+.spf-create-order .header-title .speedaf-content  {
+    text-align: center;
+    width: 100%;
+
+ }
+.spf-create-order .header-title .goback a {
+    display: block;
+    width: 100%;
+    height: 2.5rem;
+    background-color: #ccc;
+    line-height: 2.5rem;
+    text-decoration: none;
+    text-align: center;
+    font-size: 1rem;
+    color: #fff;
+   
+    border-radius: 10px;
+}
+.spf-create-order .header-title .goback a:hover{
+    background-color: #107f61;
+    box-shadow: 0 0 3px #107f61;
+}
+.spf-create-order.wrap {
+    margin:  0 1rem;
+    padding: 1rem;
+}
+.spf-create-order table {
+    border-spacing: 0;
+    border: 1px solid #ebeef5;
+    width: 100%;
+}
+ .spf-create-order th{
+    background-color: rgb(242, 242, 242);
+    border-right: 1px solid #ebeef5;
+    border-bottom:  1px solid #ebeef5;
+    padding: 1rem;
+    color: #909399;
+ }
+ .spf-create-order td {
+    padding: 1rem;
+    border-left: 1px solid #ebeef5;
+ }
+ .spf-create-order th:last-child{
+    border-right: none;
+ }
+ .spf-create-order-header {
+    display: flex;
+    padding: 10px 0;
+ }
+ .spf-create-order-header .search{
+    display: flex;
+    align-items: center;
+ }
+/*   .spf-create-order-header .search .date{
+    border: 1px solid #2271b1;
+    border-radius: 5px;
+ }
+ .spf-create-order-header .search .date input[type="datetime-local"]{
+     border: none;
+ }
+ .spf-create-order-header .search .date input[type="datetime-local"]:focus{
+     border: none;
+     outline: none;
+     box-shadow:none;
+ } */
+ .spf-create-order-header > div {
+    flex: 1 0 auto;
+ }
+ .spf-create-order-header .search-botton {
+    margin-left: 1rem;
+ }
+ .spf-create-order-header .search-botton button {
+    width: 100px;
+    height: 2.5rem;
+ }
+ .spf-create-order-header  .order-button-group {
+    display:flex;
+    align-items: center;
+    justify-content: flex-end;
+
+ }
+ .spf-create-order-header  .order-button-group > div {
+    margin: 0 .5rem;
+ }
+ .spf-create-order-header .order_search {
+    padding-right: 1rem;
+ }
+ .spf-create-order-header  .order-button-group button {
+    width: 8rem;
+    height: 2.5rem;
+ }
+ #print-label-type .print-label-content{
+     display: grid;
+     place-items: start;
+     padding: .5rem;
+ }
+  #print-label-type .print-label-content label {
+    padding: 5px 0;
+ }
+  #print-label-type .print-label-content label  span {
+         display: inline-block;
+        padding-left: 10px;
+        font-size: 1rem;
+        color: #909399;
+ }
+ #edit-sender{
+    position: fixed;
+    max-width: 25%;
+    right: 0;
+ }
+ #edit-sender form#edit-form{
+   /*  display: flex;
+    flex-direction: column;
+    justify-content: center; */
+    height: 100vh;
+
+ }
+ #edit-form-tabel table.form-table select[name="woocommerce_default_country"]{
+    max-width: 11rem;
+ }
+ #edit-sender form#edit-form table.form-table label {
+    display: inline-block;
+    width: 55px;
+ }
+ #edit-form-tabel  {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-gap: 10px;
+ }
+ #edit-form-tabel > h2,#edit-form-tabel #store_address-description {
+    display: none;
+ }
+ #edit-form-tabel input,#edit-form-tabel select {
+    width: 220px;
+ }
+ #edit-form-tabel label {
+    width: 80px;
+}
+#edit-form-tabel label:not(:nth-of-type(2)):before{
+    content: "*";
+    color: red;
+    vertical-align: middle;
+    font-size: 1rem;
+}
+.remodal.popup-error {
+   padding: 0;
+}
+.remodal .error-remodal{
+   display: flex;
+align-items: center;
+justify-content: center;
+font-size: 1.5rem;
+padding: 1rem;
+color: #535e66;
+}
+.remodal  .error-title {
+   text-align: left;
+padding: 10px;
+border-bottom: solid 1px #eef0f1;
+color: #535e66;
+}
+.remodal .error-remodal .bigIcon{   
+   margin-right: 20px;
+width: 48px;
+height: 48px;
+background-image: url( '../img/icons.png');
+background-repeat: no-repeat
+}
+.remodal  .error-content{
+   padding: 35px;
+}
+#order-tracking-popup img {
+   margin: 0 auto;
+}
+.spf-table__cell .cell {
+   text-align: center;
+
+}
+.spf-table__cell .cell input[type="text"] {
+   width: 60px;
+}

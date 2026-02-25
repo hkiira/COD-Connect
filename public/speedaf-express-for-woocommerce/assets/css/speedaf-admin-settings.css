@@ -1,0 +1,48 @@
+/**
+ * mc-woocommerce Settings Page
+ */
+ @import url('https://use.typekit.net/wvc2hnb.css');
+
+ @font-face {
+	font-family: 'Proxima Nova Alt Light';
+	font-style: normal;
+	font-weight: normal;
+	src: local('Proxima Nova Alt Light'), url('../fonts/Mark Simonson - Proxima Nova Alt Light.woff') format('woff');
+	}
+
+html {
+	scroll-padding-top: 8em;
+}
+
+.mc-woocommerce-settings {
+	width: 100%;
+	margin: 0 !important;
+	font-family: "proxima-nova", Arial, Helvetica, sans-serif;
+
+}
+
+.woocommerce-layout .woocommerce-store-alerts{
+	display: none !important;
+}
+
+.mc-woocommerce-settings-header-wrapper {
+	width:100%;
+	padding-top: 56px;
+}
+
+.mc-woocommerce-settings-header-wrapper.wiz-header {
+	background-color: white;
+}
+
+.mc-woocommerce-settings-header-wrapper.wiz-header .mc-woocommerce-settings-header{
+	padding-bottom: 69px;
+}
+
+
+.mc-woocommerce-settings-header {
+	width: 90%;
+	margin: 2em auto 0 auto !important;
+	font-family: "proxima-nova", Arial, Helvetica, sans-serif;
+	padding-bottom: 0px;
+	display:table;
+}

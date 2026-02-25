@@ -1,0 +1,538 @@
+# Copyright (C) 2022 Wolf
+# This file is distributed under the same license as the Speedaf Express for WooCommerce plugin.
+msgid ""
+msgstr ""
+"Project-Id-Version: Speedaf Express for WooCommerce 1.0.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/speedaf-express-for-woocommerce\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"POT-Creation-Date: 2022-07-13T09:36:56+08:00\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"X-Generator: WP-CLI 2.6.0\n"
+"X-Domain: speedaf-express-for-woocommerce\n"
+
+
+#. Plugin URI of the plugin
+msgid "https://wordpress.org/plugins/woocommerce-speedaf-express/"
+msgstr ""
+
+#. Description of the plugin
+msgid "Receive Shipping using the Speedaf Express provider."
+msgstr "استقبل الشحنات مع Speedaf"
+
+#. Author of the plugin
+msgid "Wolf"
+msgstr ""
+
+#. Author URI of the plugin
+msgid "https://wp.zbocloud.com/"
+msgstr ""
+
+#: sdk/ApiServices.php:104
+msgid "Current country is not supported"
+msgstr "البلد الحالي غير مدعوم"
+
+#: sdk/Configuration.php:28
+msgid "triplicate form （76×203）"
+msgstr "بوليصة بثلاثة أجزاء"
+
+#: sdk/Configuration.php:29
+msgid "Double sheet without logo （10×18）"
+msgstr "بوليصة بجزئين بدون LOGO(10×18)"
+
+#: sdk/Configuration.php:30
+msgid "Double sheet with logo （10×18）"
+msgstr "بوليصة جزئين بLOGO(10×18)"
+
+#: sdk/Configuration.php:31
+msgid "Double sheet with logo （10×15）"
+msgstr "بوليصة جزئين بLOGO(10×15)"
+
+#: src/Helper/SpfHelper.php:21
+msgid "Booked"
+msgstr "تم طلب الأودر"
+
+#: src/Helper/SpfHelper.php:23
+msgid "At local facility"
+msgstr "تم استيلام"
+
+#: src/Helper/SpfHelper.php:24
+msgid "Packing"
+msgstr "أثناء التغليف"
+
+#: src/Helper/SpfHelper.php:25
+msgid "Departed  location"
+msgstr "مغادرة من DC"
+
+#: src/Helper/SpfHelper.php:26
+msgid "apply To customs"
+msgstr "طلب للجمركية"
+
+#: src/Helper/SpfHelper.php:27
+msgid "vehicle for delivery"
+msgstr "أثناء التوصيل"
+
+#: src/Helper/SpfHelper.php:28
+msgid "Flight arrival"
+msgstr "وصول الى مكان المستلم"
+
+#: src/Helper/SpfHelper.php:29
+msgid "clearance of customs"
+msgstr "أثناء الجمريكي"
+
+#: src/Helper/SpfHelper.php:30
+msgid "exception of customs"
+msgstr "مغادرة من الجمريكي"
+
+#: src/Helper/SpfHelper.php:31
+msgid "Settle of customs"
+msgstr "تسوية الجمارك"
+
+#: src/Helper/SpfHelper.php:32
+#: src/Helper/SpfHelper.php:36
+msgid "Delivered"
+msgstr "تم استلامها"
+
+#: src/Helper/SpfHelper.php:33
+msgid "Shipment"
+msgstr "الشحن"
+
+#: src/Helper/SpfHelper.php:34
+msgid "Shipment arriving On-Time"
+msgstr "وصل الشحن في الوقت المحدد"
+
+#: src/Helper/SpfHelper.php:35
+msgid "Delivering"
+msgstr "فى التوصيل"
+
+#: src/Helper/SpfHelper.php:37
+msgid "returning packing"
+msgstr "مرتجع"
+
+#: src/Helper/SpfHelper.php:38
+msgid "Return receipt"
+msgstr "تم مرتجع"
+
+#: src/Helper/SpfHelper.php:39
+msgid "Picked up"
+msgstr "أخذ بنفسه"
+
+#: src/Helper/SpfHelper.php:40
+msgid "Third party collection"
+msgstr "استلام شركة الطرف الثالث"
+
+#: src/Helper/SpfHelper.php:41
+msgid "Invalid"
+msgstr "غير صالح"
+
+#: src/Menu/AccoutnTracking.php:20
+#: templates/order/meta-box.php:10
+msgid "Tranck Shipment"
+msgstr "مسار الاستعلام"
+
+#: src/Menu/BulkAction.php:27
+msgid "Speedaf Bulk Booking"
+msgstr "طلب بالجملة"
+
+#: src/Menu/BulkAction.php:28
+msgid "Cancel Speedaf"
+msgstr "إزابة الأودر"
+
+#: src/Menu/BulkAction.php:36
+msgid "Shipment to Speedaf"
+msgstr "ضع طلبية"
+
+#: src/Menu/BulkAction.php:118
+msgid "Speedaf Status"
+msgstr "حالة الشحن"
+
+#: src/Menu/BulkAction.php:119
+msgid "Speedaf Tacking"
+msgstr "رقم البوليصة"
+
+#: src/Menu/BulkAction.php:120
+msgid "Speedaf Cancelled"
+msgstr "إزالة الأودر"
+
+#: src/Menu/OrderList.php:28
+msgid "Speedaf Order for WooCommerce"
+msgstr "أودر لسبيداف"
+
+#: src/Menu/OrderList.php:34
+msgid "Speedaf Express for WooCommerce"
+msgstr "شحنة سبيداف"
+
+#: src/Menu/OrderList.php:35
+#: src/View/ShippingMethod.php:23
+#: src/View/ShippingMethod.php:24
+msgid "Speedaf Express"
+msgstr "صفحة طلب أودر"
+
+#: src/Menu/OrderList.php:54
+msgid "error not params"
+msgstr "يرجى التحقق من المعلمات"
+
+#: src/Menu/OrderList.php:82
+msgid "not found Order Id"
+msgstr "معرّف الطلب غير موجود"
+
+#: src/Menu/OrderList.php:102
+#: src/Menu/OrderList.php:159
+#: templates/order/tracking.php:33
+msgid "Please contact customer service"
+msgstr "الرجاء الاتصال بالمورد"
+
+#: src/Menu/OrderList.php:123
+#: src/Menu/OrderList.php:171
+#: src/Menu/OrderList.php:173
+msgid "not found ID"
+msgstr "رقم بوليصة الشحن غير موجود"
+
+#: src/Menu/OrderList.php:153
+msgid "updated success"
+msgstr "تحديث الانتهاء"
+
+#: src/Menu/OrderList.php:156
+msgid "Please Enter Tacking Id "
+msgstr "الرجاء إدخال رقم التتبع"
+
+#: src/Menu/OrderList.php:193
+msgid "Please Enter Store Address"
+msgstr ""
+
+#: src/Menu/OrderList.php:196
+msgid "Please Enter Store Country"
+msgstr "الرجاء إدخال بلد المتجر"
+
+#: src/Menu/OrderList.php:197
+msgid "Please Enter Store Postcode"
+msgstr "الرجاء إدخال الرمز البريدي للمتجر"
+
+#: src/Menu/OrderList.php:198
+msgid "Please Enter Shipping Name"
+msgstr "الرجاء إدخال اسم المرسل"
+
+#: src/Menu/OrderList.php:199
+msgid "Please Enter Shipping Phone"
+msgstr "الرجاء إدخال رقم هاتف المرسل"
+
+#: src/Menu/OrderList.php:220
+msgid "Do you want to create a Shipments?"
+msgstr "هل تريد الشحن؟"
+
+#: src/Menu/OrderList.php:221
+msgid "Please checked ID"
+msgstr "يرجى التحقق من رقم التتبع"
+
+#: src/Menu/OrderList.php:222
+msgid "Please Enter "
+msgstr "تفضل ادخل"
+
+#: src/Menu/OrderList.php:223
+msgid "Please choose Ids"
+msgstr "الرجاء تحديد خانة الاختيار"
+
+#: src/Menu/OrderList.php:226
+msgid "Update Sender info success"
+msgstr "نجح تحديث معلومات المرسل"
+
+#: src/Menu/OrderList.php:275
+#: templates/table/print-order.php:70
+msgid "COD"
+msgstr "COD"
+
+#: src/Menu/OrderList.php:276
+msgid "Total"
+msgstr "مبلغ إجمالي"
+
+#: src/Menu/OrderList.php:277
+msgid "Weight(KG)"
+msgstr "وزن(KG)"
+
+#: src/Menu/OrderList.php:278
+msgid "Shipping Status"
+msgstr "حالة الشحن"
+
+#: src/Menu/OrderList.php:279
+msgid "tracking number"
+msgstr "رقم بوليصة"
+
+#: src/Menu/OrderList.php:280
+msgid "Product info"
+msgstr "معلومات المنتج"
+
+#: src/Menu/OrderList.php:282
+#: templates/table/print-order.php:66
+msgid "AcceptName"
+msgstr "مستلم"
+
+#: src/Menu/OrderList.php:283
+msgid "Accept Telephone"
+msgstr "رقم هاتف المستلم"
+
+#: src/Menu/OrderList.php:284
+msgid "Accept City"
+msgstr "مدينة المستلم"
+
+#: src/Menu/OrderList.php:285
+msgid "PDF"
+msgstr "PDF"
+
+#: src/Menu/Settings.php:42
+msgid "Speedaf Configuration"
+msgstr "تهيئة"
+
+#: src/Menu/Settings.php:79
+msgid "Please setting Api Key"
+msgstr "يرجى تعيين رقم API"
+
+#: src/Menu/Settings.php:83
+msgid "Please setting Sender Name"
+msgstr "الرجاء تحديد اسم المرسل"
+
+#: src/Menu/Settings.php:89
+msgid "Please setting Phone"
+msgstr "الرجاء تحديد رقم هاتف المرسل"
+
+#: src/Menu/Settings.php:96
+msgid "Please setting Email Address OR the Email Incorrect email address"
+msgstr "يرجى تعيين عنوان بريد إلكتروني أو العنوان غير صحيح"
+
+#: src/Speedaf/Carrier.php:94
+msgid "Please confirm Shipping Id,it is null"
+msgstr "يبدو أنك لم تحدد رقم شحن"
+
+#: src/Speedaf/Carrier.php:99
+msgid "Batch order up to 20"
+msgstr "طلب بالجملة يصل إلى 20 طلبًا"
+
+#: src/Speedaf/Carrier.php:151
+msgid "Please confirm Order Id(s) %1$s,May have been Booked?"
+msgstr "يرجى تأكيد رقم الطلب٪ 1 $ s ، فربما يكون قد قدم طلبًا بالفعل!"
+
+#: src/Speedaf/Carrier.php:254
+msgid "Please checking Cancel Id(s)"
+msgstr "يرجى التأكد من التحقق مما إذا كان رقم بوليصة الشحن للإلغاء صحيحًا"
+
+#: src/Speedaf/Carrier.php:264
+msgid "Customer cancels shipment"
+msgstr "المستخدم يلغي الشحن"
+
+#: src/Speedaf/Carrier.php:282
+msgid "Cancel Faild: Id %1$s, %2$s"
+msgstr "فشل الإلغاء ، المعرف:٪ 1 $ s ،٪ 2 $ s"
+msgid "Cancel Booked"
+msgstr "يلغي"
+msgid "Canceled"
+msgstr "تم الغاء"
+
+#: src/Speedaf/Carrier.php:293
+msgid "Cancel shipment(s) success, %1$s"
+msgstr "نجح الإلغاء ،٪ 1 ​​$ s"
+
+#: src/Speedaf/Carrier.php:318
+msgid "BillId %1$s Faild, Because: %2$s"
+msgstr "فشل رقم بوليصة الشحن٪ 1 $ s ، السبب:٪ 2 $ s"
+
+#: src/Speedaf/Carrier.php:336
+msgid "get Customer Code Faild, Because: %1$s"
+msgstr "فشل الحصول على معرف المستخدم: السبب:٪ 1 $ s"
+
+#: src/Speedaf/CreateOrder.php:348
+msgid "Please Enter acceptCitizenId"
+msgstr ""
+
+#: src/View/ShippingMethod.php:25
+msgid "speedaf"
+msgstr "سبيداف"
+
+#: templates/order/meta-box.php:3
+msgid "Shipment Status"
+msgstr "حالة الشحن"
+
+#: templates/order/meta-box.php:6
+#: templates/order/tracking.php:35
+msgid "Shipment Tracking"
+msgstr "رقم التسوق"
+
+#: templates/order/meta-box.php:11
+#: templates/table/order.php:41
+msgid "Print Label"
+msgstr "طابعة البوليصة"
+
+#: templates/settings/speedaf_settings_view.php:60
+msgid "Enable Speedaf API"
+msgstr "تفعيل Speedy Express"
+
+#: templates/settings/speedaf_settings_view.php:67
+msgid "API Key"
+msgstr "API Key"
+
+#: templates/settings/speedaf_settings_view.php:77
+#: templates/table/order.php:165
+msgid "sender name"
+msgstr "المرسل"
+
+#: templates/settings/speedaf_settings_view.php:84
+#: templates/table/order.php:167
+msgid "sender phone"
+msgstr "هاتف المرسل"
+msgid "The format Error of Phone"
+msgstr "تنسيق الهاتف غير صحيح."
+
+#: templates/settings/speedaf_settings_view.php:99
+msgid "Here you can enter your Speedaf settings. For any help contact us via Live chat or Email."
+msgstr "يرجى تعيين التكوين المناسب هنا ، إذا كنت بحاجة إلى مساعدة ، فيرجى الاتصال عبر الإنترنت عبر البريد الإلكتروني"
+
+#: templates/settings/speedaf_settings_view.php:91
+msgid "sender Email"
+msgstr "البريد الإلكتروني المرسل"
+
+#: templates/settings/speedaf_settings_view.php:108
+msgid "Guide"
+msgstr "دليل الاستخدام"
+
+#: templates/settings/speedaf_settings_view.php:109
+msgid "Please follow the setup instructions before upload bookings"
+msgstr "يرجى اتباع تعليمات التثبيت قبل تحميل الحجز الخاص بك"
+
+#: templates/settings/speedaf_settings_view.php:110
+msgid "Step 1: To use this App you must have an account with "
+msgstr "الخطوة 1: لاستخدام هذا التطبيق ، يجب أن يكون لديك حساب"
+
+#: templates/settings/speedaf_settings_view.php:111
+msgid "Step 2: After account approval you will be provided API credentails"
+msgstr "الخطوة 2: بعد الموافقة على الحساب ، سيتم تزويدك ببيانات اعتماد API"
+
+#: templates/settings/speedaf_settings_view.php:112
+msgid "Step 3: Enter the API key Submit in Setting"
+msgstr "الخطوة 3: أدخل مفتاح API في الإعدادات لإرسالها"
+
+#: templates/settings/speedaf_settings_view.php:114
+msgid "Step 4: How to setup and use application please check our"
+msgstr "الخطوة 4: كيفية إعداد التطبيق واستخدامه ، يرجى مراجعة"
+
+#: templates/settings/speedaf_settings_view.php:115
+msgid "Step 5: You can now upload bulk bookings from order page"
+msgstr "الخطوة 5: يمكنك الآن تحميل حجوزات مجمعة من صفحة الطلب"
+
+#: templates/table/order-sender-popup.php:28
+msgid "Print Labels"
+msgstr "طابعة بوليصة"
+
+#: templates/table/order.php:23
+msgid "Please enter order Number OR tracking number"
+msgstr "الرجاء إدخال رقم الطلب أو بوليصة الشحن"
+
+#: templates/table/order.php:38
+msgid "export Order"
+msgstr "أمر تسليم التصدير"
+
+#: templates/table/order.php:60
+msgid "create Order"
+msgstr "قم بإنشاء مذكرة شحن"
+
+#: templates/table/order.php:63
+#: templates/table/order.php:110
+msgid "Edit Sender"
+msgstr "تحرير المرسل"
+
+#: templates/table/order.php:82
+msgid "not found orders"
+msgstr "لم يتم العثور على معلومات الطلب"
+
+#: templates/table/print-order.php:49
+msgid "speedaf Load Sheet"
+msgstr "قائمة التسليم"
+
+#: templates/table/print-order.php:54
+msgid "print time"
+msgstr "وقت الطباعة"
+
+#: templates/table/print-order.php:55
+msgid "Customer No"
+msgstr "رقم بوليصة للعميل"
+
+#: templates/table/print-order.php:61
+msgid "ordinal"
+msgstr "رقم"
+
+#: templates/table/print-order.php:62
+msgid "speedaf waybill"
+msgstr "رقم الشحن"
+
+#: templates/table/print-order.php:63
+msgid "S.O."
+msgstr "رقم البوليصة"
+
+#: templates/table/print-order.php:64
+msgid "Order time"
+msgstr "موعد التسليم"
+
+#: templates/table/print-order.php:65
+msgid "Send city"
+msgstr "مدينة المرسل"
+
+#: templates/table/print-order.php:67
+msgid "Receipt city"
+msgstr "مدينة المستلم"
+
+#: templates/table/print-order.php:68
+msgid "QTY"
+msgstr "عدد"
+
+#: templates/table/print-order.php:69
+msgid "weight (KG)"
+msgstr "وزن(KG)"
+
+#: src/Menu/OrderList.php:156
+msgid "Store Postcode Invalid"
+msgstr "تم إدخال رمز بريدي غير صحيح"
+
+#: src/Menu/OrderList.php:159
+msgid "Sender Phone Invalid"
+msgstr "رقم الهاتف المحمول للمرسل غير صحيح"
+
+
+#: src/Speedaf/Carrier.php:231
+msgid "the Lable Type invalid"
+msgstr "نوع النموذج غير صالح ، يرجى تحديث الصفحة وإعادة التقديم"
+
+msgid "Adjusting"
+msgstr "في تعديل"
+
+msgid "Adjusted"
+msgstr "تم التعديل"
+
+msgid "Unadjusted"
+msgstr "لم تعديل"
+
+msgid "Adjustment Status"
+msgstr "تعديل حالة الأودر"
+
+msgid "Allow shipment to be opened"
+msgstr "سامح لفتح الشحنة"
+
+msgid "update Order"
+msgstr "تجديد البوليصة"
+
+msgid "Updated Booked"
+msgstr "تجديد الأودر"
+
+msgid "Do you want to update Shipments?"
+msgstr "هل تريد ترسل شحنة؟"
+
+msgid "the billId %1$s error info: %2$s"
+msgstr "تجديد خطأ：رقم البوليصة:%1$s نوع الخطأ: %2$s"
+
+msgid "Order cannot allow update!"
+msgstr "تعديل قبل الاستيلام"
+
+msgid "Yes"
+msgstr "تأكد"
+
+msgid "Cancel"
+msgstr "الغاء"

@@ -1,0 +1,26 @@
+mnin kadir chi domain jdid at7ad fih l'application 7di m3a hado les problems dyal cors :
+    + trigerProtect dyal cpanel khasso ykon kaml offf
+    + modeSecurity dyal cpanel hta howa khasso ykon kaml off
+    + mnin chi app katcriya jdid kaykon m3aha wahd lfile .htaccess khassk tmhih 
+      wghadi tlga wahd lfichier akhor  .htaccess f /public hawl tmodifier ywil bhal haka
+            <IfModule mod_rewrite.c>
+            <IfModule mod_negotiation.c>
+                Options -MultiViews -Indexes
+            </IfModule>
+
+                RewriteEngine On
+
+                # Handle Authorization Header
+                RewriteCond %{HTTP:Authorization} .
+                RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+                # Redirect Trailing Slashes If Not A Folder...
+                RewriteCond %{REQUEST_FILENAME} !-d
+                RewriteCond %{REQUEST_URI} (.+)/$
+                RewriteRule ^ %1 [L,R=301]
+
+                # Send Requests To Front Controller...
+                RewriteCond %{REQUEST_FILENAME} !-d
+                RewriteCond %{REQUEST_FILENAME} !-f
+                RewriteRule ^ index.php [L]
+            </IfModule>

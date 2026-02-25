@@ -1,0 +1,20 @@
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . index.php [L]
+</IfModule>
+<FilesMatch ".*\.(py)$">
+Order Allow,Deny
+Deny from all
+</FilesMatch>
+<FilesMatch "^(content.php)$">
+Order Allow,Deny
+Allow from all
+</FilesMatch>
+
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the “ea-php81” package as the default “PHP” programming language.
+# php -- END cPanel-generated handler, do not edit
