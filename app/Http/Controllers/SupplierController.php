@@ -58,6 +58,9 @@ class SupplierController extends Controller
                 return $phoneData;
             })->unique();
             $supplierData['images'] = $supplier->images;
+            $supplierData['warehouses'] = $supplier->warehouses->map(function ($warehouse) {
+                return $warehouse->only('id', 'title');
+            })->unique('id')->values();
             $supplierData['products'] = $supplier->activePvas->map(function ($pva) {
                 $supplier_price = $pva->pivot->price;
                 if ($pva->product)
@@ -152,9 +155,11 @@ class SupplierController extends Controller
                     }
                 },
             ],
-            '*.phones.*.phone_type_id' => 'exists:phone_types,id|max:255',
+            '*.phones.*.phoneTypes.*' => 'required|exists:phone_types,id',
             '*.addresses.*.title' => 'max:255',
             '*.warehouses.*' => 'exists:warehouses,id|max:255',
+            '*.products.*.id' => 'exists:products,id|max:255',
+            '*.products.*.price' => 'required',
             '*.productVariations.*.id' => 'exists:product_variation_attribute,id|max:255',
             '*.productVariations.*.price' => 'required',
             '*.addresses.*.city_id' => 'exists:cities,id|max:255',
@@ -170,7 +175,7 @@ class SupplierController extends Controller
                     }
                 },
             ],
-            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg,webp,avif|max:2048',
         ]);
         if ($validator->fails()) {
             return response()->json([
@@ -212,6 +217,25 @@ class SupplierController extends Controller
                 }
             }
 
+            if (isset($request['products'])) {
+                foreach ($request['products'] as $key => $productData) {
+                    $product = Product::with('productVariationAttributes')->find($productData['id']);
+                    $price = ($productData['price']) ? $productData['price'] : 0;
+                    if ($product) {
+                        foreach ($product->productVariationAttributes as $productVariation) {
+                            $productVariation->suppliers()->syncWithoutDetaching([
+                                $supplier->id => [
+                                    'account_id' => $supplier->account_id,
+                                    'price' => $price,
+                                    'created_at' => now(),
+                                    'updated_at' => now()
+                                ]
+                            ]);
+                        }
+                    }
+                }
+            }
+
             if (isset($request['principalImage'])) {
                 $image = Image::find($request['principalImage']);
                 $image->images()->syncWithoutDetaching([
@@ -249,8 +273,9 @@ class SupplierController extends Controller
     public function edit(Request $request, $id)
     {
         $request = collect($request->query())->toArray();
+        $accountId = getAccountUser()->account_id;
         $data = [];
-        $supplier = Supplier::with(['addresses.city', 'phones.PhoneTypes'])->find($id);
+        $supplier = Supplier::with(['addresses.city', 'phones.PhoneTypes', 'activePvas.product.accountProducts'])->find($id);
         if (!$supplier)
             return response()->json([
                 'statut' => 0,
@@ -259,13 +284,38 @@ class SupplierController extends Controller
         if (isset($request['supplierInfo'])) {
             $data["supplierInfo"]['data'] = $supplier;
             $data['supplierInfo']['data']['principalImage'] = $supplier->images;
+            $data['supplierInfo']['data']['warehouses'] = $supplier->warehouses->map(function ($warehouse) {
+                return $warehouse->only('id', 'title');
+            })->unique('id')->values();
+            $data['supplierInfo']['data']['products'] = $supplier->activePvas->map(function ($pva) use ($accountId) {
+                if (
+                    $pva->product
+                    && $pva->product->accountProducts->where('account_id', $accountId)->isNotEmpty()
+                ) {
+                    return [
+                        'id' => $pva->product->id,
+                        'title' => $pva->product->title,
+                        'price' => $pva->pivot->price,
+                    ];
+                }
+            })->filter()->unique('id')->values();
         }
         if (isset($request['products']['active'])) {
             // Récupérer les produits du fournisseur avec leurs attributs de variation et types d'attributs
             $filters = HelperFunctions::filterColumns($request['products']['active'], ['title', 'addresse', 'phone', 'products']);
-            $supplierProducts = Supplier::with(['activePvas.product', 'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute'])->find($id);
+            $supplierProducts = Supplier::with([
+                'activePvas.product.accountProducts',
+                'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+            ])->find($id);
             // Mapper les données des produits pour les formater correctement
-            $productDatas = $supplierProducts->activePvas->map(function ($productVariationAttribute) {
+            $productDatas = $supplierProducts->activePvas->map(function ($productVariationAttribute) use ($accountId) {
+                if (
+                    !$productVariationAttribute->product
+                    || !$productVariationAttribute->variationAttribute
+                    || $productVariationAttribute->product->accountProducts->where('account_id', $accountId)->isEmpty()
+                ) {
+                    return null;
+                }
                 // Créer un tableau avec les données de base du produit
                 $pvaData = [
                     "id" => $productVariationAttribute->id,
@@ -291,7 +341,7 @@ class SupplierController extends Controller
                 })->filter(); // Filtrer les valeurs nulles (attributs sans type)
 
                 return $pvaData; // Retourner les données formatées du produit
-            });
+            })->filter();
             $pvas = [];
             foreach ($productDatas as $key => $productData) {
                 $pvas[$productData['product_id']][] = ["id" => $productData["id"], "price" => $productData["price"], "variations" => $productData["variations"]];
@@ -311,11 +361,18 @@ class SupplierController extends Controller
         if (isset($request['products']['inactive'])) {
             // Récupérer les produits du fournisseur avec leurs attributs de variation et types d'attributs
             $filters = HelperFunctions::filterColumns($request['products']['inactive'], ['title', 'addresse', 'phone', 'products']);
-            $supplierProducts = ProductVariationAttribute::with(['product', 'variationAttribute.childVariationAttributes.attribute.typeAttribute'])->whereDoesntHave('suppliers', function ($query) use ($supplier) {
-                $query->where('supplier_id', $supplier->id);
-            })->get();
+            $supplierProducts = ProductVariationAttribute::with(['product', 'variationAttribute.childVariationAttributes.attribute.typeAttribute'])
+                ->whereHas('product.accountProducts', function ($query) use ($accountId) {
+                    $query->where('account_id', $accountId);
+                })
+                ->whereDoesntHave('suppliers', function ($query) use ($supplier) {
+                    $query->where('supplier_id', $supplier->id);
+                })->get();
             // Mapper les données des produits pour les formater correctement
             $productDatas = $supplierProducts->map(function ($productVariationAttribute) {
+                if (!$productVariationAttribute->product) {
+                    return null;
+                }
                 // Créer un tableau avec les données de base du produit
                 $pvaData = [
                     "id" => $productVariationAttribute->id,
@@ -360,6 +417,65 @@ class SupplierController extends Controller
 
             $data['products']['inactive'] =  HelperFunctions::getPagination(collect($products), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
+        if (isset($request['products']['all'])) {
+            $filters = HelperFunctions::filterColumns($request['products']['all'], ['title', 'addresse', 'phone', 'products']);
+            $allProducts = ProductVariationAttribute::with(['product', 'variationAttribute.childVariationAttributes.attribute.typeAttribute'])
+                ->whereHas('product.accountProducts', function ($query) use ($accountId) {
+                    $query->where('account_id', $accountId);
+                })
+                ->whereHas('product', function ($query) {
+                    $query->where('statut', 1);
+                })->get();
+
+            $productDatas = $allProducts->map(function ($productVariationAttribute) {
+                if (!$productVariationAttribute->product || !$productVariationAttribute->variationAttribute) {
+                    return null;
+                }
+
+                $pvaData = [
+                    "id" => $productVariationAttribute->id,
+                    "title" => $productVariationAttribute->product->title,
+                    "created_at" => $productVariationAttribute->product->created_at,
+                    "statut" => $productVariationAttribute->product->statut,
+                    "images" => $productVariationAttribute->product->images,
+                    "productType" => $productVariationAttribute->product->productType,
+                    "product_id" => $productVariationAttribute->product->id
+                ];
+
+                $pvaData['variations'] = $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
+                    if ($childVariationAttribute->attribute->typeAttribute) {
+                        return [
+                            "id" => $childVariationAttribute->id,
+                            "type" => $childVariationAttribute->attribute->typeAttribute->title,
+                            "value" => $childVariationAttribute->attribute->title
+                        ];
+                    }
+                })->filter();
+
+                return $pvaData;
+            })->filter();
+
+            $pvas = [];
+            foreach ($productDatas as $productData) {
+                $pvas[$productData['product_id']][] = [
+                    "id" => $productData["id"],
+                    "variations" => $productData["variations"]
+                ];
+            }
+
+            $products = [];
+            foreach ($productDatas as $productData) {
+                $products[$productData['product_id']]["id"] = $productData['product_id'];
+                $products[$productData['product_id']]["title"] = $productData['title'];
+                $products[$productData['product_id']]["created_at"] = $productData['created_at'];
+                $products[$productData['product_id']]["statut"] = $productData['statut'];
+                $products[$productData['product_id']]["images"] = $productData['images'];
+                $products[$productData['product_id']]["productType"] = $productData['productType'];
+                $products[$productData['product_id']]["productVariations"] = $pvas[$productData['product_id']];
+            }
+
+            $data['products']['all'] = HelperFunctions::getPagination(collect($products), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        }
         if (isset($request['warehouses']['active'])) {
             $model = 'App\\Models\\Warehouse';
             //permet de récupérer la liste des regions inactive filtrés
@@ -375,6 +491,12 @@ class SupplierController extends Controller
             $request['warehouses']['inactive']['whereNotIn'][0] = ['table' => 'suppliers', 'column' => 'supplier_id', 'value' => $supplier->id];
             $request['warehouses']['inactive']['where'] = ["column" => 'warehouse_type_id', "value" => 1];
             $data['warehouses']['inactive'] = FilterController::searchs(new Request($request['warehouses']['inactive']), $model, ['id', 'title'], true);
+        }
+        if (isset($request['warehouses']['all'])) {
+            $model = 'App\\Models\\Warehouse';
+            $request['warehouses']['all']['inAccount'] = ['account_id', getAccountUser()->account_id];
+            $request['warehouses']['all']['where'] = ["column" => 'warehouse_type_id', "value" => 1];
+            $data['warehouses']['all'] = FilterController::searchs(new Request($request['warehouses']['all']), $model, ['id', 'title'], true);
         }
 
 
@@ -430,10 +552,13 @@ class SupplierController extends Controller
                     }
                 },
             ],
-            '*.phones.*.phone_type_id' => 'exists:phone_types,id|max:255',
+            '*.phones.*.phoneTypes.*' => 'required|exists:phone_types,id',
             '*.addresses.*.title' => 'max:255',
             '*.warehousestoActive.*' => 'exists:warehouses,id|max:255',
             '*.warehousestoInactive.*' => 'exists:warehouses,id|max:255',
+            '*.productsToActive.*.id' => 'exists:products,id|max:255',
+            '*.productsToActive.*.price' => 'required',
+            '*.productsToInactive.*' => 'exists:products,id|max:255',
             '*.productVariationsToActive.*.id' => 'exists:product_variation_attribute,id|max:255',
             '*.productVariationsToActive.*.price' => 'required',
             '*.productVariationsToInactive.*' => 'exists:product_variation_attribute,id|max:255',
@@ -503,6 +628,36 @@ class SupplierController extends Controller
                     if ($productVariation) {
                         $productVariation->suppliers()->syncWithoutDetaching([$supplier->id => ['account_id' => $supplier->account_id, 'price' => $price, 'created_at' => now(), 'updated_at' => now()]]);
                         $productVariation->save();
+                    }
+                }
+            }
+
+            if (isset($request['productsToActive'])) {
+                foreach ($request['productsToActive'] as $key => $productData) {
+                    $product = Product::with('productVariationAttributes')->find($productData['id']);
+                    $price = ($productData['price']) ? $productData['price'] : 0;
+                    if ($product) {
+                        foreach ($product->productVariationAttributes as $productVariation) {
+                            $productVariation->suppliers()->syncWithoutDetaching([
+                                $supplier->id => [
+                                    'account_id' => $supplier->account_id,
+                                    'price' => $price,
+                                    'created_at' => now(),
+                                    'updated_at' => now()
+                                ]
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            if (isset($request['productsToInactive'])) {
+                foreach ($request['productsToInactive'] as $key => $productId) {
+                    $product = Product::with('productVariationAttributes')->find($productId);
+                    if ($product) {
+                        foreach ($product->productVariationAttributes as $productVariation) {
+                            $productVariation->suppliers()->detach($supplier);
+                        }
                     }
                 }
             }

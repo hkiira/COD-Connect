@@ -12,6 +12,7 @@ use App\Models\Imageable;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\HelperFunctions;
 
 class ImageController extends Controller
@@ -79,6 +80,14 @@ class ImageController extends Controller
                 return collect($image)->map(function ($imageData) use ($model, $has_one, $imageInfos) {
                     $account = getAccountUser()->account_id;
                     $path = Storage::disk('public')->putFile('images/' . $imageInfos['folder'], $imageData['image']); //store the image
+                    if (!$path || !Storage::disk('public')->exists($path)) {
+                        Log::error('Image upload failed: file not written to storage', [
+                            'account_id' => $account,
+                            'folder' => $imageInfos['folder'] ?? null,
+                            'image_type_id' => $imageInfos['type_id'] ?? null,
+                        ]);
+                        return null;
+                    }
                     $image = Image::create([
                         'type' => $imageInfos['folder'],
                         'account_id' => $account,
@@ -109,7 +118,7 @@ class ImageController extends Controller
                         }
                     }
                     return $image;
-                });
+                })->filter()->values();
             });
         });
         return $images;

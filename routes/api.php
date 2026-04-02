@@ -117,7 +117,9 @@ Route::post('register_new_account', [RegisterController::class, 'register_new_ac
 Route::post('login', [RegisterController::class, 'login']);
 // Route::resource('PhoneTypes', PhoneTypesController::class);
 
-Route::get('inventory', [StockController::class, 'index']);
+Route::middleware(['VerifyDomain', 'auth.optional'])->group(function () {
+    Route::get('inventory', [StockController::class, 'index']);
+});
 
 Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('returns/print/{id}', [ReturnController::class, 'generatePdf']);
@@ -160,7 +162,9 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('warehouses', WarehouseController::class);
     Route::resource('partitions', PartitionController::class);
     Route::resource('rays', RayController::class);
-    Route::resource('offers', OfferController::class);
+    Route::get('offers/create', [OfferController::class, 'createData']);
+    Route::resource('offers', OfferController::class)->except(['create']);
+    Route::post('products/{id}/variation-images', [ProductController::class, 'updateVariationImages']);
     Route::resource('products', ProductController::class);
     Route::resource('variation_attributes', VariationAttributesController::class);
     Route::resource('pvas', PVAController::class);
@@ -202,6 +206,8 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('pickups', PickupController::class);
     Route::resource('transactions', TransactionController::class);
     Route::resource('shipments', ShipmentController::class);
+    Route::get('shipments/print/{id}', [ShipmentController::class, 'printShipment']);
+    Route::get('shipments/print/{id}/pdf', [ShipmentController::class, 'printShipmentPdf']);
     Route::resource('shipment_types', ShipmentTypeController::class);
     Route::resource('transaction_types', TransactionTypeController::class);
     Route::resource('payments', PaymentController::class);

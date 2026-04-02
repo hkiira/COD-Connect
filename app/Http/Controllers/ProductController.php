@@ -19,6 +19,7 @@ use App\Models\Brand;
 use App\Models\Image;
 use App\Models\ProductVariationAttribute;
 use App\Models\Offer;
+use App\Models\Offerable;
 use App\Models\Taxonomy;
 use App\Models\PvaMeasurement;
 use App\Models\User;
@@ -136,40 +137,135 @@ class ProductController extends Controller
             $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
         }
         $columns = ['id', 'title', 'reference', 'created_at', 'product_type_id'];
-        $associated[] = [
-            'model' => 'App\\Models\\ProductType',
-            'title' => 'productType',
-            'search' => true,
-        ];
-        $associated[] = [
-            'model' => 'App\\Models\\AccountProduct',
-            'title' => 'accountProducts.Taxonomies',
-            'search' => true,
-        ];
-        $associated[] = [
-            'model' => 'App\\Models\\ProductVariationAttribute',
-            'title' => 'productVariationAttributes.suppliers',
-            'search' => true,
-        ];
-        $associated[] = [
-            'model' => 'App\\Models\\ProductVariationAttribute',
-            'title' => 'productVariationAttributes.warehousePvas.warehouse',
-            'search' => true,
-        ];
-        $associated[] = [
-            'model' => 'App\\Models\\Offer',
-            'title' => 'price',
-            'search' => true,
-        ];
-        $model = 'App\\Models\\Product';
         $request['inAccountUser'] = ['account_user_id', $account];
         $request['statut'] = 1;
-        $filters = HelperFunctions::filterColumns($request, $columns);
-        $products = FilterController::searchs(new Request($request), $model, $columns, true, $associated);
+
+        $search = $request['search'] ?? null;
+        $startDate = $request['startDate'] ?? null;
+        $endDate = $request['endDate'] ?? null;
+        $paginationCurrentPage = $request['pagination']['current_page'] ?? 0;
+        $paginationPerPage = $request['pagination']['per_page'] ?? 10;
+        $sorts = $request['sort'] ?? [['column' => 'created_at', 'order' => 'DESC']];
+
+        $productsQuery = Product::with([
+            'productType',
+            'accountProducts.taxonomies',
+            'activePvas.suppliers',
+            'activePvas.warehousePvas.warehouse',
+            'activePvas.variationAttribute.childVariationAttributes.attribute',
+            'activePvas.activeWarehouses',
+            'activePvas.activeSuppliers',
+            'activePvas.images',
+            'price',
+            'principalImage',
+            'images',
+            'offers',
+        ]);
+
+        if ($search !== null && $search !== '') {
+            $productsQuery->where(function ($query) use ($columns, $search) {
+                foreach ($columns as $column) {
+                    $query->orWhere($column, 'like', "%{$search}%");
+                }
+            });
+        }
+
+        if (isset($request['whereHas'])) {
+            $productsQuery->whereHas($request['whereHas']);
+        }
+
+        if (isset($request['whereDoesntHave'])) {
+            $productsQuery->whereDoesntHave($request['whereDoesntHave']['table'], function ($query) use ($request) {
+                $query->where($request['whereDoesntHave']['column'], $request['whereDoesntHave']['value']);
+            });
+        }
+
+        if (isset($request['inAccount'])) {
+            $productsQuery->where($request['inAccount'][0], $request['inAccount'][1]);
+        }
+
+        if (isset($request['statut'])) {
+            $productsQuery->where('statut', $request['statut']);
+        }
+
+        if (isset($request['inAccountUser'])) {
+            $accountUsers = AccountUser::where('account_id', $request['inAccountUser'][1])->pluck('id')->toArray();
+            $productsQuery->whereIn($request['inAccountUser'][0], $accountUsers);
+        }
+
+        if (isset($request['where'])) {
+            $productsQuery->where($request['where']['column'], $request['where']['value']);
+        }
+
+        if (isset($request['wheres'])) {
+            foreach ($request['wheres'] as $where) {
+                $productsQuery->where($where['column'], $where['value']);
+            }
+        }
+
+        if (isset($request['whereNots'])) {
+            foreach ($request['whereNots'] as $whereNot) {
+                $productsQuery->whereNot($whereNot['column'], $whereNot['value']);
+            }
+        }
+
+        if (isset($request['whereArray'])) {
+            $productsQuery->whereIn($request['whereArray']['column'], $request['whereArray']['values']);
+        }
+
+        if (isset($request['whereNot'])) {
+            $productsQuery->where($request['whereNot']['column'], '!=', $request['whereNot']['value'])
+                ->orWhere($request['whereNot']['column'], null);
+        }
+
+        if (isset($request['whereNotArray'])) {
+            $productsQuery->whereNotIn($request['whereNotArray']['column'], $request['whereNotArray']['values']);
+        }
+
+        if (isset($request['whereIn'])) {
+            foreach ($request['whereIn'] as $whereIn) {
+                $productsQuery->whereHas($whereIn['table'], function ($query) use ($whereIn) {
+                    $query->where($whereIn['column'], $whereIn['value']);
+                });
+            }
+        }
+
+        if (isset($request['whereNotIn'])) {
+            foreach ($request['whereNotIn'] as $whereNotIn) {
+                $productsQuery->whereDoesntHave($whereNotIn['table'], function ($query) use ($whereNotIn) {
+                    $query->where($whereNotIn['column'], $whereNotIn['value']);
+                });
+            }
+        }
+
+        if ($startDate && $endDate) {
+            $productsQuery->whereBetween('created_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
+        }
+
+        foreach ($sorts as $sort) {
+            $sortColumn = $sort['column'] ?? 'created_at';
+            $sortOrder = $sort['order'] ?? 'DESC';
+            $productsQuery->orderBy($sortColumn, $sortOrder);
+        }
+
+        $productsCollection = $productsQuery->get();
+        $totalRows = $productsCollection->count();
+        $perPage = ($paginationPerPage == null || $paginationPerPage == 0) ? 10 : (int) $paginationPerPage;
+        $currentPage = ($paginationCurrentPage == null) ? 1 : ((int) $paginationCurrentPage + 1);
+
+        $products = [
+            'statut' => 1,
+            'data'   => $productsCollection->forPage($currentPage, $perPage)->values(),
+            'meta'   => [
+                'total'        => $totalRows,
+                'per_page'     => $perPage,
+                'current_page' => $currentPage,
+            ],
+        ];
         
         // Get all PVA IDs from products to batch load related data
         $pvaIds = collect($products['data'])->flatMap(function ($product) {
-            return $product->productVariationAttributes->pluck('id');
+            return $product->activePvas->pluck('id');
         })->unique()->toArray();
         
         // Batch load all required data for PVAs
@@ -196,7 +292,7 @@ class ProductController extends Controller
                 'image' => collect($product->principalImage->only('id', 'photo', 'photo_dir')),
                 'reference' => $product->reference,
                 'created_at' => $product->created_at,
-                'depot_attributes' => $product->productVariationAttributes->map(function ($pva) use ($orderPvas, $supplierOrderPvas, $warehousePvas) {
+                'depot_attributes' => $product->activePvas->map(function ($pva) use ($orderPvas, $supplierOrderPvas, $warehousePvas) {
                     $pvaOrderPvas = $orderPvas->get($pva->id, collect());
                     $pvaSupplierOrderPvas = $supplierOrderPvas->get($pva->id, collect());
                     $pvaWarehousePvas = $warehousePvas->get($pva->id, collect());
@@ -215,7 +311,7 @@ class ProductController extends Controller
                         'delivery' => $delivery,
                         'real' => $realStock,
                         'available' => $realStock - $pending,
-                        'iamges' => $pva->images,
+                        'images' => $pva->images,
                         'ordered' => $ordered,
                         'attribute' => isset($pva->variationAttribute->childVariationAttributes) ? implode(',', $pva->variationAttribute->childVariationAttributes->map(function ($childV) {
                             return $childV->attribute->title;
@@ -227,14 +323,14 @@ class ProductController extends Controller
                         return $taxonomy->only('id', 'title');
                     });
                 }),
-                'warehouses' => $product->productVariationAttributes->flatMap(function ($pva) {
+                'warehouses' => $product->activePvas->flatMap(function ($pva) {
                     return $pva->activeWarehouses->where('warehouse_type_id', 1)->map(function ($activeWarehouse) {
                         return $activeWarehouse->only('id', 'title');
                     });
                 })->unique(),
-                'suppliers' => $product->productVariationAttributes->flatMap(function ($pva) {
+                'suppliers' => $product->activePvas->flatMap(function ($pva) {
                     return $pva->activeSuppliers;
-                })->unique(),
+                })->unique('title')->values(),
                 'images' => $product->images,
                 'product_type' => $product->productType->only('id', 'code', 'title'),
                 'offers' => $product->offers,
@@ -250,8 +346,45 @@ class ProductController extends Controller
         //transformer les données sous des array
         $request = collect($request->query())->toArray();
         $products = [];
+
+        $normalize = function ($payload, $columns = []) {
+            $payload = is_array($payload) ? $payload : [];
+            $filters = [];
+            foreach ($columns as $column) {
+                $filters[$column] = $payload['filters'][$column] ?? null;
+            }
+            return [
+                'search' => $payload['search'] ?? null,
+                'filters' => $filters,
+                'pagination' => [
+                    'current_page' => $payload['pagination']['current_page'] ?? 0,
+                    'per_page' => $payload['pagination']['per_page'] ?? 10,
+                ],
+                'sort' => $payload['sort'] ?? [['column' => 'created_at', 'order' => 'DESC']],
+            ];
+        };
+
+        $applySearchAndSort = function ($query, $params, $columns) {
+            if (!empty($params['search'])) {
+                $search = $params['search'];
+                $query->where(function ($subQuery) use ($columns, $search) {
+                    foreach ($columns as $column) {
+                        $subQuery->orWhere($column, 'like', "%{$search}%");
+                    }
+                });
+            }
+
+            if (!empty($params['sort'])) {
+                foreach ($params['sort'] as $sort) {
+                    $query->orderBy($sort['column'] ?? 'created_at', $sort['order'] ?? 'DESC');
+                }
+            }
+
+            return $query;
+        };
+
         if (isset($request['taxonomies']['inactive'])) {
-            $filters = HelperFunctions::filterColumns($request['taxonomies']['inactive'], ['title', 'description']);
+            $filters = $normalize($request['taxonomies']['inactive'], ['title', 'description']);
             $model = 'App\\Models\\Taxonomy';
             $accountUsers = AccountUser::where('account_id', getAccountUser()->account_id)->pluck('id')->toArray();
             $categories = $model::whereNull('taxonomy_id')->with(['images', 'childTaxonomies'])->where('type_taxonomy_id', 1)->whereIn('account_user_id', $accountUsers)->get();
@@ -262,7 +395,7 @@ class ProductController extends Controller
             $products['taxonomies']['inactive'] = HelperFunctions::getPagination(collect($formattedCategories), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
         if (isset($request['tags']['inactive'])) {
-            $filters = HelperFunctions::filterColumns($request['tags']['inactive'], ['title', 'description']);
+            $filters = $normalize($request['tags']['inactive'], ['title', 'description']);
             $model = 'App\\Models\\Taxonomy';
             $accountUsers = AccountUser::where('account_id', getAccountUser()->account_id)->pluck('id')->toArray();
             $tags = $model::whereNull('taxonomy_id')->with(['images', 'childTaxonomies'])->where('type_taxonomy_id', 2)->whereIn('account_user_id', $accountUsers)->get();
@@ -270,35 +403,37 @@ class ProductController extends Controller
             foreach ($tags as $tag) {
                 $formattedTags[] = TaxonomyController::formatTaxonomy($tag);
             }
-            $products['tags']['inactive'] = HelperFunctions::getPagination(collect($formattedTags), $request['tags']['inactive']['pagination']['per_page'], $request['tags']['inactive']['pagination']['current_page']);
+            $products['tags']['inactive'] = HelperFunctions::getPagination(collect($formattedTags), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
         if (isset($request['suppliers']['inactive'])) {
-            $model = 'App\\Models\\Supplier';
-            $request['suppliers']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            //permet de récupérer la liste des regions inactive filtrés
-            $products['suppliers']['inactive'] = FilterController::searchs(new Request($request['suppliers']['inactive']), $model, ['id', 'title'], true, [['model' => 'App\\Models\\Images', 'title' => 'images', 'search' => true]]);
+            $filters = $normalize($request['suppliers']['inactive'], ['id', 'title']);
+            $query = Supplier::with('images')->where('account_id', getAccountUser()->account_id);
+            $suppliers = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $products['suppliers']['inactive'] = HelperFunctions::getPagination($suppliers, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
 
         if (isset($request['offers']['inactive'])) {
-            $model = 'App\\Models\\Offer';
-            $request['offers']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['offers']['inactive']['whereNot'] = ['column' => 'offer_type_id', 'value' => 1];
-            //permet de récupérer la liste des regions inactive filtrés
-            $products['offers']['inactive'] = FilterController::searchs(new Request($request['offers']['inactive']), $model, ['id', 'title'], true, []);
+            $filters = $normalize($request['offers']['inactive'], ['id', 'title']);
+            $query = Offer::where('account_id', getAccountUser()->account_id)
+                ->where(function ($q) {
+                    $q->where('offer_type_id', '!=', 1)->orWhereNull('offer_type_id');
+                });
+            $offers = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $products['offers']['inactive'] = HelperFunctions::getPagination($offers, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
 
         if (isset($request['warehouses']['inactive'])) {
-            $model = 'App\\Models\\Warehouse';
-            $associated = [];
-            $request['warehouses']['inactive']['where'] = ['column' => 'warehouse_type_id', 'value' => 1];
-            $request['warehouses']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $products['warehouses']['inactive'] = FilterController::searchs(new Request($request['warehouses']['inactive']), $model, ['id', 'title'], true, $associated);
+            $filters = $normalize($request['warehouses']['inactive'], ['id', 'title']);
+            $query = Warehouse::where('warehouse_type_id', 1)
+                ->where('account_id', getAccountUser()->account_id);
+            $warehouses = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $products['warehouses']['inactive'] = HelperFunctions::getPagination($warehouses, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
 
         if (isset($request['products']['inactive'])) {
             $columns = ['id', 'title', 'reference', 'images', 'product_type', 'variation_attributes'];
             $account = getAccountUser()->account_id;
-            $filters = HelperFunctions::filterColumns($request['products']['inactive'], ['reference', 'title', 'shipping_price', 'suppliers', 'variations', 'offers']);
+            $filters = $normalize($request['products']['inactive'], ['reference', 'title', 'shipping_price', 'suppliers', 'variations', 'offers']);
             $products = Account::with([
                 'products' => function ($query) use ($account, $request, $filters) {
                     $query->with(['images', 'productType']);
@@ -314,7 +449,7 @@ class ProductController extends Controller
                             ->orWhere('title', 'like', "%{$filters['search']}%");
                     }
                     $query->with([
-                        'productVariationAttributes' => function ($query) use ($account) {
+                        'activePvas' => function ($query) use ($account) {
                             $query->with([
                                 'variationAttribute' => function ($query) {
                                     $query->with('attributes');
@@ -324,7 +459,7 @@ class ProductController extends Controller
                     ]);
                 }
             ])->find($account)->products->map(function ($product) use ($columns, $filters) {
-                $product->variation_attributes = $variation_attributes = $product->productVariationAttributes->map(function ($pva) {
+                $product->variation_attributes = $variation_attributes = $product->activePvas->map(function ($pva) {
                     $depots = [];
                     $attributes = $pva->variationAttribute->attributes->map(function ($attr) {
                         return $attr->title;
@@ -351,16 +486,12 @@ class ProductController extends Controller
         }
 
         if (isset($request['variations']['inactive'])) {
-            $model = 'App\\Models\\TypeAttribute';
-            $associated = [];
-            $associated[] = [
-                'model' => 'App\\Models\\Attribute',
-                'title' => 'attributes',
-                'search' => true,
-            ];
+            $filters = $normalize($request['variations']['inactive'], ['id', 'title']);
             $accountUsers = AccountUser::where(['account_id' => getAccountUser()->account_id])->pluck('id')->toArray();
-            $request['variations']['inactive']['inAccountUser'] = ['account_user_id', getAccountUser()->account_id];
-            $products['variations']['inactive'] = FilterController::searchs(new Request($request['variations']['inactive']), $model, ['id', 'title'], true, $associated);
+            $query = \App\Models\TypeAttribute::with('attributes')
+                ->whereIn('account_user_id', $accountUsers);
+            $variations = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $products['variations']['inactive'] = HelperFunctions::getPagination($variations, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
 
         return response()->json([
@@ -373,168 +504,109 @@ class ProductController extends Controller
     {
         $account = getAccountUser()->account_id;
         $users = AccountUser::where(['account_id' => $account, 'statut' => 1])->get()->pluck('id')->toArray();
+
+        $existsById = function (string $model, ?callable $scope = null) {
+            return function ($attribute, $value, $fail) use ($model, $scope) {
+                $query = $model::query()->where('id', $value);
+                if ($scope) {
+                    $scope($query, $value, $attribute);
+                }
+                if (!$query->exists()) {
+                    $fail('not exist');
+                }
+            };
+        };
+
+        $existsInAccount = function (string $model, array $extraConditions = [], ?callable $scope = null) use ($account, $existsById) {
+            return $existsById($model, function ($query) use ($account, $extraConditions, $scope) {
+                $query->where('account_id', $account)->where($extraConditions);
+                if ($scope) {
+                    $scope($query);
+                }
+            });
+        };
+
+        $existsInUsers = function (string $model) use ($users, $existsById) {
+            return $existsById($model, function ($query) use ($users) {
+                $query->whereIn('account_user_id', $users);
+            });
+        };
+
+        $validateAvailableImage = function (string $imageableType) use ($account) {
+            return function ($attribute, $value, $fail) use ($account, $imageableType) {
+                $image = Image::where(['id' => $value, 'account_id' => $account])->first();
+                if (!$image) {
+                    $fail('not exist');
+                    return;
+                }
+
+                $alreadyAttached = \App\Models\Imageable::where('image_id', $image->id)
+                    ->where('imageable_type', $imageableType)
+                    ->exists();
+
+                if ($alreadyAttached) {
+                    $fail('exist');
+                }
+            };
+        };
+
         $validator = Validator::make($requests->except('_method'), [
             '*.default_measurement_id' => 'exists:measurements,id',
-            '*.product_type_id' => 'required|exists:product_types,id',
+            '*.product_type_id' => 'exists:product_types,id',
             '*.measurements.*.id' => 'exists:measurements,id',
             '*.measurements.*.quantity' => 'numeric',
             '*.price' => 'required|numeric',
-            '*.title' => [
-                'required',
-                'max:255',
-                function ($attribute, $value, $fail) use ($users) {
-                    $hasTitle = Product::where('title', $value)
-                        ->whereIn('account_user_id', $users)
-                        ->first();
-                    // a supprimer !
-                    // if (!$hasTitle) {
-                    //     $fail("exist");
-                    // }
-                },
-            ],
-            '*.reference' => [
-                'required',
-                'max:255',
-                function ($attribute, $value, $fail) use ($users) {
-                    $user = getAccountUser()->account_id;
-                    $hasTitle = Product::where('reference', $value)
-                        ->whereIn('account_user_id', $users)
-                        ->first();
-
-                    // if ($hasTitle) {
-                    //     $fail("exist");
-                    // }
-                },
-            ],
+            '*.title' => ['required', 'string', 'max:255'],
+            '*.reference' => ['required', 'string', 'max:255'],
             '*.warehouses.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account, 'warehouse_type_id' => 1])->first();
-                    if (!$warehouse) {
-                        $fail("not exist");
-                    }
-                },
+                $existsInAccount(Warehouse::class, ['warehouse_type_id' => 1]),
             ],
             '*.brands.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $brand = Brand::where(['id' => $value, 'account_id' => $account, 'statut' => 1])->first();
-                    if (!$brand) {
-                        $fail("not exist");
-                    }
-                },
+                $existsInAccount(Brand::class, ['statut' => 1]),
             ],
             '*.categories.*' => [
-                function ($attribute, $value, $fail) use ($users) {
-                    $category = Taxonomy::where('id', $value)
-                        ->whereIn('account_user_id', $users)
-                        ->first();
-                    if (!$category) {
-                        $fail("not exist");
-                    }
-                },
+                $existsInUsers(Taxonomy::class),
             ],
             '*.suppliers' => 'array',
             '*.suppliers.*.id' => [
                 'sometimes',
                 'required',
-                function ($attribute, $value, $fail) use ($account) {
-                    $supplier = Supplier::where(['id' => $value, 'account_id' => $account])
-                        ->first();
-                    if (!$supplier) {
-                        $fail("not exist");
-                    }
-                },
+                $existsInAccount(Supplier::class),
             ],
-            '*.suppliers.*.price' => 'sometimes|required',
+            '*.suppliers.*.price' => 'sometimes|required|numeric',
             '*.attributes.*' => [
-                function ($attribute, $value, $fail) use ($users) {
-                    $attribute = Attribute::where('id', $value)
-                        ->whereIn('account_user_id', $users)
-                        ->first();
-                    if (!$attribute) {
-                        $fail("not exist");
-                    }
-                },
+                $existsInUsers(Attribute::class),
             ],
             '*.productVariationAttributes.id' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $attribute = ProductVariationAttribute::where('id', $value)
-                        ->where('account_id', $account)
-                        ->first();
-                    if (!$attribute) {
-                        $fail("not exist");
-                    }
-                },
+                $existsInAccount(ProductVariationAttribute::class),
             ],
             '*.productVariationAttributes.quantity' => "numeric",
             '*.offers.*' => [
                 'string',
-                function ($attribute, $value, $fail) use ($account) {
-                    $offer = Offer::where(['id' => $value, 'account_id' => $account])->whereNot('offer_type_id', 1)->first();
-                    if (!$offer) {
-                        $fail("not exist");
-                    }
-                },
+                $existsInAccount(Offer::class, [], function ($query) {
+                    $query->where('offer_type_id', '!=', 1);
+                }),
             ],
             '*.images.*' => [
                 'string',
-                function ($attribute, $value, $fail) {
-                    $account = getAccountUser()->account_id;
-                    $image = Image::where(['id' => $value, 'account_id' => $account])->first();
-                    if ($image) {
-                        $isUnique = \App\Models\Imageable::where('image_id', $image->id)
-                            ->where('imageable_type', "App\Models\Product")
-                            ->first();
-                        if ($isUnique) {
-                            $fail("exist");
-                        }
-                    } else {
-                        $fail("not exist");
-                    }
-                },
+                $validateAvailableImage("App\Models\Product"),
             ],
             '*.imageVariations.*.image' => [
                 'string',
-                function ($attribute, $value, $fail) {
-                    $account = getAccountUser()->account_id;
-                    $image = Image::where(['id' => $value, 'account_id' => $account])->first();
-                    if ($image) {
-                        $isUnique = \App\Models\Imageable::where('image_id', $image->id)
-                            ->where('imageable_type', "App\Models\ProductVariationAttribute")
-                            ->first();
-                        if ($isUnique) {
-                            $fail("exist");
-                        }
-                    } else {
-                        $fail("not exist");
-                    }
-                },
+                $validateAvailableImage("App\Models\ProductVariationAttribute"),
             ],
             
             '*.imageVariations.*.attribute.*' => [
                 'string',
-                function ($attribute, $value, $fail) {
-                    $account = getAccountUser()->account_id;
-                    $attributeP = Attribute::where(['id' => $value, 'account_id' => $account])->first();
-                    if (!$attributeP) 
-                        $fail("not exist");
-                },
+                $existsInUsers(Attribute::class),
+            ],
+            '*.imageVariations.*.attributes.*' => [
+                'string',
+                $existsInUsers(Attribute::class),
             ],
             '*.principalImage' => [
                 'string',
-                function ($attribute, $value, $fail) {
-                    $account = getAccountUser()->account_id;
-                    $image = Image::where(['id' => $value, 'account_id' => $account])->first();
-                    if ($image) {
-                        $isUnique = \App\Models\Imageable::where('image_id', $image->id)
-                            ->where('imageable_type', "App\Models\Product")
-                            ->first();
-                        if ($isUnique) {
-                            $fail("exist");
-                        }
-                    } else {
-                        $fail("not exist");
-                    }
-                },
+                $validateAvailableImage("App\Models\Product"),
             ],
             '*.statut' => 'required',
             '*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
@@ -549,6 +621,7 @@ class ProductController extends Controller
         $products = collect($requests->except('_method'))->map(function ($request) {
             $request["account_user_id"] = getAccountUser()->id;
             $request['code'] = DefaultCodeController::getAccountCode('Product', getAccountUser()->account_id);
+            $request['product_type_id'] = $request['product_type_id'] ?? 1;
             $product_only = collect($request)->only('code', 'title', 'reference', 'statut', 'account_user_id', 'product_type_id');
 
             $product = Product::create($product_only->all());
@@ -576,7 +649,7 @@ class ProductController extends Controller
             if (isset($request['brands'])) {
                 foreach ($request['brands'] as $key => $brandId) {
                     $brand = Brand::find($brandId);
-                    $brand->brand_sources()->map(function ($brandSource) use ($product) {
+                    $brand->brand_sources->map(function ($brandSource) use ($product) {
                         $product->brandSources()->syncWithoutDetaching([$brandSource->id => ['statut' => 1, 'created_at' => now(), 'account_user_id' => getAccountUser()->id, 'updated_at' => now()]]);
                     });
                 }
@@ -626,13 +699,12 @@ class ProductController extends Controller
                             $productVariation->warehouses()->syncWithoutDetaching([$warehouse->id => ['quantity' => 0, 'created_at' => now(), 'updated_at' => now()]]);
                         }
                     }
-                }
-                if (isset($request['suppliers'])) {
-                    foreach ($request['suppliers'] as $supplierData) {
-                        $supplier = Supplier::find($supplierData['id']);
-                        $productVariation = ProductVariationAttribute::where(['variation_attribute_id' => $supplierData['variation_id'], 'product_id' => $product->id])->get()->first();
-                        if ($productVariation)
+                    
+                    if (isset($request['suppliers'])) {
+                        foreach ($request['suppliers'] as $supplierData) {
+                            $supplier = Supplier::find($supplierData['id']);
                             $productVariation->suppliers()->syncWithoutDetaching([$supplier->id => ["account_id" => getAccountUser()->account_id, 'price' => $supplierData['price'], 'created_at' => now(), 'updated_at' => now(), 'statut' => 1]]);
+                        }
                     }
                 }
             } else {
@@ -668,7 +740,7 @@ class ProductController extends Controller
                 'image_type_id' => 2,
                 'images' => $images
             ];
-            if ($imageData) {
+            if (!empty($images)) {
                 $image = ImageController::store(new Request([$imageData]), $product, false);
             }
 
@@ -698,29 +770,262 @@ class ProductController extends Controller
 
     public function show($id)
     {
-        //
+        $account = getAccountUser()->account_id;
+        $accountUsers = AccountUser::where('account_id', $account)->pluck('id')->toArray();
+
+        $product = Product::with([
+            'productType',
+            'accountProducts.taxonomies',
+            'activePvas.suppliers',
+            'activePvas.warehousePvas.warehouse',
+            'activePvas.variationAttribute.childVariationAttributes.attribute',
+            'activePvas.activeWarehouses',
+            'activePvas.activeSuppliers',
+            'activePvas.images',
+            'price',
+            'principalImage',
+            'images',
+            'offers',
+        ])
+            ->whereIn('account_user_id', $accountUsers)
+            ->where('statut', 1)
+            ->find($id);
+
+        if (!$product) {
+            return response()->json(['statut' => 0, 'data' => 'not exist'], 404);
+        }
+
+        $pvaIds = $product->activePvas->pluck('id')->toArray();
+
+        $orderPvas = !empty($pvaIds)
+            ? OrderPva::whereIn('product_variation_attribute_id', $pvaIds)
+                ->whereIn('order_status_id', [1, 4, 5, 8, 9])
+                ->get()
+                ->groupBy('product_variation_attribute_id')
+            : collect();
+
+        $supplierOrderPvas = !empty($pvaIds)
+            ? SupplierOrderPva::whereIn('product_variation_attribute_id', $pvaIds)
+                ->where('statut', 1)
+                ->get()
+                ->groupBy('product_variation_attribute_id')
+            : collect();
+
+        $warehousePvas = !empty($pvaIds)
+            ? WarehousePva::whereIn('product_variation_attribute_id', $pvaIds)
+                ->get()
+                ->groupBy('product_variation_attribute_id')
+            : collect();
+
+        $productData = [
+            'id'         => $product->id,
+            'title'      => $product->title,
+            'statut'     => $product->statut,
+            'price'      => $product->price->first()->price,
+            'image'      => collect($product->principalImage->only('id', 'photo', 'photo_dir')),
+            'reference'  => $product->reference,
+            'created_at' => $product->created_at,
+            'depot_attributes' => $product->activePvas->map(function ($pva) use ($orderPvas, $supplierOrderPvas, $warehousePvas) {
+                $pvaOrderPvas        = $orderPvas->get($pva->id, collect());
+                $pvaSupplierOrderPvas = $supplierOrderPvas->get($pva->id, collect());
+                $pvaWarehousePvas    = $warehousePvas->get($pva->id, collect());
+
+                $deliveryOrders = $pvaOrderPvas->whereIn('order_status_id', [5, 8, 9]);
+                $pendingOrders  = $pvaOrderPvas->whereIn('order_status_id', [1, 4, 5]);
+
+                $realStock = $pvaWarehousePvas->sum('quantity');
+
+                return [
+                    'id'                    => $pva->id,
+                    'variation_attributes_id' => $pva->variationAttribute->id ?? null,
+                    'delivery'              => $deliveryOrders->sum('quantity'),
+                    'real'                  => $realStock,
+                    'available'             => $realStock - $pendingOrders->sum('quantity'),
+                    'images'                => $pva->images,
+                    'ordered'               => $pvaSupplierOrderPvas->sum('quantity'),
+                    'attribute'             => isset($pva->variationAttribute->childVariationAttributes)
+                        ? implode(',', $pva->variationAttribute->childVariationAttributes->map(function ($childV) {
+                            return $childV->attribute->title;
+                        })->toArray())
+                        : null,
+                ];
+            }),
+            'categories' => $product->accountProducts->where('account_id', $account)->flatMap(function ($accountProduct) {
+                return $accountProduct->taxonomies->where('type_taxonomy_id', 1)->map(function ($taxonomy) {
+                    return $taxonomy->only('id', 'title');
+                });
+            }),
+            'warehouses' => $product->activePvas->flatMap(function ($pva) {
+                return $pva->activeWarehouses->where('warehouse_type_id', 1)->map(function ($activeWarehouse) {
+                    return $activeWarehouse->only('id', 'title');
+                });
+            })->unique(),
+            'suppliers'    => $product->activePvas->flatMap(function ($pva) {
+                return $pva->activeSuppliers;
+            })->unique(),
+            'images'       => $product->images,
+            'product_type' => $product->productType->only('id', 'code', 'title'),
+            'offers'       => $product->offers,
+        ];
+
+        return response()->json(['statut' => 1, 'data' => $productData]);
     }
 
     public function edit(Request $request, $id)
     {
         $request = collect($request->query())->toArray();
         $data = [];
-        $product = Product::with('ProductType')->find($id);
+        $normalize = function ($payload, $columns = []) {
+            $payload = is_array($payload) ? $payload : [];
+            $filters = [];
+            foreach ($columns as $column) {
+                $filters[$column] = $payload['filters'][$column] ?? null;
+            }
+            return [
+                'search' => $payload['search'] ?? null,
+                'filters' => $filters,
+                'pagination' => [
+                    'current_page' => $payload['pagination']['current_page'] ?? 0,
+                    'per_page' => $payload['pagination']['per_page'] ?? 10,
+                ],
+                'sort' => $payload['sort'] ?? [['column' => 'created_at', 'order' => 'DESC']],
+            ];
+        };
+
+        $applySearchAndSort = function ($query, $params, $columns) {
+            if (!empty($params['search'])) {
+                $search = $params['search'];
+                $query->where(function ($subQuery) use ($columns, $search) {
+                    foreach ($columns as $column) {
+                        $subQuery->orWhere($column, 'like', "%{$search}%");
+                    }
+                });
+            }
+
+            if (!empty($params['sort'])) {
+                foreach ($params['sort'] as $sort) {
+                    $query->orderBy($sort['column'] ?? 'created_at', $sort['order'] ?? 'DESC');
+                }
+            }
+
+            return $query;
+        };
+
+        $product = Product::with('ProductType', 'activePvas.variationAttribute.childVariationAttributes.attribute')->find($id);
         if (!$product)
             return response()->json([
                 'statut' => 0,
                 'data' => 'not exist'
             ]);
-        $pvas = ProductVariationAttribute::where('product_id', $product->id)->get()->pluck('id')->toArray();
+        $pvas = $product->activePvas->pluck('id')->toArray();
         if (isset($request['productInfo'])) {
+            $accountId = getAccountUser()->account_id;
             $info = collect($product)->toArray();
             $info['price'] = $product->price->first()->price;
             $info['principalImage'] = $product->principalImage->toArray();
             $info['images'] = $product->images->where('pivot.statut', 1)->values()->toArray();
+
+            $activeSupplierIds = SupplierPva::whereIn('product_variation_attribute_id', $pvas)
+                ->where('statut', 1)
+                ->pluck('supplier_id')
+                ->unique()
+                ->toArray();
+
+            $activeSupplierPvasBySupplier = SupplierPva::whereIn('product_variation_attribute_id', $pvas)
+                ->where('statut', 1)
+                ->get()
+                ->sortByDesc('updated_at')
+                ->groupBy('supplier_id');
+
+            $info['suppliers'] = Supplier::where('account_id', $accountId)
+                ->whereIn('id', $activeSupplierIds)
+                ->get()
+                ->map(function ($supplier) use ($activeSupplierPvasBySupplier) {
+                    $supplierData = $supplier->only('id', 'title');
+                    $supplierData['price'] = optional($activeSupplierPvasBySupplier->get($supplier->id)->first())->price;
+                    return $supplierData;
+                })
+                ->values()
+                ->toArray();
+
+            $activeWarehouseIds = WarehousePva::whereIn('product_variation_attribute_id', $pvas)
+                ->where('statut', 1)
+                ->pluck('warehouse_id')
+                ->unique()
+                ->toArray();
+            $info['warehouses'] = Warehouse::where('account_id', $accountId)
+                ->where('warehouse_type_id', 1)
+                ->whereIn('id', $activeWarehouseIds)
+                ->get()
+                ->map(function ($warehouse) {
+                    return $warehouse->only('id', 'title');
+                })
+                ->values()
+                ->toArray();
+
+            $activeBrandIds = $product->brandSources()
+                ->wherePivot('statut', 1)
+                ->pluck('brand_source.brand_id')
+                ->unique()
+                ->toArray();
+            $info['brands'] = Brand::where('account_id', $accountId)
+                ->whereIn('id', $activeBrandIds)
+                ->get()
+                ->map(function ($brand) {
+                    return $brand->only('id', 'title', 'code');
+                })
+                ->values()
+                ->toArray();
+
+            $activeOfferIds = Offerable::where('offerable_type', Product::class)
+                ->where('offerable_id', $product->id)
+                ->where('statut', 1)
+                ->pluck('offer_id')
+                ->unique()
+                ->toArray();
+            $info['offers'] = Offer::where('account_id', $accountId)
+                ->whereIn('id', $activeOfferIds)
+                ->where(function ($q) {
+                    $q->where('offer_type_id', '!=', 1)->orWhereNull('offer_type_id');
+                })
+                ->get()
+                ->map(function ($offer) {
+                    return $offer->only('id', 'title', 'code');
+                })
+                ->values()
+                ->toArray();
+
+            $info['taxonomies'] = $product->accountProducts
+                ->where('account_id', $accountId)
+                ->flatMap(function ($accountProduct) {
+                    return $accountProduct->taxonomies
+                        ->where('type_taxonomy_id', 1)
+                        ->map(function ($taxonomy) {
+                            return $taxonomy->only('id', 'title');
+                        });
+                })
+                ->unique('id')
+                ->values()
+                ->toArray();
+
+            $info['variations'] = $product->activePvas->map(function ($pva) {
+                return [
+                    'id' => $pva->id,
+                    'variation_attributes_id' => $pva->variationAttribute->id ?? null,
+                    'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($childVariation) {
+                        return [
+                            'id' => $childVariation->id,
+                            'type' => $childVariation->attribute->TypeAttribute->title ?? null,
+                            'value' => $childVariation->attribute->title,
+                        ];
+                    })->values(),
+                ];
+            })->values()->toArray();
+
             $data["productInfo"]['data'] = $info;
         }
         if (isset($request['taxonomies']['active'])) {
-            $filters = HelperFunctions::filterColumns($request['taxonomies']['active'], ['title', 'description']);
+            $filters = $normalize($request['taxonomies']['active'], ['title', 'description']);
             $model = 'App\\Models\\Taxonomy';
             $accountUsers = AccountUser::where('account_id', getAccountUser()->account_id)->pluck('id')->toArray();
             $categories = $model::whereNull('taxonomy_id')->with(['images', 'childTaxonomies'])->where('type_taxonomy_id', 1)->whereIn('account_user_id', $accountUsers)->get();
@@ -733,16 +1038,28 @@ class ProductController extends Controller
             }
             $data['taxonomies']['active'] = HelperFunctions::getPagination(collect($formattedCategories), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
+        if (isset($request['taxonomies']['all'])) {
+            $filters = $normalize($request['taxonomies']['all'], ['title', 'description']);
+            $model = 'App\\Models\\Taxonomy';
+            $accountUsers = AccountUser::where('account_id', getAccountUser()->account_id)->pluck('id')->toArray();
+            $categories = $model::whereNull('taxonomy_id')->with(['images', 'childTaxonomies'])->where('type_taxonomy_id', 1)->whereIn('account_user_id', $accountUsers)->get();
+            $formattedCategories = [];
+            $taxonomyIds = $product->accountProducts->first()->taxonomies->pluck('id')->toArray();
+            foreach ($categories as $category) {
+                if (in_array($category->id, $taxonomyIds))
+                    $category->checked = true;
+                $formattedCategories[] = TaxonomyController::formatTaxonomy($category, $taxonomyIds);
+            }
+            $data['taxonomies']['all'] = HelperFunctions::getPagination(collect($formattedCategories), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        }
         if (isset($request['suppliers']['inactive'])) {
-            $filters = HelperFunctions::filterColumns($request['suppliers']['inactive'], ['title', 'code']);
-            $model = 'App\\Models\\Supplier';
+            $filters = $normalize($request['suppliers']['inactive'], ['title', 'code']);
             $supplierPvas = SupplierPva::whereIn('product_variation_attribute_id', $pvas)->get()->pluck('supplier_id')->unique()->toArray();
-            $request['suppliers']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['suppliers']['inactive']['whereNotArray'] = ['column' => 'id', 'values' => $supplierPvas];
-            //permet de récupérer la liste des regions inactive filtrés
-            $suppliers = FilterController::searchs(new Request($request['suppliers']['inactive']), $model, ['id', 'title'], false, [])->map(function ($supplier) use ($supplierPvas, $product) {
+            $query = Supplier::where('account_id', getAccountUser()->account_id)
+                ->whereNotIn('id', $supplierPvas);
+            $suppliers = $applySearchAndSort($query, $filters, ['id', 'title'])->get()->map(function ($supplier) use ($supplierPvas, $product) {
                 $supplierDatas = $supplier->only('id', 'title');
-                $supplierDatas['variations'] = $product->productVariationAttributes->whereNotIn('id', $supplierPvas)->map(function ($pva) {
+                $supplierDatas['variations'] = $product->activePvas->whereNotIn('id', $supplierPvas)->map(function ($pva) {
                     $variation['id'] = $pva->id;
                     $variation['attributes'] = $pva->variationAttribute->childVariationAttributes->map(function ($childVariation) {
                         $attribute['id'] = $childVariation->id;
@@ -755,7 +1072,7 @@ class ProductController extends Controller
                 return $supplierDatas;
             });
             $data['suppliers']['inactive'] = HelperFunctions::getPagination(collect($suppliers), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
-            $data['suppliers']['inactive']['variations'] = $product->productVariationAttributes->map(function ($pva) {
+            $data['suppliers']['inactive']['variations'] = $product->activePvas->map(function ($pva) {
                 $variation['id'] = $pva->id;
                 $variation['attributes'] = $pva->variationAttribute->childVariationAttributes->map(function ($childVariation) {
                     $attribute['id'] = $childVariation->id;
@@ -767,13 +1084,11 @@ class ProductController extends Controller
             });
         }
         if (isset($request['suppliers']['active'])) {
-            $filters = HelperFunctions::filterColumns($request['suppliers']['active'], ['title', 'code']);
-            $model = 'App\\Models\\Supplier';
+            $filters = $normalize($request['suppliers']['active'], ['title', 'code']);
             $supplierPvas = SupplierPva::whereIn('product_variation_attribute_id', $pvas)->get()->pluck('supplier_id')->unique()->toArray();
-            $request['suppliers']['active']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['suppliers']['active']['whereArray'] = ['column' => 'id', 'values' => $supplierPvas];
-            //permet de récupérer la liste des regions active filtrés
-            $suppliers = FilterController::searchs(new Request($request['suppliers']['active']), $model, ['id', 'title'], false, [])->map(function ($supplier) use ($pvas) {
+            $query = Supplier::where('account_id', getAccountUser()->account_id)
+                ->whereIn('id', $supplierPvas);
+            $suppliers = $applySearchAndSort($query, $filters, ['id', 'title'])->get()->map(function ($supplier) use ($pvas) {
                 $supplierDatas = $supplier->only('id', 'title');
                 $supplierDatas['variations'] = $supplier->activePvas->whereIn('id', $pvas)->map(function ($pva) {
                     $variation['id'] = $pva->id;
@@ -790,56 +1105,122 @@ class ProductController extends Controller
             });
             $data['suppliers']['active'] = HelperFunctions::getPagination(collect($suppliers), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
+        if (isset($request['suppliers']['all'])) {
+            $filters = $normalize($request['suppliers']['all'], ['title', 'code']);
+            $query = Supplier::where('account_id', getAccountUser()->account_id);
+            $suppliers = $applySearchAndSort($query, $filters, ['id', 'title'])->get()->map(function ($supplier) use ($pvas, $product) {
+                $supplierDatas = $supplier->only('id', 'title');
+                $supplierActivePvas = $supplier->activePvas->whereIn('id', $pvas)->keyBy('id');
+                $supplierDatas['variations'] = $product->activePvas->map(function ($pva) use ($supplierActivePvas) {
+                    $variation['id'] = $pva->id;
+                    $activePva = $supplierActivePvas->get($pva->id);
+                    $variation['price'] = $activePva && $activePva->pivot ? $activePva->pivot->price : null;
+                    $variation['attributes'] = $pva->variationAttribute->childVariationAttributes->map(function ($childVariation) {
+                        $attribute['id'] = $childVariation->id;
+                        $attribute['type'] = $childVariation->attribute->TypeAttribute->title;
+                        $attribute['value'] = $childVariation->attribute->title;
+                        return $attribute;
+                    });
+                    return $variation;
+                })->values();
+                return $supplierDatas;
+            });
+            $data['suppliers']['all'] = HelperFunctions::getPagination(collect($suppliers), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        }
         if (isset($request['warehouses']['inactive'])) {
-            $model = 'App\\Models\\Warehouse';
+            $filters = $normalize($request['warehouses']['inactive'], ['id', 'title']);
             $warehousePvas = WarehousePva::whereIn('product_variation_attribute_id', $pvas)->get()->pluck('warehouse_id')->unique()->toArray();
-            $request['warehouses']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['warehouses']['inactive']['where'] = ['column' => 'warehouse_type_id', 'value' => 1];
-            $request['warehouses']['inactive']['whereNotArray'] = ['column' => 'id', 'values' => $warehousePvas];
-            //permet de récupérer la liste des regions inactive filtrés
-            $data['warehouses']['inactive'] = FilterController::searchs(new Request($request['warehouses']['inactive']), $model, ['id', 'title'], true, [['model' => 'App\\Models\\Images', 'title' => 'images', 'search' => true]]);
+            $query = Warehouse::with('images')
+                ->where('account_id', getAccountUser()->account_id)
+                ->where('warehouse_type_id', 1)
+                ->whereNotIn('id', $warehousePvas);
+            $warehouses = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $data['warehouses']['inactive'] = HelperFunctions::getPagination($warehouses, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
 
         if (isset($request['warehouses']['active'])) {
-            $model = 'App\\Models\\Warehouse';
+            $filters = $normalize($request['warehouses']['active'], ['id', 'title']);
             $warehousePvas = WarehousePva::whereIn('product_variation_attribute_id', $pvas)->get()->pluck('warehouse_id')->unique()->toArray();
-            $request['warehouses']['active']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['warehouses']['active']['where'] = ['column' => 'warehouse_type_id', 'value' => 1];
-            $request['warehouses']['active']['whereArray'] = ['column' => 'id', 'values' => $warehousePvas];
-            //permet de récupérer la liste des regions active filtrés
-            $data['warehouses']['active'] = FilterController::searchs(new Request($request['warehouses']['active']), $model, ['id', 'title'], true, [['model' => 'App\\Models\\Images', 'title' => 'images', 'search' => true]]);
+            $query = Warehouse::with('images')
+                ->where('account_id', getAccountUser()->account_id)
+                ->where('warehouse_type_id', 1)
+                ->whereIn('id', $warehousePvas);
+            $warehouses = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $data['warehouses']['active'] = HelperFunctions::getPagination($warehouses, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        }
+        if (isset($request['warehouses']['all'])) {
+            $filters = $normalize($request['warehouses']['all'], ['id', 'title']);
+            $query = Warehouse::with('images')
+                ->where('account_id', getAccountUser()->account_id)
+                ->where('warehouse_type_id', 1);
+            $warehouses = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $data['warehouses']['all'] = HelperFunctions::getPagination($warehouses, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
         if (isset($request['offers']['active'])) {
-            $model = 'App\\Models\\Offer';
-            $request['offers']['active']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['offers']['active']['whereArray'] = ['column' => 'id', 'values' => $product->offers->pluck('id')->toArray()];
-            $request['offers']['active']['whereNot'] = ['column' => 'offer_type_id', 'value' => 1];
-            //permet de récupérer la liste des regions active filtrés
-            $data['offers']['active'] = FilterController::searchs(new Request($request['offers']['active']), $model, ['id', 'title'], true, []);
+            $filters = $normalize($request['offers']['active'], ['id', 'title']);
+            $query = Offer::where('account_id', getAccountUser()->account_id)
+                ->whereIn('id', $product->offers->pluck('id')->toArray())
+                ->where(function ($q) {
+                    $q->where('offer_type_id', '!=', 1)->orWhereNull('offer_type_id');
+                });
+            $offers = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $data['offers']['active'] = HelperFunctions::getPagination($offers, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
         if (isset($request['offers']['inactive'])) {
-            $model = 'App\\Models\\Offer';
-            $request['offers']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['offers']['inactive']['whereNotArray'] = ['column' => 'id', 'values' => $product->offers->pluck('id')->toArray()];
-            $request['offers']['inactive']['whereNot'] = ['column' => 'offer_type_id', 'value' => 1];
-            //permet de récupérer la liste des regions inactive filtrés
-            $data['offers']['inactive'] = FilterController::searchs(new Request($request['offers']['inactive']), $model, ['id', 'title'], true, []);
+            $filters = $normalize($request['offers']['inactive'], ['id', 'title']);
+            $query = Offer::where('account_id', getAccountUser()->account_id)
+                ->whereNotIn('id', $product->offers->pluck('id')->toArray())
+                ->where(function ($q) {
+                    $q->where('offer_type_id', '!=', 1)->orWhereNull('offer_type_id');
+                });
+            $offers = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $data['offers']['inactive'] = HelperFunctions::getPagination($offers, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        }
+        if (isset($request['offers']['all'])) {
+            $filters = $normalize($request['offers']['all'], ['id', 'title']);
+            $query = Offer::where('account_id', getAccountUser()->account_id)
+                ->where(function ($q) {
+                    $q->where('offer_type_id', '!=', 1)->orWhereNull('offer_type_id');
+                });
+            $offers = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            $data['offers']['all'] = HelperFunctions::getPagination($offers, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        }
+        if (isset($request['brands']['all'])) {
+            $filters = $normalize($request['brands']['all'], ['id', 'title']);
+            $query = Brand::with('images')
+                ->where('account_id', getAccountUser()->account_id);
+            $brands = $applySearchAndSort($query, $filters, ['id', 'title', 'code'])->get();
+            $data['brands']['all'] = HelperFunctions::getPagination($brands, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
 
+        if (isset($request['pva']['active'])) {
+                $filters = $normalize($request['pva']['active'], ['id', 'title']);
+                $query = ProductVariationAttribute::with('variationAttribute.childVariationAttributes.attribute')
+                    ->whereIn('id', $pvas);
+                $pvasData = $applySearchAndSort($query, $filters, ['id', 'code'])->get()->map(function ($pva) {
+                    $pvaData = $pva->only('id', 'code');
+                    $pvaData['attributes'] = $pva->variationAttribute->childVariationAttributes->map(function ($childVariation) {
+                        $attribute['id'] = $childVariation->id;
+                        $attribute['type'] = $childVariation->attribute->TypeAttribute->title;
+                        $attribute['value'] = $childVariation->attribute->title;
+                        return $attribute;
+                    });
+                    return $pvaData;
+                });
+                $data['pva']['active'] = HelperFunctions::getPagination($pvasData, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        }
+        if (isset($request['pva']['inactive'])) {}
         if (isset($request['variations']['active'])) {
-            $model = 'App\\Models\\TypeAttribute';
-            $associated[] = [
-                'model' => 'App\\Models\\Attribute',
-                'title' => 'attributes',
-                'search' => true,
-            ];
-            $selectedAttributes = $product->productVariationAttributes->flatMap(function ($pva) {
+            $filters = $normalize($request['variations']['active'], ['id', 'title']);
+            $selectedAttributes = $product->activePvas->flatMap(function ($pva) {
                 return $pva->variationAttribute->childVariationAttributes->map(function ($variationAttribute) {
                     return $variationAttribute->attribute_id;
                 });
             })->unique()->values()->toArray();
-            $request['variations']['active']['inAccountUser'] = ['account_user_id', getAccountUser()->account_id];
-            $variations = FilterController::searchs(new Request($request['variations']['active']), $model, ['id', 'title'], false, $associated);
+            $accountUsers = AccountUser::where('account_id', getAccountUser()->account_id)->pluck('id')->toArray();
+            $query = \App\Models\TypeAttribute::with('attributes')
+                ->whereIn('account_user_id', $accountUsers);
+            $variations = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
             foreach ($variations as $variation) {
                 foreach ($variation->attributes as $attribute) {
                     $attribute->checked = false;
@@ -850,8 +1231,30 @@ class ProductController extends Controller
                     }
                 }
             }
-            $filters = HelperFunctions::filterColumns($request['variations']['active'], ['id', 'title']);
             $data['variations']['active'] = HelperFunctions::getPagination(collect($variations), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        }
+        if (isset($request['variations']['all'])) {
+            $filters = $normalize($request['variations']['all'], ['id', 'title']);
+            $selectedAttributes = $product->activePvas->flatMap(function ($pva) {
+                return $pva->variationAttribute->childVariationAttributes->map(function ($variationAttribute) {
+                    return $variationAttribute->attribute_id;
+                });
+            })->unique()->values()->toArray();
+            $accountUsers = AccountUser::where('account_id', getAccountUser()->account_id)->pluck('id')->toArray();
+            $query = \App\Models\TypeAttribute::with('attributes')
+                ->whereIn('account_user_id', $accountUsers);
+            $attributes = $applySearchAndSort($query, $filters, ['id', 'title'])->get();
+            foreach ($attributes as $attributeType) {
+                foreach ($attributeType->attributes as $attribute) {
+                    $attribute->checked = false;
+                    $attributeType->checked = $attributeType->checked ? true : false;
+                    if (in_array($attribute->id, $selectedAttributes)) {
+                        $attribute->checked = true;
+                        $attributeType->checked = true;
+                    }
+                }
+            }
+            $data['variations']['all'] = HelperFunctions::getPagination(collect($attributes), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
         return response()->json([
             'statut' => 1,
@@ -862,10 +1265,34 @@ class ProductController extends Controller
 
     public function update(Request $requests, $id)
     {
-        //$variations = VariationAttributesController::store(new Request($request->only('variations')), 1);
-        // tester si il n'y a pas probleme en validation et aprés enregistrer si il ya de nouvaux attributs
         $account = getAccountUser()->account_id;
         $users = AccountUser::where(['account_id' => $account, 'statut' => 1])->get()->pluck('id')->toArray();
+
+        $existsById = function (string $model) {
+            return function ($attribute, $value, $fail) use ($model) {
+                if (!$model::where('id', $value)->first()) {
+                    $fail("not exist");
+                }
+            };
+        };
+
+        $existsInAccount = function (string $model, array $extraConditions = []) use ($account) {
+            return function ($attribute, $value, $fail) use ($model, $account, $extraConditions) {
+                $conditions = array_merge(['id' => $value, 'account_id' => $account], $extraConditions);
+                if (!$model::where($conditions)->first()) {
+                    $fail("not exist");
+                }
+            };
+        };
+
+        $existsInUsers = function (string $model) use ($users) {
+            return function ($attribute, $value, $fail) use ($model, $users) {
+                if (!$model::where('id', $value)->whereIn('account_user_id', $users)->first()) {
+                    $fail("not exist");
+                }
+            };
+        };
+
         $validator = Validator::make($requests->except('_method'), [
             '*.id' => 'required|exists:products,id',
             '*.reference' => [ // Validate title field
@@ -906,148 +1333,27 @@ class ProductController extends Controller
                     }
                 },
             ],
-            '*.warehousesToActive.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account, 'warehouse_type_id' => 1])->first();
-                    if (!$warehouse) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.warehousesToInactive.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    //remarque 7ta nrje3 nchof l'illimité f les sous warehouses
-                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account, 'warehouse_type_id' => 1])->first();
-                    if (!$warehouse) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.categories.*' => [
-                function ($attribute, $value, $fail) use ($users) {
-                    $category = Taxonomy::where('id', $value)
-                        ->whereIn('account_user_id', $users)
-                        ->first();
-                    if (!$category) {
-                        $fail("not exist");
-                    }
-                },
-            ],
+            '*.warehousesToActive.*' => [$existsInAccount(Warehouse::class, ['warehouse_type_id' => 1])],
+            '*.warehousesToInactive.*' => [$existsInAccount(Warehouse::class, ['warehouse_type_id' => 1])],
+            '*.taxonomiesToActive.*' => [$existsById(Taxonomy::class)],
+            '*.taxonomiesToInactive.*' => [$existsById(Taxonomy::class)],
             '*.suppliersToActive.*.price' => 'required',
-            '*.suppliersToActive.*.id' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $supplier = Supplier::where(['id' => $value, 'account_id' => $account])
-                        ->first();
-                    if (!$supplier) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.suppliersToInactive.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $supplier = Supplier::where(['id' => $value, 'account_id' => $account])
-                        ->first();
-                    if (!$supplier) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.attributesToActive.*' => [
-                function ($attribute, $value, $fail) use ($users) {
-                    $attribute = Attribute::where('id', $value)
-                        ->whereIn('account_user_id', $users)
-                        ->first();
-                    if (!$attribute) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.attributesToInactive.*' => [
-                function ($attribute, $value, $fail) use ($users) {
-                    $attribute = Attribute::where('id', $value)
-                        ->whereIn('account_user_id', $users)
-                        ->first();
-                    if (!$attribute) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.brandsToActive.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $brand = Brand::where(['id' => $value, 'account_id' => $account])->first();
-                    if (!$brand) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.brandsToInactive.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $brand = Brand::where(['id' => $value, 'account_id' => $account])->first();
-                    if (!$brand) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.offersToActive.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $offer = Offer::where(['id' => $value, 'account_id' => $account])->first();
-                    if (!$offer) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            '*.offersToInactive.*' => [
-                function ($attribute, $value, $fail) use ($account) {
-                    $offer = Offer::where(['id' => $value, 'account_id' => $account])->first();
-                    if (!$offer) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-            
-            '*.imageVariations.*.attributes.*' => [
-                function ($attribute, $value, $fail) {
-                    $accountUsers = AccountUser::where('account_id',getAccountUser()->account_id)->pluck('id')->toArray();
-                    $attributeP = Attribute::where(['id' => $value])->first();
-                    if (!$attributeP) 
-                        $fail("not exist");
-                },
-            ],
+            '*.suppliersToActive.*.id' => [$existsInAccount(Supplier::class)],
+            '*.suppliersToInactive.*' => [$existsInAccount(Supplier::class)],
+            '*.attributes.*' => [$existsInUsers(Attribute::class)],
+            '*.brandsToActive.*' => [$existsInAccount(Brand::class)],
+            '*.brandsToInactive.*' => [$existsInAccount(Brand::class)],
+            '*.offersToActive.*' => [$existsInAccount(Offer::class)],
+            '*.offersToInactive.*' => [$existsInAccount(Offer::class)],
+            '*.imageVariations.*.image' => ['string', $existsInAccount(Image::class)],
+            '*.imageVariations.*.attributes.*' => [$existsById(Attribute::class)],
             '*.images.*' => [
                 'string',
-                // function ($attribute, $value, $fail) {
-                //     $account = getAccountUser()->account_id;
-                //     $image = Image::where(['id' => $value, 'account_id' => $account])->first();
-                //     if ($image) {
-                //         // $isUnique = \App\Models\Imageable::where('image_id', $image->id)
-                //         //     ->where('imageable_type', "App\Models\Product")
-                //         //     ->first();
-                //         // if ($isUnique) {
-                //         //     $fail("exist");
-                //         // }
-                //     } else {
-                //         $fail("not exist");
-                //     }
-
-                // },
+                $existsInAccount(Image::class),
             ],
             '*.principalImage' => [
                 'string',
-                // function ($attribute, $value, $fail) {
-                //     $account = getAccountUser()->account_id;
-                //     $image = Image::where(['id' => $value, 'account_id' => $account])->first();
-                //     if ($image) {
-                //         // $isUnique = \App\Models\Imageable::where('image_id', $image->id)
-                //         //     ->where('imageable_type', "App\Models\Product")
-                //         //     ->first();
-                //         // if ($isUnique) {
-                //         //     $fail("exist");
-                //         // }
-                //     } else {
-                //         $fail("not exist");
-                //     }
-
-                // },
+                $existsInAccount(Image::class),
             ],
             '*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
             '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
@@ -1062,14 +1368,20 @@ class ProductController extends Controller
         $products = collect($requests->except('_method'))->map(function ($request) {
             $request["account_user_id"] = getAccountUser()->id;
             $product = Product::find($request['id']);
-            $request["reference"]=$product->reference;
-            $request["title"]=$product->title;
+            if (!$product) {
+                return null;
+            }
+            // $request["reference"]=$product->reference;
+            // $request["title"]=$product->title;
             $product_only = collect($request)->only('title', 'reference', 'statut');
             $attributeByTypes = [];
             $product->update($product_only->all());
-            if (isset($request['price']))
-                if (doubleVal($request['price']) != $product->price->first()->price) {
-                    $product->price->first()->update(['statut' => 0]);
+            if (isset($request['price'])) {
+                $currentPrice = $product->price->first();
+                if (!$currentPrice || doubleVal($request['price']) != $currentPrice->price) {
+                    if ($currentPrice) {
+                        $currentPrice->update(['statut' => 0]);
+                    }
                     //definir une offre de type par défault pour définir le prix de base du produit
                     $dafaultOffer = Offer::create([
                         'code' => DefaultCodeController::getAccountCode('Offer', getAccountUser()->account_id),
@@ -1080,41 +1392,60 @@ class ProductController extends Controller
                     ]);
                     $dafaultOffer->products()->syncWithoutDetaching([$product->id => ['account_user_id' => getAccountUser()->id, 'created_at' => now(), 'updated_at' => now()]]);
                 }
-
+            }
             if (isset($request['attributes'])) {
                 foreach ($request['attributes'] as $key => $attributeId) {
                     $attribute = Attribute::where('id', $attributeId)->first();
-                    $attributeByTypes[$attribute->type_attribute_id][] = $attribute->id;
+                    if (!$attribute) {
+                        continue;
+                    }
+                    $attributeByTypes[$attribute->types_attribute_id][] = $attribute->id;
                 }
             }
-            if (isset($request['categories'])) {
 
-                $product->accountProducts->where('account_id', getAccountUser()->account_id)->map(function ($accountproduct) {
-                    $accountproduct->taxonomies->map(function ($taxonomy) use ($accountproduct) {
-                        $taxonomy->products()->detach($accountproduct->id);
-                    });
-                });
-                foreach ($request['categories'] as $key => $categoryId) {
-                    $category = Taxonomy::find($categoryId);
-                    $category->products()->syncWithoutDetaching([
-                        $product->accountProducts->where('account_id', getAccountUser()->account_id)->first()->id => [
+            // Handle taxonomiesToActive
+            if (isset($request['taxonomiesToActive'])) {
+                $accountProduct = $product->accountProducts->where('account_id', getAccountUser()->account_id)->first();
+                if (!$accountProduct) {
+                    $accountProduct = $product->accountProducts->first();
+                }
+                foreach ($request['taxonomiesToActive'] as $taxonomyId) {
+                    $taxonomy = Taxonomy::find($taxonomyId);
+                    if (!$taxonomy || !$accountProduct) {
+                        continue;
+                    }
+                    $taxonomy->products()->syncWithoutDetaching([
+                        $accountProduct->id => [
                             'created_at' => now(),
-                            'updated_at' => now()
+                            'updated_at' => now(),
+                            'statut' => 1
                         ]
                     ]);
                 }
             }
-            if (isset($request['categoriesToInactive'])) {
-                foreach ($request['categoriesToInactive'] as $key => $categoryId) {
-                    $category = Taxonomy::find($categoryId);
-                    $category->products()->detach($category);
+
+            // Handle taxonomiesToInactive
+            if (isset($request['taxonomiesToInactive'])) {
+                $accountProduct = $product->accountProducts->where('account_id', getAccountUser()->account_id)->first();
+                if (!$accountProduct) {
+                    $accountProduct = $product->accountProducts->first();
+                }
+                foreach ($request['taxonomiesToInactive'] as $taxonomyId) {
+                    $taxonomy = Taxonomy::find($taxonomyId);
+                    if (!$taxonomy || !$accountProduct) {
+                        continue;
+                    }
+                    $taxonomy->products()->detach($accountProduct->id);
                 }
             }
 
             if (isset($request['brandsToActive'])) {
                 foreach ($request['brandsToActive'] as $key => $brandId) {
                     $brand = Brand::find($brandId);
-                    $brand->brand_sources()->map(function ($brandSource) use ($product) {
+                    if (!$brand) {
+                        continue;
+                    }
+                    $brand->brand_sources->map(function ($brandSource) use ($product) {
                         $product->brandSources()->syncWithoutDetaching([$brandSource->id => ['statut' => 1, 'created_at' => now(), 'account_user_id' => getAccountUser()->id, 'updated_at' => now()]]);
                     });
                 }
@@ -1122,7 +1453,10 @@ class ProductController extends Controller
             if (isset($request['brandsToInactive'])) {
                 foreach ($request['brandsToInactive'] as $key => $brandId) {
                     $brand = Brand::find($brandId);
-                    $brand->brand_sources()->map(function ($brandSource) use ($product) {
+                    if (!$brand) {
+                        continue;
+                    }
+                    $brand->brand_sources->map(function ($brandSource) use ($product) {
                         $product->brandSources()->syncWithoutDetaching([$brandSource->id => ['statut' => 0, 'created_at' => now(), 'account_user_id' => getAccountUser()->id, 'updated_at' => now()]]);
                     });
                 }
@@ -1130,6 +1464,9 @@ class ProductController extends Controller
             if (isset($request['offersToActive'])) {
                 foreach ($request['offersToActive'] as $key => $offerId) {
                     $offer = Offer::find($offerId);
+                    if (!$offer) {
+                        continue;
+                    }
                     $offer->products()->syncWithoutDetaching([
                         $product->id => [
                             'account_user_id' => getAccountUser()->id,
@@ -1142,6 +1479,9 @@ class ProductController extends Controller
             if (isset($request['offersToInactive'])) {
                 foreach ($request['offersToInactive'] as $key => $offerId) {
                     $offer = Offer::find($offerId);
+                    if (!$offer) {
+                        continue;
+                    }
                     if ($offer->products->where('id', $product->id)->first())
                         $offer->products()->syncWithoutDetaching([
                             $product->id => [
@@ -1155,6 +1495,9 @@ class ProductController extends Controller
                 if (isset($request['warehousesToInactive'])) {
                     foreach ($request['warehousesToInactive'] as $key => $warehouseId) {
                         $warehouse = Warehouse::find($warehouseId);
+                        if (!$warehouse) {
+                            continue;
+                        }
                         if ($warehouse->productVariationAttributes->where('id', $pvaToInactive->id)->first())
                             $warehouse->products()->syncWithoutDetaching([
                                 $pvaToInactive->id => [
@@ -1167,6 +1510,9 @@ class ProductController extends Controller
                 if (isset($request['suppliersToInactive'])) {
                     foreach ($request['suppliersToInactive'] as $key => $supplierId) {
                         $supplier = Supplier::find($supplierId);
+                        if (!$supplier) {
+                            continue;
+                        }
                         if ($supplier->productVariationAttributes->where('id', $pvaToInactive->id)->first())
                             $supplier->productVariationAttributes()->syncWithoutDetaching([
                                 $pvaToInactive->id => [
@@ -1176,7 +1522,8 @@ class ProductController extends Controller
                             ]);
                     }
                 }
-                if (isset($request['attributes']))
+            }
+            foreach($product->productVariationAttributes as $key => $pvaToInactive) {
                     $pvaToInactive->update(['statut' => 0]);
             }
             $variationAttributes = VariationAttributesController::store(new Request(array_values($attributeByTypes)), 1, 0);
@@ -1197,6 +1544,9 @@ class ProductController extends Controller
                 if (isset($request['warehousesToActive'])) {
                     foreach ($request['warehousesToActive'] as $warehouseId) {
                         $warehouse = Warehouse::find($warehouseId);
+                        if (!$warehouse) {
+                            continue;
+                        }
                         if ($warehouse->productVariationAttributes->where('id', $productVariation->id)->first()) {
                             $warehouse->products()->syncWithoutDetaching([
                                 $productVariation->id => [
@@ -1222,6 +1572,9 @@ class ProductController extends Controller
                 foreach ($request['imageVariations'] as $key => $imageVariation) {
                     if(isset($imageVariation['image'])){
                         $pvaId= $product->productVariationAttributes->map( function($pva) use ($imageVariation){
+                            if (!$pva->variationAttribute) {
+                                return null;
+                            }
                             $variationAttributes= $pva->variationAttribute->childVariationAttributes->pluck(['attribute_id'])->toArray();
                             if($variationAttributes==$imageVariation['attributes']){
                                 return $pva->id;
@@ -1229,6 +1582,9 @@ class ProductController extends Controller
                             })->filter()->values()->first();
                         if($pvaId){
                             $productVariationAttribute=productVariationAttribute::find($pvaId);
+                            if (!$productVariationAttribute) {
+                                continue;
+                            }
                             $imagePva[] = ["image" => $imageVariation['image'], "as_principal" => true];
                             $dataImage = [
                                 'title' => $product->title,
@@ -1245,29 +1601,37 @@ class ProductController extends Controller
             }
             if (isset($request['suppliersToActive'])) {
                 foreach ($request['suppliersToActive'] as $supplierData) {
-                    $supplier = Supplier::find($supplierData['id']);
-                    $productVariation = ProductVariationAttribute::where(['variation_attribute_id' => $supplierData['variation_id'], 'product_id' => $product->id])->get()->first();
-                    if ($productVariation) {
-                        $productVariation->suppliers()->syncWithoutDetaching([$supplier->id => ["account_id" => getAccountUser()->account_id, 'price' => $supplierData['price'], 'created_at' => now(), 'updated_at' => now(), 'statut' => 1]]);
-                        if ($supplier->productVariationAttributes->where('id', $productVariation->id)->first()) {
-                            $supplier->productVariationAttributes()->syncWithoutDetaching([
-                                $productVariation->id => [
-                                    'statut' => 1,
-                                    'price' => $supplierData['price'],
-                                    'updated_at' => now(),
-                                ]
-                            ]);
-                        } else {
-                            $supplier->productVariationAttributes()->syncWithoutDetaching([
-                                $productVariation->id => [
-                                    'statut' => 1,
-                                    'price' => $supplierData['price'],
-                                    'created_at' => now(),
-                                    'updated_at' => now(),
-                                ]
-                            ]);
-                        }
+                    if (!isset($supplierData['id'],$supplierData['price'])) {
+                        continue;
                     }
+                    $supplier = Supplier::find($supplierData['id']);
+                    if (!$supplier) {
+                        continue;
+                    }
+                    $productVariations = ProductVariationAttribute::where(['product_id' => $product->id])->get()->map(function ($productVariation) use ($supplierData,$supplier) {
+                        if ($productVariation) {
+                            $productVariation->suppliers()->syncWithoutDetaching([$supplier->id => ["account_id" => getAccountUser()->account_id, 'price' => $supplierData['price'], 'created_at' => now(), 'updated_at' => now(), 'statut' => 1]]);
+                            if ($supplier->productVariationAttributes->where('id', $productVariation->id)->first()) {
+                                $supplier->productVariationAttributes()->syncWithoutDetaching([
+                                    $productVariation->id => [
+                                        'statut' => 1,
+                                        'price' => $supplierData['price'],
+                                        'updated_at' => now(),
+                                    ]
+                                ]);
+                            } else {
+                                $supplier->productVariationAttributes()->syncWithoutDetaching([
+                                    $productVariation->id => [
+                                        'statut' => 1,
+                                        'price' => $supplierData['price'],
+                                        'created_at' => now(),
+                                        'updated_at' => now(),
+                                    ]
+                                ]);
+                            }
+                        }
+                    })->filter();
+                    
                 }
             }
             $images = [];
@@ -1285,24 +1649,31 @@ class ProductController extends Controller
                 'image_type_id' => 2,
                 'images' => $images
             ];
-            if ($imageData) {
+            if (!empty($images)) {
                 $image = ImageController::store(new Request([$imageData]), $product, false);
             }
             if (isset($request['newPrincipalImage']) && isset($request['principalImage'])) {
-                $image = Image::find($request['principalImage'])->first();
-                $product->images()->attach($image->id, ['created_at' => now(), 'updated_at' => now(), 'statut' => 2]);
+                $image = Image::find($request['principalImage']);
+                if ($image) {
+                    $product->images()->attach($image->id, ['created_at' => now(), 'updated_at' => now(), 'statut' => 2]);
+                }
             } elseif (isset($request['principalImage'])) {
-                $image = Image::find($request['principalImage'])->first();
-                $product->images()->attach($image->id, ['created_at' => now(), 'updated_at' => now(), 'statut' => 1]);
+                $image = Image::find($request['principalImage']);
+                if ($image) {
+                    $product->images()->attach($image->id, ['created_at' => now(), 'updated_at' => now(), 'statut' => 1]);
+                }
             }
             if (isset($request['images'])) {
                 foreach ($request['images'] as $imageInfo) {
-                    $image = Image::find($imageInfo)->first();
-                    $product->images()->attach($image->id, ['created_at' => now(), 'updated_at' => now(), 'statut' => 2]);
+                    $image = Image::find($imageInfo);
+                    if ($image) {
+                        $product->images()->attach($image->id, ['created_at' => now(), 'updated_at' => now(), 'statut' => 2]);
+                    }
                 }
             }
+            $product=Product::find($product->id);
             return $product;
-        });
+        })->filter()->values();
 
         return response()->json([
             'statut' => 1,
@@ -1318,6 +1689,144 @@ class ProductController extends Controller
         return response()->json([
             'statut' => 1,
             'data' => $product,
+        ]);
+    }
+
+    public function updateVariationImages(Request $request, $id)
+    {
+        $product = Product::with('activePvas.imageables')->find($id);
+        if (!$product) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'not exist'
+            ]);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'variations' => 'required|array|min:1',
+            'variations.*.id' => [
+                'required',
+                function ($attribute, $value, $fail) use ($product) {
+                    $exists = $product->activePvas->contains('id', $value);
+                    if (!$exists) {
+                        $fail('not exist');
+                    }
+                },
+            ],
+            'variations.*.images' => 'nullable|array',
+            'variations.*.images.*' => [
+                'integer',
+                function ($attribute, $value, $fail) {
+                    $account = getAccountUser()->account_id;
+                    $image = Image::where(['id' => $value, 'account_id' => $account])->first();
+                    if (!$image) {
+                        $fail('not exist');
+                    }
+                },
+            ],
+            'variations.*.principalImage' => [
+                'nullable',
+                'integer',
+                function ($attribute, $value, $fail) {
+                    $account = getAccountUser()->account_id;
+                    $image = Image::where(['id' => $value, 'account_id' => $account])->first();
+                    if (!$image) {
+                        $fail('not exist');
+                    }
+                },
+            ],
+            'variations.*.newImages' => 'nullable|array',
+            'variations.*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'variations.*.newPrincipalImage' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'statut' => 0,
+                'data' => $validator->errors(),
+            ]);
+        }
+
+        $updatedVariations = collect($request->input('variations', []))->map(function ($variationData) use ($request, $product) {
+            $pva = $product->activePvas->firstWhere('id', $variationData['id']);
+            if (!$pva) {
+                return null;
+            }
+
+            $existingSecondaryIds = collect($variationData['images'] ?? [])->filter()->unique()->values();
+            $existingPrincipalId = $variationData['principalImage'] ?? null;
+
+            $newImageFiles = $request->file('variations.' . $variationData['id'] . '.newImages', []);
+            if (empty($newImageFiles)) {
+                $newImageFiles = $request->file('variations.' . array_search($variationData['id'], array_column($request->input('variations', []), 'id')) . '.newImages', []);
+            }
+
+            $newPrincipalFile = $request->file('variations.' . $variationData['id'] . '.newPrincipalImage');
+            if (!$newPrincipalFile) {
+                $variationIndex = array_search($variationData['id'], array_column($request->input('variations', []), 'id'));
+                if ($variationIndex !== false) {
+                    $newPrincipalFile = $request->file('variations.' . $variationIndex . '.newPrincipalImage');
+                }
+            }
+
+            $imagesPayload = [];
+            foreach ($newImageFiles as $file) {
+                $imagesPayload[] = ['image' => $file];
+            }
+            if ($newPrincipalFile) {
+                $imagesPayload[] = ['image' => $newPrincipalFile, 'as_principal' => true];
+            }
+
+            if (!empty($imagesPayload)) {
+                $imageData = [
+                    'title' => $product->title,
+                    'type' => 'productVariationAttribute',
+                    'image_type_id' => 17,
+                    'images' => $imagesPayload,
+                ];
+                ImageController::store(new Request([$imageData]), $pva, false);
+                $pva->load('images');
+            }
+
+            $currentImageables = $pva->imageables()->get();
+            $desiredSecondaryIds = $existingSecondaryIds->values()->all();
+            $desiredPrincipalId = $existingPrincipalId;
+
+            foreach ($currentImageables as $imageable) {
+                if ($desiredPrincipalId && (int) $imageable->image_id === (int) $desiredPrincipalId) {
+                    $imageable->update(['statut' => 2]);
+                } elseif (in_array((int) $imageable->image_id, array_map('intval', $desiredSecondaryIds), true)) {
+                    $imageable->update(['statut' => 1]);
+                } else {
+                    $imageable->update(['statut' => 0]);
+                }
+            }
+
+            if ($desiredPrincipalId) {
+                $hasPrincipal = $currentImageables->contains('image_id', $desiredPrincipalId);
+                if (!$hasPrincipal) {
+                    $pva->images()->attach($desiredPrincipalId, ['created_at' => now(), 'updated_at' => now(), 'statut' => 2]);
+                }
+            }
+
+            foreach ($desiredSecondaryIds as $imageId) {
+                $hasSecondary = $currentImageables->contains('image_id', $imageId);
+                if (!$hasSecondary) {
+                    $pva->images()->attach($imageId, ['created_at' => now(), 'updated_at' => now(), 'statut' => 1]);
+                }
+            }
+
+            $pva = ProductVariationAttribute::with('principalImage', 'images')->find($pva->id);
+            return [
+                'id' => $pva->id,
+                'principalImage' => $pva->principalImage->first(),
+                'images' => $pva->images->where('pivot.statut', 1)->values(),
+            ];
+        })->filter()->values();
+
+        return response()->json([
+            'statut' => 1,
+            'data' => $updatedVariations,
         ]);
     }
 

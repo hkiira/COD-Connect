@@ -43,6 +43,12 @@ class Product extends Model
         return $this->hasMany(ProductVariationAttribute::class);
     }
 
+    public function activePvas()
+    {
+        return $this->hasMany(ProductVariationAttribute::class)
+            ->where('statut', '!=', 0);
+    }
+
 
     public function price()
     {

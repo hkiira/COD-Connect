@@ -69,7 +69,8 @@ class DefaultCodeController extends Controller
         $defaultCode = DefaultCode::where('controller', $controller)->first();
         if ($defaultCode) {
             $defaultCode->update(['counter' => $defaultCode->counter + 1]);
-            return $defaultCode->prefix . $defaultCode->counter;
+            $random = substr(str_shuffle('ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 0, 5);
+            return $defaultCode->prefix . $defaultCode->counter . "0" . $random;
         }
         return null;
     }
@@ -78,9 +79,10 @@ class DefaultCodeController extends Controller
         $defaultCode = DefaultCode::where('controller', $controller)->first();
         if ($defaultCode) {
             $accountCode = AccountCode::where(['account_id' => $accountId, 'default_code_id' => $defaultCode->id])->first();
+            $random = substr(str_shuffle('ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 0, 5);
             if ($accountCode) {
                 $accountCode->update(['counter' => ($accountCode->counter + 1)]);
-                return $accountCode->prefixe . $accountCode->counter;
+                return $accountCode->prefixe . $accountCode->counter . $random;
             } else {
                 $accountCode = AccountCode::create([
                     "account_id" => $accountId,
@@ -88,7 +90,7 @@ class DefaultCodeController extends Controller
                     "prefixe" => $defaultCode->prefix,
                     "counter" => 1,
                 ]);
-                return $accountCode->prefixe . $accountCode->counter;
+                return $accountCode->prefixe . $accountCode->counter . $random;
             }
         }
         return null;

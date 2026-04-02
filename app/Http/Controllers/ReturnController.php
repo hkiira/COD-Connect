@@ -66,7 +66,22 @@ class ReturnController extends Controller
     public function generatePdf($id)
     {
         $shipment = Shipment::find($id);
-        $deplacement = $shipment->childShipments()->where('shipment_type_id', 2)->first()->mouvement;
+        if (!$shipment) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'shipment not found'
+            ], 404);
+        }
+
+        $returnShipment = $shipment->childShipments()->where('shipment_type_id', 2)->first();
+        if (!$returnShipment || !$returnShipment->mouvement) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'return movement not found'
+            ], 404);
+        }
+
+        $deplacement = $returnShipment->mouvement;
         $total = 0;
         $datas = [
             "code" => $deplacement->code,
@@ -111,10 +126,31 @@ class ReturnController extends Controller
     public function inventoryPdf($id)
     {
         $shipment = Shipment::find($id);
-        $deplacement = $shipment->childShipments()->where('shipment_type_id', 2)->first()->mouvement;
+        if (!$shipment) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'shipment not found'
+            ], 404);
+        }
+
+        $returnShipment = $shipment->childShipments()->where('shipment_type_id', 2)->first();
+        if (!$returnShipment || !$returnShipment->mouvement) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'return movement not found'
+            ], 404);
+        }
+
+        $deplacement = $returnShipment->mouvement;
         $datas = [];
         $datas['code'] = $shipment->code;
         $beforeInventory = $deplacement->inventories()->where('warehouse_id', $deplacement->to_warehouse)->get();
+        if ($beforeInventory->isEmpty()) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'inventory not found'
+            ], 404);
+        }
         $datas['toWarehouse']['title'] = $deplacement->toWarehouse->title;
         foreach ($beforeInventory->first()->inventoryPvas as $inventoryPva) {
             $variations = $inventoryPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVa) {

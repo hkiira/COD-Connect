@@ -47,22 +47,39 @@ class HelperFunctions extends Controller
    */
   public static function filterColumns($filters, $columns)
   {
+    // Query-string payloads can turn nested objects into strings.
+    // Normalize to arrays before accessing offsets.
+    if (!is_array($filters)) {
+      $filters = [];
+    }
+
+    $columnFilters = (isset($filters['filters']) && is_array($filters['filters'])) ? $filters['filters'] : [];
+    $pagination = (isset($filters['pagination']) && is_array($filters['pagination'])) ? $filters['pagination'] : [];
+    $sort = (isset($filters['sort']) && is_array($filters['sort']))
+      ? $filters['sort']
+      : ((isset($filters['multiSort']) && is_array($filters['multiSort'])) ? $filters['multiSort'] : []);
+    $firstSort = (isset($sort[0]) && is_array($sort[0])) ? $sort[0] : [];
+
     // Set the default value for the 'search' filter
     $filters['search'] = isset($filters['search']) ? $filters['search'] : null;
     // Loop through each column and set default values for their filters
     foreach ($columns as $column) {
-      $filters['filters'][$column] = isset($filters['filters'][$column]) ? $filters['filters'][$column] : null;
+      $columnFilters[$column] = isset($columnFilters[$column]) ? $columnFilters[$column] : null;
     }
+    $filters['filters'] = $columnFilters;
 
     // Set default values for date range filters
     $filters['startDate'] = isset($filters['startDate']) ? $filters['startDate'] : null;
     $filters['endDate'] = isset($filters['endDate']) ? $filters['endDate'] : null;
 
     // Set default values for pagination
-    $filters['pagination']['current_page'] = isset($filters['pagination']['current_page']) ? $filters['pagination']['current_page'] : 0;
-    $filters['pagination']['per_page'] = isset($filters['pagination']['per_page']) ? $filters['pagination']['per_page'] : 10;
-    $filters['sort'][0]['column'] = isset($filters['sort'][0]['column']) ? $filters['sort'][0]['column'] : "created_at";
-    $filters['sort'][0]['order'] = isset($filters['sort'][0]['order']) ? $filters['sort'][0]['order'] : "DESC";
+    $pagination['current_page'] = isset($pagination['current_page']) ? $pagination['current_page'] : 0;
+    $pagination['per_page'] = isset($pagination['per_page']) ? $pagination['per_page'] : 10;
+    $firstSort['column'] = isset($firstSort['column']) ? $firstSort['column'] : "created_at";
+    $firstSort['order'] = isset($firstSort['order']) ? $firstSort['order'] : "DESC";
+
+    $filters['pagination'] = $pagination;
+    $filters['sort'] = [$firstSort];
 
     // Return the filtered array of columns
     return $filters;
@@ -71,17 +88,17 @@ class HelperFunctions extends Controller
   public static function getPagination($data, $per_page, $current_page)
   {
     $total_rows = $data->count();
-    $per_page = ($per_page == null or $per_page == 0) ? 10 : $per_page;
-    $pages = ceil($total_rows / $per_page) != 0 ? range(0, ceil($total_rows / $per_page) - 1) : [0];
-   // $current_page = ($current_page == null or $current_page > end($pages))  ? 1 : $current_page + 1;
-    $current_page = ($current_page == null)  ? 1 : $current_page + 1;
+    $per_page = ($per_page == null or $per_page == 0) ? 10 : (int) $per_page;
+    $current_page = ($current_page == null) ? 1 : (int) $current_page + 1;
     $data = $data->forpage($current_page, $per_page)->values();
     return [
       'statut' => 1,
-      'data' => $data,
-      'per_page' => $per_page,
-      'current_page' => $current_page,
-      'total' => $total_rows
+      'data'   => $data,
+      'meta'   => [
+        'total'        => $total_rows,
+        'per_page'     => $per_page,
+        'current_page' => $current_page,
+      ],
     ];
   }
 

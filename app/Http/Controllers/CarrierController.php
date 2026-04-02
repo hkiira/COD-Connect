@@ -62,14 +62,21 @@ class CarrierController extends Controller
         $datas['data'] = collect($datas['data'])->map(function ($data) {
             $carrier = collect($data)->except(['cities', 'addresses', 'phones']);
             $carrier['image'] = ($data->images) ? $data->images->first : [];
-            $carrier['addresses'] = $data->addresses->map(function ($addresse) {
+            $carrier['addresses'] = collect($data->activeAddresses ?? $data->addresses ?? [])->map(function ($addresse) {
                 return ["id" => $addresse->id, "title" => $addresse->title];
             });
-            $carrier['phones'] =  $data->activePhones->map(function ($phone) {
+            $carrier['phones'] = collect($data->activePhones ?? [])->map(function ($phone) {
                 return ["id" => $phone->id, "title" => $phone->title, "phoneTypes" => $phone->phoneTypes];
             });
-            $carrier['cities'] =  $data->cities->map(function ($city) {
-                return ["id" => $city->id, "title" => $city->title];
+            $carrier['cities'] = collect($data->activeCities ?? [])->map(function ($city) {
+                return [
+                    "id"            => $city->id,
+                    "title"         => $city->title,
+                    "name"         => optional($city->pivot)->name,
+                    "price"         => optional($city->pivot)->price,
+                    "return"        => optional($city->pivot)->return,
+                    "delivery_time" => optional($city->pivot)->delivery_time,
+                ];
             });
 
             return $carrier;
@@ -227,45 +234,89 @@ class CarrierController extends Controller
 
     public function edit(Request $request, $id)
     {
-        $request = collect($request->query())->toArray();
+        $params = collect($request->query())->toArray();
+        $data   = [];
 
-        $carrier = carrier::with(['images', 'addresses.city', 'activePhones.PhoneTypes'])->find($id);
-        if (!$carrier)
+        $carrier = Carrier::with(['images', 'addresses.city', 'activePhones.phoneTypes', 'defaultCarriers.city'])->find($id);
+
+        if (!$carrier) {
             return response()->json([
                 'statut' => 0,
-                'data' => 'not exist'
+                'data'   => 'not exist',
             ]);
-        if (isset($request['carrierInfo'])) {
-            $data["carrierInfo"]['data'] = $carrier->only('id', 'title', 'email', 'trackinglink', 'autocode', 'comment', 'statut', 'created_at', 'updated_at', 'code');
-            $data["carrierInfo"]['data']['images'] = $carrier->images;
-            $data["carrierInfo"]['data']['addresses'] = $carrier->addresses;
-            $data["carrierInfo"]['data']['phones'] = $carrier->activePhones;
         }
-        if (isset($request['cities']['active'])) {
-            $model = 'App\\Models\\City';
-            $request['cities']['active']['whereArray'] = ['column' => 'id', 'values' => $carrier->defaultCarriers->pluck('city_id')->toArray()];
-            $data['cities']['active'] = FilterController::searchs(new Request($request['cities']['active']), $model, ['id', 'title'], true);
-            $data['cities']['active']['data'] = collect($data['cities']['active']['data'])->map(function ($city) use ($carrier) {
+
+        if (isset($params['carrierInfo'])) {
+            $carrierData                       = $carrier->only('id', 'title', 'email', 'trackinglink', 'autocode', 'comment', 'statut', 'created_at', 'updated_at', 'code');
+            $carrierData['images']             = $carrier->images;
+            $carrierData['addresses']          = $carrier->addresses;
+            $carrierData['phones']             = $carrier->activePhones;
+            
+            $carrierData['cities'] = collect($carrier->activeCities ?? [])->map(function ($city) {
+                return [
+                    "id"            => $city->id,
+                    "title"         => $city->title,
+                    "name"         => optional($city->pivot)->name,
+                    "price"         => optional($city->pivot)->price,
+                    "return"        => optional($city->pivot)->return,
+                    "delivery_time" => optional($city->pivot)->delivery_time,
+                ];
+            });
+            $data['carrierInfo']['data']       = $carrierData;
+        }
+
+        $activeCityIds = $carrier->defaultCarriers->pluck('city_id')->toArray();
+
+        if (isset($params['cities']['active'])) {
+            $activeParams                   = $params['cities']['active'];
+            $activeParams['whereArray']     = ['column' => 'id', 'values' => $activeCityIds];
+            $result                         = FilterController::searchs(new Request($activeParams), 'App\\Models\\City', ['id', 'title'], true);
+            $result['data']                 = collect($result['data'])->map(function ($city) use ($carrier) {
                 $default = $city->defaultCarriers->where('carrier_id', $carrier->id)->first();
-                if ($default) {
-                    $cityData = $city->only('id', 'title', 'statut', 'created_at', 'updated_at');
-                    $cityData['name'] = $default->name;
-                    $cityData['price'] = $default->price;
-                    $cityData['return'] = $default->return;
-                    $cityData['delivery_time'] = $default->delivery_time;
-                    return $cityData;
+                if (!$default) {
+                    return null;
                 }
+                return array_merge(
+                    $city->only('id', 'title', 'statut', 'created_at', 'updated_at'),
+                    [
+                        'name'          => $default->name,
+                        'price'         => $default->price,
+                        'return'        => $default->return,
+                        'delivery_time' => $default->delivery_time,
+                    ]
+                );
             })->filter()->values();
+            $data['cities']['active'] = $result;
         }
-        if (isset($request['cities']['inactive'])) {
-            $model = 'App\\Models\\City';
-            $request['cities']['inactive']['whereNotArray'] = ['column' => 'id', 'values' => $carrier->defaultCarriers->pluck('city_id')->toArray()];
-            $data['cities']['inactive'] = FilterController::searchs(new Request($request['cities']['inactive']), $model, ['id', 'title'], true);
+
+        if (isset($params['cities']['inactive'])) {
+            $inactiveParams                     = $params['cities']['inactive'];
+            $inactiveParams['whereNotArray']    = ['column' => 'id', 'values' => $activeCityIds];
+            $data['cities']['inactive']         = FilterController::searchs(new Request($inactiveParams), 'App\\Models\\City', ['id', 'title'], true);
+        }
+
+        if (isset($params['cities']['all'])) {
+            $allParams          = $params['cities']['all'];
+            $result             = FilterController::searchs(new Request($allParams), 'App\\Models\\City', ['id', 'title'], true);
+            $defaultsByCity     = $carrier->defaultCarriers->keyBy('city_id');
+            $result['data']     = collect($result['data'])->map(function ($city) use ($carrier, $defaultsByCity) {
+                $default = $defaultsByCity->get($city->id);
+                return array_merge(
+                    $city->only('id', 'title', 'statut', 'created_at', 'updated_at'),
+                    [
+                        'name'          => $default ? $default->name          : null,
+                        'price'         => $default ? $default->price         : null,
+                        'return'        => $default ? $default->return        : null,
+                        'delivery_time' => $default ? $default->delivery_time : null,
+                    ]
+                );
+            })->values();
+            $data['cities']['all'] = $result;
         }
 
         return response()->json([
             'statut' => 1,
-            'data' => $data
+            'data'   => $data,
         ]);
     }
 
@@ -339,7 +390,7 @@ class CarrierController extends Controller
             }
             if (isset($request['addresses'])) {
                 $request_address = new Request($request['addresses']);
-                AddressController::update($request_address, $local = 1, $carrier);
+                 AddressController::update($request_address, $carrier->id, 1, $carrier);
             }
 
             if (isset($request['citiesToInactive'])) {

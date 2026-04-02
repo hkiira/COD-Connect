@@ -144,6 +144,20 @@ class Order extends Model
     {
         return $this->belongsTo(Account::class);
     }
+    public function activePhones()
+    {
+        return $this->morphToMany(Phone::class, 'phoneable')
+            ->wherePivot('statut', 1);
+    }
+    public function images()
+    {
+        return $this->morphToMany(Image::class, 'imageable');
+    }
+    public function activeAddresses()
+    {
+        return $this->morphToMany(Address::class, 'addressable')
+            ->wherePivot('statut', 1);
+    }
 
     public function phones()
     {

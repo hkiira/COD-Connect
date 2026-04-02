@@ -131,17 +131,23 @@ class CustomerController extends Controller
 
     public function show($id)
     {
-        //
+        $customer = Customer::with(['phones.phoneTypes', 'addresses.city', 'images'])->find($id);
+        if (!$customer) {
+            return response()->json(['statut' => 0, 'message' => 'not exist'], 404);
+        }
+        return response()->json(['statut' => 1, 'data' => $customer]);
     }
 
     public function edit(Request $request, $id)
     {
         $request = collect($request->query())->toArray();
-        $customer = Customer::find($id);
-
+        $customer = Customer::with(['phones.phoneTypes', 'addresses.city', 'images'])->find($id);
+        if (!$customer) {
+            return response()->json(['statut' => 0, 'message' => 'not exist'], 404);
+        }
         return response()->json([
             'statut' => 1,
-            'data' => $customer
+            'data' => $customer,
         ]);
     }
 

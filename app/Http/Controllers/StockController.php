@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Product;
+use App\Models\AccountUser;
 use App\Http\Resources\ProductInventoryResource;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class StockController extends Controller
@@ -19,6 +21,17 @@ class StockController extends Controller
             'productVariationAttributes.orderPvas.order.orderStatus',
             'productVariationAttributes.supplierOrderPvas.supplierOrder'
         ]);
+
+        // When authenticated, scope to the caller's account only.
+        // This prevents cross-account data exposure and enables
+        // account-specific pricing / stock data in the response.
+        if (Auth::check()) {
+            $accountUserIds = AccountUser::where('account_id', getAccountUser()->account_id)
+                ->pluck('id')
+                ->toArray();
+            $query->whereIn('account_user_id', $accountUserIds)
+                  ->where('statut', 1);
+        }
 
         // Search Filter
         if ($request->filled('search')) {

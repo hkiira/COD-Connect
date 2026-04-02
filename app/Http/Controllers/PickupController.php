@@ -265,6 +265,12 @@ class PickupController extends Controller
 
                 return $orderData;
             });
+            // Add pagination fields at the root level as well as inside meta
+            if (isset($datas['meta'])) {
+                $datas['total'] = $datas['meta']['total'] ?? null;
+                $datas['per_page'] = $datas['meta']['per_page'] ?? null;
+                $datas['current_page'] = $datas['meta']['current_page'] ?? null;
+            }
             $data['orders']['inactive'] = $datas;
         }
 
@@ -386,6 +392,54 @@ class PickupController extends Controller
         ]);
     }
 
+    public function show($id)
+    {
+        $account_id = getAccountUser()->account_id;
+        $accountUserIds = AccountUser::where(['account_id' => $account_id, 'statut' => 1])->pluck('id')->toArray();
+
+        $pickup = Pickup::with([
+            'carrier.images',
+            'carrier.phones.PhoneTypes',
+            'warehouse',
+            'collector',
+            'accountUser.user.images',
+            'orders.orderPvas',
+        ])->whereIn('account_user_id', $accountUserIds)->find($id);
+
+        if (!$pickup) {
+            return response()->json(['statut' => 0, 'data' => 'not exist'], 404);
+        }
+
+        $total = 0;
+        $shipping = 0;
+        $analytics = ['canceled' => 0, 'delivred' => 0, 'shipped' => 0];
+        $pickup->orders->each(function ($order) use (&$total, &$shipping, &$analytics) {
+            $analytics['canceled'] += in_array($order->order_status_id, [5, 6]) ? 1 : 0;
+            $analytics['delivred'] += in_array($order->order_status_id, [7, 10]) ? 1 : 0;
+            $analytics['shipped']  += in_array($order->order_status_id, [8, 9, 11]) ? 1 : 0;
+            $shipping += $order->carrier_price;
+            $order->orderPvas->each(function ($orderPva) use (&$total) {
+                $total += $orderPva->quantity * $orderPva->price;
+            });
+        });
+
+        $data = $pickup->toArray();
+        $data['user'] = [
+            'id'        => $pickup->accountUser->id,
+            'firstname' => $pickup->accountUser->user->firstname,
+            'lastname'  => $pickup->accountUser->user->lastname,
+            'images'    => $pickup->accountUser->user->images,
+        ];
+        $data['warehouse'] = $pickup->warehouse ? $pickup->warehouse->only('id', 'title') : null;
+        $data['collector'] = $pickup->collector ? $pickup->collector->only('id', 'name') : null;
+        $data['count']     = $pickup->orders->count();
+        $data['total']     = $total;
+        $data['shipping']  = $shipping;
+        $data['analytics'] = $analytics;
+
+        return response()->json(['statut' => 1, 'data' => $data]);
+    }
+
     public function edit(Request $request, $id)
     {
         $request = collect($request->query())->toArray();
@@ -398,6 +452,130 @@ class PickupController extends Controller
             ]);
         if (isset($request['pickupInfo'])) {
             $data["pickupInfo"]['data'] = $pickup;
+            // Add the list of orders in the same structure as active orders
+            $data["pickupInfo"]['orders'] = $pickup->orders->map(function ($order) {
+                $orderData = $order->only('id', 'code', 'pickup_id', 'comment', 'order_id', 'created_at');
+                $orderData['carriers'] = $order->city->activeCarriers->map(function ($carrier) {
+                    return $carrier->only('id', 'title');
+                });
+                $orderData['user'] = $order->userCreated->map(function ($user) {
+                    return [
+                        "id" => $user->id,
+                        "firstname" => $user->user->firstname,
+                        "lastname" => $user->user->lastname,
+                        "images" => $user->user->images,
+                    ];
+                });
+                $orderData['comments'] = $order->lastOrderComments->map(function ($comment) {
+                    return [
+                        "id" => $comment->id,
+                        "title" => $comment->title,
+                        "user" => $comment->accountUser->user,
+                        "status" => $comment->orderStatus,
+                    ];
+                });
+                $orderData['customer'] = $order->customer->only('id', 'name', 'images');
+                $orderData['customer']['phones'] = $order->phones->map(function ($phone) {
+                    return $phone->only('id', 'title');
+                });
+                $orderData['customer']['address'] = $order->addresses->map(function ($address) {
+                    return $address->only('id', 'title', 'city');
+                });
+                $total = 0;
+                $orderData['products'] = $order->productVariationAttributes->map(function ($pva) use (&$total) {
+                    $total += $pva->pivot->price * $pva->pivot->quantity;
+                    $productInfo = [
+                        'id' => $pva->id,
+                        'price' => $pva->pivot->price,
+                        'quantity' => $pva->pivot->quantity,
+                        'images' => $pva->product->images,
+                        'productType' => $pva->product->productType,
+                        'product' => $pva->product->title,
+                        'reference' => $pva->product->reference,
+                        'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
+                            return [
+                                "id" => $child->attribute->id,
+                                "title" => $child->attribute->title,
+                                "typeAttribute" => $child->attribute->typeAttribute->title,
+                            ];
+                        })
+                    ];
+                    return $productInfo;
+                });
+                $orderData['total'] = $total;
+                $orderData['discount'] = $order->discount;
+                $orderData['brand'] = $order->brandSource->brand->only('id', 'title', 'images');
+                $orderData['source'] = $order->brandSource->source->only('id', 'title', 'images');
+                return $orderData;
+            });
+        }
+        if (isset($request['orders']['all'])) {
+            $model = 'App\\Models\\Order';
+            //permet de récupérer la liste des regions all filtrés
+            $request['orders']['all']['inAccount'] = ["account_id", getAccountUser()->account_id];
+            $orders = FilterController::searchs(new Request($request['orders']['all']), $model, ['id', 'code'], true, []);
+            $orders['data'] = collect($orders['data'])->map(function ($data) {
+                $orderData = $data->only('id', 'code', 'pickup_id', 'comment', 'order_id', 'created_at');
+                $orderData['carriers'] = $data->city->activeCarriers->map(function ($carrier) {
+                    return $carrier->only('id', 'title');
+                });
+                $orderData['user'] = $data->userCreated->map(function ($user) {
+                    return [
+                        "id" => $user->id,
+                        "firstname" => $user->user->firstname,
+                        "lastname" => $user->user->lastname,
+                        "images" => $user->user->images,
+                    ];
+                });
+                $orderData['comments'] = $data->lastOrderComments->map(function ($comment) {
+                    return [
+                        "id" => $comment->id,
+                        "title" => $comment->title,
+                        "user" => $comment->accountUser->user,
+                        "status" => $comment->orderStatus,
+                    ];
+                });
+                $orderData['customer'] = $data->customer->only('id', 'name', 'images');
+                $orderData['customer']['phones'] = $data->phones->map(function ($phone) {
+                    return $phone->only('id', 'title');
+                });
+                $orderData['customer']['address'] = $data->addresses->map(function ($address) {
+                    return $address->only('id', 'title', 'city');
+                });
+                $total = 0;
+                $orderData['products'] = $data->productVariationAttributes->map(function ($pva) use (&$total) {
+                    $total += $pva->pivot->price * $pva->pivot->quantity;
+                    $productInfo = [
+                        'id' => $pva->id,
+                        'price' => $pva->pivot->price,
+                        'quantity' => $pva->pivot->quantity,
+                        'images' => $pva->product->images,
+                        'productType' => $pva->product->productType,
+                        'product' => $pva->product->title,
+                        'reference' => $pva->product->reference,
+                        'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
+                            return [
+                                "id" => $child->attribute->id,
+                                "title" => $child->attribute->title,
+                                "typeAttribute" => $child->attribute->typeAttribute->title,
+                            ];
+                        })
+                    ];
+                    return $productInfo;
+                });
+                $orderData['total'] = $total;
+                $orderData['discount'] = $data->discount;
+                $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
+                $orderData['source'] = $data->brandSource->source->only('id', 'title', 'images');
+
+                return $orderData;
+            });
+            if (isset($orders['meta'])) {
+                $orders['total'] = $orders['meta']['total'] ?? null;
+                $orders['per_page'] = $orders['meta']['per_page'] ?? null;
+                $orders['current_page'] = $orders['meta']['current_page'] ?? null;
+            }
+            $data['orders']['all'] =  $orders;
         }
         if (isset($request['orders']['active'])) {
             $model = 'App\\Models\\Order';
@@ -582,7 +760,6 @@ class PickupController extends Controller
                 'data' => $validator->errors(),
             ]);
         };
-
         $pickups = collect($requests->except('_method'))->map(function ($request) {
             $pickup_only = collect($request)->only('id', 'collector_id', 'title', 'comment', 'statut');
             $pickup = Pickup::find($pickup_only['id']);
@@ -600,19 +777,19 @@ class PickupController extends Controller
             }
             if (isset($request['ordersToActive'])) {
                 $orderPvas = $this->validatePickup(new Request($request['ordersToActive']), $pickup);
-                return $orderPvas;
                 if ($pickup->statut = 1) {
                     $productVariationAttributes = [];
                     collect($orderPvas)->flatMap(function ($orderPva) use (&$productVariationAttributes) {
-                        if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
-                            $productVariationAttributes[$orderPva->product_variation_attribute_id]["quantity"] += $orderPva->quantity;
+                        print($orderPva->first()->product_variation_attribute_id);
+                        if (isset($productVariationAttributes[$orderPva->first()->product_variation_attribute_id])) {
+                            $productVariationAttributes[$orderPva->first()->product_variation_attribute_id]["quantity"] += $orderPva->first()->quantity;
                         } else {
-                            $productVariationAttributes[$orderPva->product_variation_attribute_id] = [
-                                "id" => $orderPva->product_variation_attribute_id,
-                                "quantity" => $orderPva->quantity,
+                            $productVariationAttributes[$orderPva->first()->product_variation_attribute_id] = [
+                                "id" => $orderPva->first()->product_variation_attribute_id,
+                                "quantity" => $orderPva->first()->quantity,
                             ];
                         }
-                        $productVariationAttributes[$orderPva->product_variation_attribute_id]['orders'][] = $orderPva->id;
+                        $productVariationAttributes[$orderPva->first()->product_variation_attribute_id]['orders'][] = $orderPva->first()->id;
                     });
                     $pickupData = [
                         'from_warehouse' => $from_warehouse->id,
@@ -625,12 +802,6 @@ class PickupController extends Controller
             }
 
             $pickup = Pickup::with('orders')->find($pickup->id);
-            return $pickup;
-            // a supprimer aprés la fin des tests
-            if ($pickup->carrier_id == 22) {
-                // $asap = new AsapDeliveryController();
-                // $asap->pickup($pickup->id);
-            }
         });
         return response()->json([
             'statut' => 1,

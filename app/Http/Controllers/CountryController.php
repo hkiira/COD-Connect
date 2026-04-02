@@ -14,43 +14,54 @@ class CountryController extends Controller
 {
     public function index(Request $request)
     {
-        $request = collect($request->query())->toArray();
-        $model = 'App\\Models\\Country';
-        if(isset($request['regions'])&& array_filter($request['regions'], function($value) {
-            return $value !== null;
-        })){
-            $associated[]=[
-                'model'=>'App\\Models\\Region',
-                'title'=>'regions',
-                'search'=>true,
-                'column'=>'title',
-                'foreignKey'=>'country_id',
-                'select'=>$request['regions'],
-            ];
-        }else{
-            $associated[]=[
-                'model'=>'App\\Models\\Region',
-                'title'=>'regions',
-                'search'=>true,
-                'column'=>'title',
-                'foreignKey'=>'country_id',
-            ]; 
-        }
-        
-        $associated[]=[
-            'model'=>'App\\Models\\Images',
-            'title'=>'images',
-            'search'=>true,
+        $params      = collect($request->query())->toArray();
+        $search      = $params['search'] ?? null;
+        $sort        = (isset($params['sort'][0]) && is_array($params['sort'][0]))
+                           ? $params['sort'][0]
+                           : ['column' => 'created_at', 'order' => 'DESC'];
+        $perPage     = (int) ($params['pagination']['per_page'] ?? 10);
+        $perPage     = $perPage > 0 ? $perPage : 10;
+        $currentPage = (int) ($params['pagination']['current_page'] ?? 0) + 1;
+        $startDate   = $params['startDate'] ?? null;
+        $endDate     = $params['endDate'] ?? null;
+
+        $selectedRegions = (isset($params['regions']) && is_array($params['regions'])
+            && array_filter($params['regions'], fn($v) => $v !== null))
+            ? $params['regions'] : null;
+
+        $paginated = Country::with(['regions', 'images', 'history'])
+            ->when($search, function ($q) use ($search) {
+                $q->where(function ($sub) use ($search) {
+                    $sub->where('id', 'like', "%{$search}%")
+                        ->orWhere('title', 'like', "%{$search}%");
+                });
+            })
+            ->when($selectedRegions, function ($q) use ($selectedRegions, $search) {
+                $countryIds = Region::whereIn('id', $selectedRegions)->pluck('country_id');
+                if ($search) {
+                    $countryIds = $countryIds->merge(
+                        Region::where('title', 'like', "%{$search}%")->pluck('country_id')
+                    )->unique();
+                    $q->orWhereIn('id', $countryIds->toArray());
+                } else {
+                    $q->whereIn('id', $countryIds->toArray());
+                }
+            })
+            ->when($startDate && $endDate, function ($q) use ($startDate, $endDate) {
+                $q->whereBetween('created_at', ["{$startDate} 00:00:00", "{$endDate} 23:59:59"]);
+            })
+            ->orderBy($sort['column'], $sort['order'])
+            ->paginate($perPage, ['*'], 'page', $currentPage);
+
+        return [
+            'statut' => 1,
+            'data'   => $paginated->items(),
+            'meta'   => [
+                'total'        => $paginated->total(),
+                'per_page'     => $paginated->perPage(),
+                'current_page' => $paginated->currentPage(),
+            ],
         ];
-        $associated[]=[
-            'model'=>'App\\Models\\CountryHistory',
-            'title'=>'history',
-            'search'=>true,
-        ];
-        //permet de récupérer la liste des regions inactive filtrés
-        $countries = FilterController::searchs(new Request($request),$model,['id','title'], true,$associated);
-        
-        return $countries;
     }
 
     /*public function create()
@@ -171,16 +182,22 @@ class CountryController extends Controller
             $info['principalImage']=$country->images;
             $data["countryInfo"]['data']=$info;
         }
-        if (isset($request['regions']['active'])){
-            $model = 'App\\Models\\Region';
-            $request['regions']['active']['where']=['column'=>'country_id','value'=>$country->id];
-            $data['regions']['active'] = FilterController::searchs(new Request($request['regions']['active']),$model,['id','title'], true);
-        }
+        if (isset($request['regions'])) {
+            $model = Region::class;
 
-        if (isset($request['regions']['inactive'])){
-            $model = 'App\\Models\\Region';
-            $request['regions']['inactive']['whereNot']=['column'=>'country_id','value'=>$country->id];
-            $data['regions']['inactive'] = FilterController::searchs(new Request($request['regions']['inactive']),$model,['id','title'], true);
+            $activeRequest = isset($request['regions']['active']) && is_array($request['regions']['active'])
+                ? $request['regions']['active']
+                : [];
+            $inactiveRequest = isset($request['regions']['inactive']) && is_array($request['regions']['inactive'])
+                ? $request['regions']['inactive']
+                : [];
+
+            $activeRequest['where'] = ['column' => 'country_id', 'value' => $country->id];
+            $inactiveRequest['whereNot'] = ['column' => 'country_id', 'value' => $country->id];
+
+            // Always return both paginated blocks so frontend pagination state stays defined.
+            $data['regions']['active'] = FilterController::searchs(new Request($activeRequest), $model, ['id', 'title'], true);
+            $data['regions']['inactive'] = FilterController::searchs(new Request($inactiveRequest), $model, ['id', 'title'], true);
         }
 
 

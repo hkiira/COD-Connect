@@ -17,7 +17,7 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods' => ['*'],
-    'allowed_origins' => ['http://localhost:3002', 'https://space.codconnect.com', 'https://mini.codconnect.com'],
+    'allowed_origins' => ['http://localhost:3002','http://localhost:3032', 'https://space.codconnect.com', 'https://mini.codconnect.com'],
     'allowed_origins_patterns' => [],
     'allowed_headers' => ['*'],
     'exposed_headers' => [],

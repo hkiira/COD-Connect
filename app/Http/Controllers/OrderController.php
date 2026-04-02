@@ -37,12 +37,20 @@ class OrderController extends Controller
     {
 
         $request = collect($request->query())->toArray();
-        $filter=[];
-        if (isset($request['pagination']) ) {
-            $filter['limit']=isset($request['pagination']['per_page'])?$request['pagination']['per_page']:10;
-            $filter['page']=isset($request['pagination']['current_page'])?$request['pagination']['current_page']:0;
-            $filter['sort']['by']=isset($request['sort'][0]['column'])?$request['sort'][0]['column']:'created_at';
-            $filter['sort']['order']=isset($request['sort'][0]['order'])?$request['sort'][0]['order']:'desc';
+        $filter = [];
+        if (isset($request['pagination'])) {
+            $filter['limit'] = isset($request['pagination']['per_page']) ? $request['pagination']['per_page'] : 10;
+            $filter['page'] = isset($request['pagination']['current_page']) ? $request['pagination']['current_page'] : 0;
+            if (isset($request['sort']) && isset($request['sort'][0]['column'])) {
+                $filter['sort']['by'] = $request['sort'][0]['column'];
+            } else {
+                $filter['sort']['by'] = 'created_at';
+            }
+            if (isset($request['sort']) && isset($request['sort'][0]['order'])) {
+                $filter['sort']['order'] = $request['sort'][0]['order'];
+            } else {
+                $filter['sort']['order'] = 'desc';
+            }
         }
 
 
@@ -145,7 +153,7 @@ class OrderController extends Controller
             $orderData['comments'] = $data->lastOrderComments()->where('type', 'comment')->get()->map(function ($comment) {
                 $data = [
                     "id" => $comment->id,
-                    "comment" => $comment->comment_id."",
+                    "comment" => $comment->comment_id,
                     "title" => $comment->title,
                     "created_at" => $comment->created_at,
                     "user" => $comment->accountUser->user,
@@ -154,13 +162,18 @@ class OrderController extends Controller
                 $data["status"]['created_at'] = $comment->created_at;
                 return $data;
             });
-            $orderData['customer'] = $data->customer->only('id', 'name', 'images');
-            $orderData['customer']['phones'] = $data->customer->phones->map(function ($phone) {
-                return $phone->only('id', 'title');
-            });
-            $orderData['customer']['address'] = $data->customer->addresses->map(function ($address) {
-                return $address->only('id', 'title', 'city');
-            });
+            if ($data->customer) {
+                $orderData['customer'] = $data->customer->only('id', 'name');
+                $orderData['customer']['images'] = $data->customer->images;
+                $orderData['customer']['phones'] = $data->customer->phones->map(function ($phone) {
+                    return $phone->only('id', 'title');
+                });
+                $orderData['customer']['address'] = $data->customer->addresses->map(function ($address) {
+                    return $address->only('id', 'title', 'city');
+                });
+            } else {
+                $orderData['customer'] = ['id' => null, 'name' => null, 'images' => [], 'phones' => [], 'address' => []];
+            }
             $totalOrder = 0;
             $orderData['products'] = ($data->order_status_id==2 ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
                 $totalOrder += $actfOrderPva->price * $actfOrderPva->quantity;
@@ -205,7 +218,7 @@ class OrderController extends Controller
         return [
             'statut' => 1,
             'data' => $datas,
-            'per_page' => (string)($filter['limit'] ?? 10),
+            'per_page' => (int)($filter['limit'] ?? 10),
             'current_page' => (int)($filter['page'] ?? 0) + 1,
             'total' => $total,
             'score' => 30
@@ -842,7 +855,7 @@ class OrderController extends Controller
             "sender_mail" => $order->brandSource->brand->email,
             "sender_phone" => $order->brandSource->brand,
             "customer" => $order->customer->name,
-            "address" => $order->addresses->first()->title . "-" . $order->city->title,
+            "address" => ($order->addresses->first()?->title ?? '') . "-" . ($order->city?->title ?? ''),
             "phones" => $order->phones->map(function ($phone) {
                 return $phone->title;
             }),
@@ -898,20 +911,26 @@ class OrderController extends Controller
             ]);
         if (isset($request['orderInfo'])) {
             $data['orderInfo'] = $order->only(['id', 'code', 'shipping_code', 'discount', 'created_at', 'updated_at']);
-            $data['orderInfo']['customer'] = $order->customer->only('id', 'name', 'note');
-            $data['orderInfo']['customer']['addresses'] = $order->customer->addresses->map(function ($address) {
-                $addressData = $address->only('id', 'title');
-                $addressData['city'] = $address->city->only('id', 'title');
-                return $addressData;
-            });
-            $data['orderInfo']['customer']['phones'] = $order->customer->phones->map(function ($phone) {
-                $phoneData = $phone->only('id', 'title');
-                $phoneData['phoneTypes'] = $phone->phoneTypes->map(function ($phoneType) {
-                    $phoneTypeData = $phoneType->only('id', 'title');
-                    return $phoneTypeData;
-                });
-                return $phoneData;
-            });
+            $orderCustomer = $order->customer;
+            $data['orderInfo']['customer'] = $orderCustomer
+                ? $orderCustomer->only('id', 'name', 'note')
+                : ['id' => null, 'name' => null, 'note' => null];
+            $data['orderInfo']['customer']['addresses'] = $orderCustomer
+                ? $orderCustomer->addresses->map(function ($address) {
+                    $addressData = $address->only('id', 'title');
+                    $addressData['city'] = $address->city ? $address->city->only('id', 'title') : null;
+                    return $addressData;
+                })
+                : [];
+            $data['orderInfo']['customer']['phones'] = $orderCustomer
+                ? $orderCustomer->phones->map(function ($phone) {
+                    $phoneData = $phone->only('id', 'title');
+                    $phoneData['phoneTypes'] = $phone->phoneTypes->map(function ($phoneType) {
+                        return $phoneType->only('id', 'title');
+                    });
+                    return $phoneData;
+                })
+                : [];
             $data['orderInfo']['warehouse'] = $order->warehouse;
             $data['orderInfo']['payment_type'] = $order->paymentType->only('id', 'title');
             if ($order->shipment)
@@ -922,15 +941,21 @@ class OrderController extends Controller
             $data['orderInfo']['source'] = ["id" => $order->brandSource['id'], "title" => $order->brandSource->source['title']];
             $data['orderInfo']['brand'] = $order->brandSource->brand->only('id', 'title');
             $data['orderInfo']['order_status'] = $order->orderStatus->only('id', 'title');
-            $data['orderInfo']['address'] = (count($order->addresses) > 0) ? $order->addresses->first()->only('id', 'title') : $order->parentOrder->addresses->first()->only('id', 'title');
-            $data['orderInfo']['city'] = $order->city->only('id', 'title');
-            $data['orderInfo']['phone'] = (count($order->phones) > 0) ? $order->phones->first()->phoneTypes->map(function ($phoneType) {
-                $phoneTypeData = $phoneType->only('id', 'title');
-                return $phoneTypeData;
-            }) : $order->parentOrder->phones->first()->phoneTypes->map(function ($phoneType) {
-                $phoneTypeData = $phoneType->only('id', 'title');
-                return $phoneTypeData;
-            });
+            $data['orderInfo']['address'] = (count($order->addresses) > 0)
+                ? $order->addresses->first()->only('id', 'title')
+                : ($order->parentOrder && count($order->parentOrder->addresses) > 0
+                    ? $order->parentOrder->addresses->first()->only('id', 'title')
+                    : null);
+            $data['orderInfo']['city'] = $order->city?->only('id', 'title');
+            $data['orderInfo']['phone'] = (count($order->phones) > 0)
+                ? $order->phones->first()->phoneTypes->map(function ($phoneType) {
+                    return $phoneType->only('id', 'title');
+                })
+                : ($order->parentOrder && count($order->parentOrder->phones) > 0
+                    ? $order->parentOrder->phones->first()->phoneTypes->map(function ($phoneType) {
+                        return $phoneType->only('id', 'title');
+                    })
+                    : []);
         }
         if (isset($request['products']['active'])) {
             // Récupérer les produits du fournisseur avec leurs attributs de variation et types d'attributs

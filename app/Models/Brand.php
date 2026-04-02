@@ -27,7 +27,23 @@ class Brand extends Model
     }
     public function sources()
     {
-        return $this->belongsToMany(Source::class)->withPivot('id');
+        return $this->belongsToMany(Source::class)->withPivot('id', 'statut');
+    }
+
+    public function activeSources()
+    {
+        return $this->belongsToMany(Source::class)->withPivot('id', 'statut')->wherePivot('statut', 1);
+    }
+
+    public function phones()
+    {
+        return $this->morphToMany(Phone::class, 'phoneable');
+    }
+
+    public function activePhones()
+    {
+        return $this->morphToMany(Phone::class, 'phoneable')
+            ->wherePivot('statut', 1);
     }
 
     public function compensationable()

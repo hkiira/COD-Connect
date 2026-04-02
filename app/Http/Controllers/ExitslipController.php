@@ -122,19 +122,27 @@ class ExitslipController extends Controller
         $deplacement = $pickup->mouvement;
         $datas = [];
         $datas['code'] = $pickup->code;
+        if (!$deplacement) {
+            return response()->json([
+                'statut' => 0,
+                'error' => 'No mouvement found for this pickup.'
+            ], 404);
+        }
         $beforeInventory = $deplacement->inventories()->where('warehouse_id', $deplacement->from_warehouse)->get();
         $datas['fromWarehouse']['title'] = $deplacement->fromWarehouse->title;
-        foreach ($beforeInventory->first()->inventoryPvas as $inventoryPva) {
-            $variations = $inventoryPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVa) {
-                return $childVa->attribute->title;
-            });
-            $datas['fromWarehouse']['products'][$inventoryPva->product_variation_attribute_id] = [
-                "title" => $inventoryPva->productVariationAttribute->product->title . ' : ' . implode(", ", $variations->toArray()),
-                "before" => $inventoryPva->quantity,
-            ];
-        }
-        foreach ($beforeInventory->last()->inventoryPvas as $inventoryPva) {
-            $datas['fromWarehouse']['products'][$inventoryPva->product_variation_attribute_id]['after'] = $inventoryPva->quantity;
+        if ($beforeInventory->isNotEmpty()) {
+            foreach ($beforeInventory->first()->inventoryPvas as $inventoryPva) {
+                $variations = $inventoryPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVa) {
+                    return $childVa->attribute->title;
+                });
+                $datas['fromWarehouse']['products'][$inventoryPva->product_variation_attribute_id] = [
+                    "title" => $inventoryPva->productVariationAttribute->product->title . ' : ' . implode(", ", $variations->toArray()),
+                    "before" => $inventoryPva->quantity,
+                ];
+            }
+            foreach ($beforeInventory->last()->inventoryPvas as $inventoryPva) {
+                $datas['fromWarehouse']['products'][$inventoryPva->product_variation_attribute_id]['after'] = $inventoryPva->quantity;
+            }
         }
         $afterInventory = $deplacement->inventories()->where('warehouse_id', $deplacement->to_warehouse)->get();
 

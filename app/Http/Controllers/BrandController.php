@@ -49,7 +49,22 @@ class BrandController extends Controller
             'title' => 'images',
             'search' => true,
         ];
+        $associated[] = [
+            'model' => 'App\\Models\\Phone',
+            'title' => 'activePhones',
+            'search' => false,
+        ];
         $datas = FilterController::searchs(new Request($request), $model, ['id', 'title'], true, $associated);
+
+        if (isset($datas['data'])) {
+            $datas['data'] = collect($datas['data'])->map(function ($brand) {
+                $brand = is_array($brand) ? $brand : $brand->toArray();
+                $brand['phones'] = collect($brand['active_phones'] ?? [])->unique('title')->values()->toArray();
+                unset($brand['active_phones']);
+                return $brand;
+            })->values();
+        }
+
         return $datas;
     }
 
@@ -73,6 +88,7 @@ class BrandController extends Controller
 
     public static function store(Request $requests)
     {
+        $phoneableType = "App\Models\Brand";
         $validator = Validator::make($requests->except('_method'), [
             '*.title' => [
                 'required',
@@ -102,6 +118,22 @@ class BrandController extends Controller
                     $fail('not exist');
                 }
             }],
+            '*.phones.*.title' => [
+                'string',
+                function ($attribute, $value, $fail) use ($phoneableType) {
+                    $account = getAccountUser()->account_id;
+                    $phone = \App\Models\Phone::where(['title' => $value, 'account_id' => $account])->first();
+                    if ($phone) {
+                        $isUnique = \App\Models\Phoneable::where('phone_id', $phone->id)
+                            ->where('phoneable_type', $phoneableType)
+                            ->first();
+                        if ($isUnique) {
+                            $fail("A phone '$value' number already taken.");
+                        }
+                    }
+                },
+            ],
+            '*.phones.*.phoneTypes.*' => 'required|exists:phone_types,id',
             '*.email' => 'max:255|email',
             '*.website' => 'max:255|url',
             '*.statut' => 'required',
@@ -119,6 +151,10 @@ class BrandController extends Controller
             $brand_all = collect($request)->all();
             $brand_only = collect($request)->only('code', 'title', 'statut', 'account_id', 'email', 'website');
             $brand = Brand::create($brand_only->all());
+            if (isset($request['phones'])) {
+                $request_phone = new Request($request['phones']);
+                $phone = PhoneController::store($request_phone, $local = 1, $brand);
+            }
             if (isset($request['principalImage'])) {
                 $image = Image::find($request['principalImage']);
                 $brand->images()->syncWithoutDetaching([
@@ -144,7 +180,7 @@ class BrandController extends Controller
                     $source->save();
                 }
             }
-            $brand = Brand::with('images', 'sources')->find($brand->id);
+            $brand = Brand::with('images', 'sources', 'phones.phoneTypes')->find($brand->id);
             return $brand;
         });
 
@@ -164,15 +200,19 @@ class BrandController extends Controller
     {
         $request = collect($request->query())->toArray();
         $data = [];
-        $brand = Brand::with('images')->find($id);
+        $brand = Brand::with('images', 'activeSources', 'activePhones.phoneTypes')->find($id);
         if (!$brand)
             return response()->json([
                 'statut' => 0,
                 'data' => 'not exist'
             ]);
         if (isset($request['brandInfo'])) {
-            $info = collect($brand)->except('images')->toArray();
+            $info = collect($brand)->except('images', 'active_sources', 'active_phones')->toArray();
             $info['principalImage'] = $brand->images;
+            $info['sources'] = $brand->activeSources->map(function ($source) {
+                return $source->only('id', 'title');
+            })->values();
+            $info['phones'] = $brand->activePhones->unique('title')->values();
             $data["brandInfo"]['data'] = $info;
         }
 
@@ -190,6 +230,13 @@ class BrandController extends Controller
             $data['sources']['inactive'] = FilterController::searchs(new Request($request['sources']['inactive']), $model, ['id', 'title'], true, [['model' => 'App\\Models\\Brand', 'title' => 'brands', 'search' => false], ['model' => 'App\\Models\\Images', 'title' => 'images', 'search' => true]]);
         }
 
+        if (isset($request['sources']['all'])) {
+            $model = 'App\\Models\\Source';
+            $request['sources']['all']['inAccount'] = ['account_id', getAccountUser()->account_id];
+            $request['sources']['all']['statut'] = 1;
+            $data['sources']['all'] = FilterController::searchs(new Request($request['sources']['all']), $model, ['id', 'title'], true, [['model' => 'App\\Models\\Brand', 'title' => 'brands', 'search' => false], ['model' => 'App\\Models\\Images', 'title' => 'images', 'search' => true]]);
+        }
+
         return response()->json([
             'statut' => 1,
             'data' => $data
@@ -198,6 +245,7 @@ class BrandController extends Controller
 
     public function update(Request $requests, $id)
     {
+        $phoneableType = "App\Models\Brand";
         $validator = Validator::make($requests->except('_method'), [
             '*.id' => 'required|exists:brands,id',
             '*.title' => [ // Validate title field
@@ -227,6 +275,25 @@ class BrandController extends Controller
                 },
             ],
             '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            '*.phones.*.title' => [
+                'string',
+                function ($attribute, $value, $fail) use ($phoneableType, $requests) {
+                    $index = str_replace(['*', '.title'], '', $attribute);
+                    $phoneable_id = $requests->input("{$index}.id");
+                    $account = getAccountUser()->account_id;
+                    $phone = \App\Models\Phone::where(['title' => $value, 'account_id' => $account])->first();
+                    if ($phone) {
+                        $isUnique = \App\Models\Phoneable::where('phone_id', $phone->id)
+                            ->where('phoneable_type', $phoneableType)
+                            ->where('phoneable_id', $phoneable_id)
+                            ->first();
+                        if ($isUnique) {
+                            $fail("A phone '$value' number already taken.");
+                        }
+                    }
+                },
+            ],
+            '*.phones.*.phoneTypes.*' => 'required|exists:phone_types,id',
             '*.sourcesToActive.*' => [function ($attribute, $value, $fail) use ($requests) {
                 $account_id = getAccountUser()->account_id;
                 $sourceExist = Source::where(['account_id' => $account_id, 'id' => $value])->first();
@@ -253,6 +320,10 @@ class BrandController extends Controller
             $brand_all = collect($request)->all();
             $brand = Brand::find($brand_all['id']);
             $brand->update($brand_all);
+            if (isset($request['phones'])) {
+                $request_phone = new Request($request['phones']);
+                $phone = PhoneController::store($request_phone, $local = 1, $brand);
+            }
             if (isset($brand_all['sourcesToInactive'])) {
                 foreach ($brand_all['sourcesToInactive'] as $key => $sourceId) {
                     $source = Source::find($sourceId);
@@ -290,7 +361,7 @@ class BrandController extends Controller
                 ];
                 $brand_image = ImageController::store(new Request([$imageData]), $brand);
             }
-            $brand = Brand::with('images', 'sources')->find($brand->id);
+            $brand = Brand::with('images', 'sources', 'phones.phoneTypes')->find($brand->id);
             return $brand;
         });
 

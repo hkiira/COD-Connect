@@ -162,15 +162,18 @@ class sourceController extends Controller
     {
         $request = collect($request->query())->toArray();
         $data = [];
-        $source = Source::with('images')->find($id);
+        $source = Source::with('images', 'brands')->find($id);
         if (!$source)
             return response()->json([
                 'statut' => 0,
                 'data' => 'not exist'
             ]);
         if (isset($request['sourceInfo'])) {
-            $info = collect($source)->except('images')->toArray();
+            $info = collect($source)->except('images', 'brands')->toArray();
             $info['principalImage'] = $source->images;
+            $info['brands'] = $source->brands->map(function ($brand) {
+                return $brand->only('id', 'title');
+            })->values();
             $data["sourceInfo"]['data'] = $info;
         }
         if (isset($request['brands']['active'])) {
@@ -185,6 +188,13 @@ class sourceController extends Controller
             $request['brands']['inactive']['whereNotIn'][0] = ['table' => 'sources', 'column' => 'source_id', 'value' => $source->id];
             $request['brands']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
             $data['brands']['inactive'] = FilterController::searchs(new Request($request['brands']['inactive']), $model, ['id', 'title'], true, [['model' => 'App\\Models\\Source', 'title' => 'sources', 'search' => false], ['model' => 'App\\Models\\Images', 'title' => 'images', 'search' => true]]);
+        }
+
+        if (isset($request['brands']['all'])) {
+            $model = 'App\\Models\\Brand';
+            $request['brands']['all']['inAccount'] = ['account_id', getAccountUser()->account_id];
+            $request['brands']['all']['statut'] = 1;
+            $data['brands']['all'] = FilterController::searchs(new Request($request['brands']['all']), $model, ['id', 'title'], true, [['model' => 'App\\Models\\Source', 'title' => 'sources', 'search' => false], ['model' => 'App\\Models\\Images', 'title' => 'images', 'search' => true]]);
         }
 
         return response()->json([

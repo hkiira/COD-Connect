@@ -13,55 +13,45 @@ use Illuminate\Support\Facades\Validator;
 class CityController extends Controller
 {
 
-    public static function index(Request $request)
+    public function index(Request $request)
     {
-        $request = collect($request->query())->toArray();
-        $associated=[];
-        $model = 'App\\Models\\City';
-        //permet de récupérer la liste des regions inactive filtrés
-        if(isset($request['regions']) && array_filter($request['regions'], function($value) {
-            return $value !== null;
-        })){
-            $associated[]=[
-                'model'=>'App\\Models\\Region',
-                'title'=>'region',
-                'search'=>true,
-                'column'=>'title',
-                'foreignKey'=>'region_id',
-                'parent'=>['column'=>'title','key'=>'id'],
-                'select'=>array_filter($request['regions'], function($value) {
-                    return $value !== null;
-                }),
-            ];
-        }else{
-            $associated[]=[
-                'model'=>'App\\Models\\Region',
-                'title'=>'region',
-                'search'=>true,
-            ];
-        }
-        if(isset($request['sectors'])&& array_filter($request['sectors'], function($value) {
-            return $value !== null;
-        })){
-            $associated[]=[
-                'model'=>'App\\Models\\Sector',
-                'title'=>'sectors',
-                'search'=>true,
-                'column'=>'title',
-                'foreignKey'=>'city_id',
-                'select'=>$request['sectors'],
-            ];
-        }else{
-            $associated[]=[
-                'model'=>'App\\Models\\Sector',
-                'title'=>'sectors',
-                'search'=>true,
-                'column'=>'title',
-                'foreignKey'=>'city_id',
-            ]; 
-        }
-        $datas = FilterController::searchs(new Request($request),$model,['id','title'], true,$associated);
-        return $datas;
+        $queryParams = $request->query();
+        $associated = [];
+
+        // Build regions association
+        $regions = collect($queryParams)->get('regions');
+        $filteredRegions = $regions ? array_filter($regions, fn($value) => $value !== null) : [];
+        
+        $associated[] = [
+            'model' => 'App\\Models\\Region',
+            'title' => 'region',
+            'search' => true,
+            'column' => 'title',
+            'foreignKey' => 'region_id',
+            'parent' => ['column' => 'title', 'key' => 'id'],
+            ...(! empty($filteredRegions) ? ['select' => $filteredRegions] : []),
+        ];
+
+        // Build sectors association
+        $sectors = collect($queryParams)->get('sectors');
+        $hasSectorFilters = $sectors && array_filter($sectors, fn($value) => $value !== null);
+        
+        $associated[] = [
+            'model' => 'App\\Models\\Sector',
+            'title' => 'sectors',
+            'search' => true,
+            'column' => 'title',
+            'foreignKey' => 'city_id',
+            ...($hasSectorFilters ? ['select' => $sectors] : []),
+        ];
+
+        return FilterController::searchs(
+            new Request($queryParams),
+            City::class,
+            ['id', 'title'],
+            true,
+            $associated
+        );
     }
     public function create(Request $request)
     {

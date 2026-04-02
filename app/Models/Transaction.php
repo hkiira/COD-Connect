@@ -31,7 +31,7 @@ class Transaction extends Model
     {
         return $this->belongsTo(AccountUser::class);
     }
-
+    
     public function expense()
     {
         return $this->belongsTo(Expense::class, 'transaction_id', 'id');

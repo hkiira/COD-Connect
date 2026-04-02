@@ -43,7 +43,7 @@ class FilterController extends Controller
 
         // organiser les colonnes
         $filters = HelperFunctions::filterColumns($request->toArray(), $columns);
-        $modelToSearch = [];
+        $modelToSearch = collect();
         // array pour récupérer la liste des modéles a appeler avec le modéle principale
         $withObjects = [];
         $isSelect = false;
@@ -89,7 +89,7 @@ class FilterController extends Controller
         }
         //recherche pour récupérer l'ensemble des enregistrement
         $objects = $model::with(collect($withObjects)->unique()->toArray())
-            ->when(($columns), function ($query) use ($columns, $filters) {
+            ->when(($columns && $filters['search']), function ($query) use ($columns, $filters) {
                 $query->where(function ($subQuery) use ($columns, $filters) {
                     foreach ($columns as $column) {
                         $subQuery->orWhere($column, 'like', "%{$filters['search']}%");
@@ -139,8 +139,10 @@ class FilterController extends Controller
             })
             // pour récupérer seulement les objets qui ont une condition je l'utilise pour edit pour afficher seulement les objects inactif qui n'ont pas relation un table pivot
             ->when(isset($filters['whereNot']), function ($query) use ($filters) {
-                $query->where($filters['whereNot']['column'], '!=', $filters['whereNot']['value'])
-                    ->orWhere($filters['whereNot']['column'], NULL);
+                $query->where(function ($subQuery) use ($filters) {
+                    $subQuery->where($filters['whereNot']['column'], '!=', $filters['whereNot']['value'])
+                        ->orWhereNull($filters['whereNot']['column']);
+                });
             })
             ->when(isset($filters['whereNotArray']), function ($query) use ($filters) {
                 $query->whereNotIn($filters['whereNotArray']['column'],  $filters['whereNotArray']['values']);
@@ -173,11 +175,10 @@ class FilterController extends Controller
             ->get();
         //si la pagination est demander on appel la fonction getPagination pour la faire sinon on va envoyer selement l'objet sans rien modifier
         if ($paginate == true) {
-            $dataPagination =  HelperFunctions::getPagination(collect($objects), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
-            return $dataPagination;
-        } else {
-            return $objects;
+            return HelperFunctions::getPagination(collect($objects), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
+
+        return $objects;
     }
 
     public static function getCombinations($arrays, $current = array(), $index = 0)
@@ -295,7 +296,7 @@ class FilterController extends Controller
                 $selectElement = ['id', 'title', 'symbol'];
                 break;
             case 'compensation_goals':
-                $object = "App\\Models\\CompensationGoal";
+                $object = "App\\Models\\Compensati onGoal";
                 break;
             case 'sources':
                 $object = "App\\Models\\Source";
@@ -481,7 +482,7 @@ class FilterController extends Controller
             $result = $object::find($id);
             $pvas = [];
             if ($result)
-                $pvas = $result->productVariationAttributes->flatMap(function ($pva) {
+                $pvas = $result->activePvas->flatMap(function ($pva) {
                     return $pva->variationAttribute->childVariationAttributes->map(function ($variationAttribute) {
                         return ["id" => $variationAttribute->attribute->id, "title" => $variationAttribute->attribute->title, "typeId" => $variationAttribute->attribute->typeAttribute->id, "typeTitle" => $variationAttribute->attribute->typeAttribute->title];
                     });
@@ -738,6 +739,12 @@ class FilterController extends Controller
                     return $result->only('id', 'title');
                 })->values();
                 return ["statut" => 1, "type" => $model, "data" => $datas->toArray()];
+            case 'type_phones':
+                $object = "App\\Models\\PhoneTypes";
+                $conditions[] = ['column' => 'account_id', 'value' => null];
+                $conditions[] = ['column' => 'account_id', 'value' => getAccountUser()->account_id];
+                $selectElement = ['id', 'title'];
+                break;
             case 'phone_types':
                 $object = "App\\Models\\PhoneTypes";
                 $conditions[] = ['column' => 'account_id', 'value' => null];
@@ -1011,7 +1018,7 @@ class FilterController extends Controller
                 $object = "App\\Models\\Product";
                 if ($id) {
                     $result = $object::find($id);
-                    $pvas = $result->productVariationAttributes->flatMap(function ($pva) {
+                    $pvas = $result->activePvas->flatMap(function ($pva) {
                         return $pva->variationAttribute->childVariationAttributes->map(function ($variationAttribute) {
                             return ["id" => $variationAttribute->attribute->id, "code" => $variationAttribute->attribute->code, "title" => $variationAttribute->attribute->title, "typeId" => $variationAttribute->attribute->typeAttribute->id, "typeTitle" => $variationAttribute->attribute->typeAttribute->title];
                         });

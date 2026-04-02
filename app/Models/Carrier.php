@@ -64,4 +64,11 @@ class Carrier extends Model
             ->withPivot('delivery_time', 'price', 'return', 'statut')
             ->withTimestamps();
     }
+    public function activeCities()
+    {
+        return $this->belongsToMany(City::class, 'default_carriers')
+            ->withPivot('delivery_time', 'price', 'name', 'return', 'statut')
+            ->wherePivot('statut', 1)
+            ->withTimestamps();
+    }
 }

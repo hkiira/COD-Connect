@@ -10,6 +10,7 @@ use App\Models\Taxonomy;
 use App\Models\Brand;
 use App\Models\Source;
 use App\Models\CustomerType;
+use App\Models\Customer;
 use App\Models\City;
 use App\Models\Region;
 use App\Models\Country;
@@ -18,6 +19,7 @@ use App\Models\OfferType;
 use App\Models\ProductVariationAttribute;
 use App\Models\Image;
 use App\Models\AccountUser;
+use App\Http\Resources\OfferCreateDataResource;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 
@@ -189,7 +191,6 @@ class OfferController extends Controller
         ];
         $model = 'App\\Models\\Offer';
         $request['inAccount'] = ['account_id', getAccountUser()->account_id];
-        $request['whereNot'] = ['column' => 'offer_type_id', 'value' => 1];
         $dataswithoutPvas = FilterController::searchs(new Request($request), $model, ['id', 'title'], false, $associated);
         $datas = collect($dataswithoutPvas)->map(function ($data) {
             $pvas = $data->productVariationAttributes->map(function ($pva) {
@@ -294,6 +295,206 @@ class OfferController extends Controller
         ]);
     }
 
+    public function createData(Request $request)
+    {
+        $sections = $this->offerCreateSectionsConfig();
+        $validator = $this->validateOfferCreateRequest($request, array_keys($sections));
+
+        if ($validator->fails()) {
+            return response()->json([
+                'statut' => 0,
+                'data' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $request->query();
+        $responseData = [];
+
+        foreach ($sections as $section => $config) {
+            $inactiveFilters = data_get($payload, $section . '.inactive', []);
+            $responseData[$section] = [
+                'inactive' => $this->fetchOfferCreateSectionData($config, is_array($inactiveFilters) ? $inactiveFilters : []),
+            ];
+        }
+
+        return new OfferCreateDataResource([
+            'statut' => 1,
+            'data' => $responseData,
+        ]);
+    }
+
+    private function validateOfferCreateRequest(Request $request, array $sections)
+    {
+        $rules = [];
+
+        foreach ($sections as $section) {
+            $prefix = $section . '.inactive';
+            $rules[$prefix . '.search'] = ['nullable', 'string', 'max:255'];
+            $rules[$prefix . '.pagination.current_page'] = ['nullable', 'integer', 'min:0', 'max:10000'];
+            $rules[$prefix . '.pagination.per_page'] = ['nullable', 'integer', 'min:1', 'max:100'];
+            $rules[$prefix . '.sort'] = ['nullable', 'array'];
+            $rules[$prefix . '.sort.0.column'] = ['nullable', 'string', 'max:64'];
+            $rules[$prefix . '.sort.0.order'] = ['nullable', 'in:ASC,DESC,asc,desc'];
+        }
+
+        return Validator::make($request->query(), $rules);
+    }
+
+    private function offerCreateSectionsConfig(): array
+    {
+        $accountUser = getAccountUser();
+        $accountId = $accountUser->account_id;
+        $accountUserIds = AccountUser::where('account_id', $accountId)->pluck('id')->toArray();
+
+        return [
+            'brands' => [
+                'model' => Brand::class,
+                'with' => ['sources'],
+                'search_columns' => ['title'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+                'query' => function ($query) use ($accountId) {
+                    $query->where('account_id', $accountId);
+                },
+            ],
+            'sources' => [
+                'model' => Source::class,
+                'with' => ['brands'],
+                'search_columns' => ['title'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+                'query' => function ($query) use ($accountId) {
+                    $query->where('account_id', $accountId);
+                },
+            ],
+            'customerTypes' => [
+                'model' => CustomerType::class,
+                'with' => ['customers'],
+                'search_columns' => ['title'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+                'query' => function ($query) use ($accountUserIds) {
+                    $query->whereIn('account_user_id', $accountUserIds);
+                },
+            ],
+            'customers' => [
+                'model' => Customer::class,
+                'with' => ['customerType'],
+                'search_columns' => ['name'],
+                'sortable_columns' => ['id', 'name', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+                'query' => function ($query) use ($accountId) {
+                    $query->where('account_id', $accountId);
+                },
+            ],
+            'cities' => [
+                'model' => City::class,
+                'with' => ['region.country'],
+                'search_columns' => ['title'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+            ],
+            'regions' => [
+                'model' => Region::class,
+                'with' => ['country'],
+                'search_columns' => ['title'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+            ],
+            'countries' => [
+                'model' => Country::class,
+                'with' => ['regions'],
+                'search_columns' => ['title'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+            ],
+            'warehouses' => [
+                'model' => Warehouse::class,
+                'with' => ['parentWarehouse'],
+                'search_columns' => ['title'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+                'query' => function ($query) use ($accountId) {
+                    $query->where('account_id', $accountId)->whereNull('warehouse_id');
+                },
+            ],
+            'products' => [
+                'model' => Product::class,
+                'with' => ['productType', 'images', 'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute'],
+                'search_columns' => ['title'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+                'query' => function ($query) use ($accountUserIds) {
+                    $query->whereIn('account_user_id', $accountUserIds)->where('product_type_id', 1);
+                },
+            ],
+            'categories' => [
+                'model' => Taxonomy::class,
+                'with' => ['images', 'childTaxonomies'],
+                'search_columns' => ['title', 'description'],
+                'sortable_columns' => ['id', 'title', 'created_at', 'updated_at'],
+                'default_sort_column' => 'created_at',
+                'query' => function ($query) use ($accountUserIds) {
+                    $query->whereNull('taxonomy_id')
+                        ->where('type_taxonomy_id', 1)
+                        ->whereIn('account_user_id', $accountUserIds);
+                },
+            ],
+        ];
+    }
+
+    private function fetchOfferCreateSectionData(array $config, array $filters): array
+    {
+        $search = trim((string) data_get($filters, 'search', ''));
+        $currentPage = (int) data_get($filters, 'pagination.current_page', 0);
+        $perPage = (int) data_get($filters, 'pagination.per_page', 10);
+        $sortColumn = (string) data_get($filters, 'sort.0.column', $config['default_sort_column']);
+        $sortOrder = strtoupper((string) data_get($filters, 'sort.0.order', 'DESC'));
+
+        $allowedSortColumns = $config['sortable_columns'];
+        if (!in_array($sortColumn, $allowedSortColumns, true)) {
+            $sortColumn = $config['default_sort_column'];
+        }
+        if (!in_array($sortOrder, ['ASC', 'DESC'], true)) {
+            $sortOrder = 'DESC';
+        }
+
+        $model = $config['model'];
+        $query = $model::query();
+
+        if (!empty($config['with'])) {
+            $query->with($config['with']);
+        }
+
+        if (isset($config['query']) && is_callable($config['query'])) {
+            $config['query']($query);
+        }
+
+        if ($search !== '') {
+            $query->where(function ($searchQuery) use ($config, $search) {
+                foreach ($config['search_columns'] as $index => $column) {
+                    if ($index === 0) {
+                        $searchQuery->where($column, 'LIKE', "%{$search}%");
+                        continue;
+                    }
+                    $searchQuery->orWhere($column, 'LIKE', "%{$search}%");
+                }
+            });
+        }
+
+        $query->orderBy($sortColumn, $sortOrder);
+
+        $total = (clone $query)->count();
+        $items = $query->skip($currentPage * $perPage)->take($perPage)->get();
+
+        return [
+            'data' => $items,
+            'total' => $total,
+            'current_page' => $currentPage,
+            'per_page' => $perPage,
+        ];
+    }
+
     public function store(Request $requests)
     {
         // avoir code
@@ -363,7 +564,7 @@ class OfferController extends Controller
                     $offer->productVariationAttributes()->syncWithoutDetaching([$productVariationAttributeId => ['account_user_id' => getAccountUser()->id, 'created_at' => now(), 'updated_at' => now()]]);
                 }
             }
-            return $offer->productVariationAttributes;
+
             if (isset($request['warehouses'])) {
                 foreach ($request['warehouses'] as $key => $warehouseId) {
                     $offer->warehouses()->syncWithoutDetaching([$warehouseId => ['account_user_id' => getAccountUser()->id, 'created_at' => now(), 'updated_at' => now()]]);
@@ -456,7 +657,19 @@ class OfferController extends Controller
                 ];
                 ImageController::store(new Request([$imageData]), $offer);
             }
-            $offer = Offer::find($offer->id);
+            $offer = Offer::with([
+                'taxonomies',
+                'brands',
+                'cities',
+                'countries',
+                'regions',
+                'warehouses',
+                'products',
+                'sources',
+                'customers',
+                'customerTypes',
+                'productVariationAttributes',
+            ])->find($offer->id);
 
             return $offer;
         });
@@ -768,7 +981,6 @@ class OfferController extends Controller
                 'data' => $validator->errors(),
             ]);
         };
-        return $requests;
         $offers = collect($requests->except('_method'))->map(function ($request) {
             $offer_only = collect($request)->only('statut', 'started', 'expired');
             $offer = Offer::find($request['id']);

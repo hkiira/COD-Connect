@@ -117,9 +117,21 @@ class VariationAttributesController extends Controller
             $attributes = collect($request)->toArray();
 
         }
+        if (empty($attributes) || collect($attributes)->contains(function ($elements) {
+            return empty($elements);
+        })) {
+            if ($local == 1) {
+                return [];
+            }
+            return response()->json([
+                'statut' => 1,
+                'data' => []
+            ]);
+        }
         $cases = HelperFunctions::generateCases($attributes);
         $variationAttributes =VariationAttribute::with('childVariationAttributes')
             ->where(['attribute_id' => null , 'variation_attribute_id' => null])
+            ->where('account_id', $account)
             ->get('id')
             ->map(function($element){
                 $element->childVariationAttributes =$element->childVariationAttributes->pluck('attribute_id')->toArray();
