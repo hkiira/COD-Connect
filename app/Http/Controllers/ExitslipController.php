@@ -3,7 +3,7 @@
 
 namespace App\Http\Controllers;
 
-use niklasravnsborg\LaravelPdf\Facades\Pdf as PDF;
+use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use App\Models\Mouvement;
 use App\Models\MouvementPva;
@@ -128,10 +128,19 @@ class ExitslipController extends Controller
                 'error' => 'No mouvement found for this pickup.'
             ], 404);
         }
-        $beforeInventory = $deplacement->inventories()->where('warehouse_id', $deplacement->from_warehouse)->get();
+        $beforeInventory = $deplacement->inventories()
+            ->where('warehouse_id', $deplacement->from_warehouse)
+            ->where('inventory_type_id', 2)
+            ->orderByDesc('id')
+            ->first();
+        $afterInventory = $deplacement->inventories()
+            ->where('warehouse_id', $deplacement->from_warehouse)
+            ->where('inventory_type_id', 3)
+            ->orderByDesc('id')
+            ->first();
         $datas['fromWarehouse']['title'] = $deplacement->fromWarehouse->title;
-        if ($beforeInventory->isNotEmpty()) {
-            foreach ($beforeInventory->first()->inventoryPvas as $inventoryPva) {
+        if ($beforeInventory) {
+            foreach ($beforeInventory->inventoryPvas as $inventoryPva) {
                 $variations = $inventoryPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVa) {
                     return $childVa->attribute->title;
                 });
@@ -140,14 +149,43 @@ class ExitslipController extends Controller
                     "before" => $inventoryPva->quantity,
                 ];
             }
-            foreach ($beforeInventory->last()->inventoryPvas as $inventoryPva) {
-                $datas['fromWarehouse']['products'][$inventoryPva->product_variation_attribute_id]['after'] = $inventoryPva->quantity;
+        }
+
+        if ($afterInventory) {
+            foreach ($afterInventory->inventoryPvas as $inventoryPva) {
+                $pvaId = $inventoryPva->product_variation_attribute_id;
+                if (!isset($datas['fromWarehouse']['products'][$pvaId])) {
+                    $variations = $inventoryPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVa) {
+                        return $childVa->attribute->title;
+                    });
+                    $datas['fromWarehouse']['products'][$pvaId] = [
+                        "title" => $inventoryPva->productVariationAttribute->product->title . ' : ' . implode(", ", $variations->toArray()),
+                        "before" => 0,
+                    ];
+                }
+                $datas['fromWarehouse']['products'][$pvaId]['after'] = $inventoryPva->quantity;
             }
         }
-        $afterInventory = $deplacement->inventories()->where('warehouse_id', $deplacement->to_warehouse)->get();
 
         foreach ($deplacement->mouvementPvas as $mouvementPva) {
-            $datas['fromWarehouse']['products'][$mouvementPva->product_variation_attribute_id]['quantity'] = $mouvementPva->quantity;
+            $pvaId = $mouvementPva->product_variation_attribute_id;
+            if (!isset($datas['fromWarehouse']['products'][$pvaId])) {
+                $variations = $mouvementPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVa) {
+                    return $childVa->attribute->title;
+                });
+                $datas['fromWarehouse']['products'][$pvaId] = [
+                    "title" => $mouvementPva->productVariationAttribute->product->title . ' : ' . implode(", ", $variations->toArray()),
+                    "before" => 0,
+                    "after" => 0,
+                ];
+            }
+            $datas['fromWarehouse']['products'][$pvaId]['quantity'] = $mouvementPva->quantity;
+        }
+
+        foreach ($datas['fromWarehouse']['products'] as $pvaId => $productData) {
+            $datas['fromWarehouse']['products'][$pvaId]['before'] = $productData['before'] ?? 0;
+            $datas['fromWarehouse']['products'][$pvaId]['after'] = $productData['after'] ?? 0;
+            $datas['fromWarehouse']['products'][$pvaId]['quantity'] = $productData['quantity'] ?? 0;
         }
         $html = view('pdf.exitslipInventory', $datas)->render();
 
@@ -229,10 +267,16 @@ class ExitslipController extends Controller
 
     public static function store(Request $request)
     {
-        $validator = Validator::make($request->except('_method'), [
+        // Step 1: Read the payload once (excluding HTTP method override).
+        $payload = $request->except('_method');
+
+        // Step 2: Validate warehouse and exitslip line constraints.
+        $validator = Validator::make($payload, [
             'from_warehouse' => [
-                'required', 'int',
+                'required',
+                'int',
                 function ($attribute, $value, $fail) {
+                    // Ensure source warehouse belongs to the current account.
                     $account = getAccountUser()->account_id;
                     $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->whereNot('warehouse_id', null)->first();
                     if (!$warehouse) {
@@ -241,10 +285,11 @@ class ExitslipController extends Controller
                 },
             ],
             'productVariationAttributes.*.id' => [
-                'required', 'numeric',
-                function ($attribute, $value, $fail) use ($request) {
-                    $keys = explode('.', $attribute); // Sépare la clé en segments
-                    $warehouseId = $request['from_warehouse'];
+                'required',
+                'numeric',
+                function ($attribute, $value, $fail) use ($payload) {
+                    // Ensure a source warehouse is present when validating line items.
+                    $warehouseId = $payload['from_warehouse'] ?? null;
                     if (!$warehouseId) {
                         $fail("Warehouse ID not found");
                     }
@@ -253,61 +298,83 @@ class ExitslipController extends Controller
             'productVariationAttributes.*.quantity' => 'required|numeric',
             'productVariationAttributes.*.price' => 'numeric',
         ]);
+
+        // Step 3: Stop early on validation failure.
         if ($validator->fails()) {
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
             ]);
-        };
-        $request["account_user_id"] = getAccountUser()->id;
+        }
+
+        // Step 4: Prepare mouvement header fields.
+        $payload['account_user_id'] = getAccountUser()->id;
         $account_id = getAccountUser()->account_id;
-        $request['code'] = DefaultCodeController::getAccountCode('Exitslip', $account_id);
-        $request['mouvement_type_id'] = 6;
-        $exitslip_only = collect($request)->only('code', 'mouvement_type_id', 'from_warehouse', 'to_warehouse', 'description', 'statut', 'account_user_id');
-        $exitslip = Mouvement::create($exitslip_only->all());
-        if (isset($request['productVariationAttributes'])) {
+        $payload['code'] = DefaultCodeController::getAccountCode('Exitslip', $account_id);
+        $payload['mouvement_type_id'] = 6;
+
+        // Step 5: Create exitslip header record.
+        $exitslipData = collect($payload)->only('code', 'mouvement_type_id', 'from_warehouse', 'to_warehouse', 'description', 'statut', 'account_user_id');
+        $exitslip = Mouvement::create($exitslipData->all());
+
+        // Step 6: If there are no lines, return header directly.
+        if (!isset($payload['productVariationAttributes'])) {
+            return $exitslip;
+        }
+
+        // Step 7: Snapshot inventory before stock movement when exitslip is active.
+        if ($exitslip->statut == 1) {
+            $inventoryAfter = [[
+                "mouvement_id" => $exitslip->id,
+                "inventory_type_id" => 2,
+                "warehouse_id" => $exitslip->from_warehouse,
+                "productVariationAttributes" => collect($payload['productVariationAttributes'])->pluck('id')->toArray(),
+            ]];
+            InventoryController::store(new Request($inventoryAfter));
+        }
+
+        // Step 8: Create each mouvement line, apply stock movement, and link order lines.
+        foreach ($payload['productVariationAttributes'] as $pvaData) {
+            $newSop = MouvementPva::create([
+                'product_variation_attribute_id' => $pvaData['id'],
+                'mouvement_id' => $exitslip->id,
+                'quantity' => $pvaData['quantity'],
+                'price' => isset($pvaData['price']) ? $pvaData['price'] : 0,
+                'account_user_id' => getAccountUser()->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // Move stock immediately for active exitslips.
             if ($exitslip->statut == 1) {
-                $inventoryAfter[] = [
-                    "mouvement_id" => $exitslip->id,
-                    "inventory_type_id" => 2,
-                    "warehouse_id" => $exitslip->from_warehouse,
-                    "productVariationAttributes" => collect($request['productVariationAttributes'])->pluck('id')->toArray()
-                ];
-                InventoryController::store(new Request($inventoryAfter));
+                WarehouseController::mouve($newSop, $exitslip);
             }
 
-            foreach ($request['productVariationAttributes'] as $pvaData) {
-                $newSop = MouvementPva::create([
-                    'product_variation_attribute_id' => $pvaData["id"],
-                    'mouvement_id' => $exitslip->id,
-                    'quantity' => $pvaData["quantity"],
-                    'price' => (isset($pvaData["price"])) ? $pvaData["price"] : 0,
-                    'account_user_id' => getAccountUser()->id,
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                    'sop_type_id' => 1,
-                ]);
-
-                if ($exitslip->statut == 1) {
-                    WarehouseController::mouve($newSop, $exitslip);
-                }
-                $orders = [];
+            // Link created mouvement line with related order pivot rows when provided.
+            $orders = [];
+            if (isset($pvaData['orders']) && is_array($pvaData['orders'])) {
                 foreach ($pvaData['orders'] as $order) {
                     $orders[$order]['created_at'] = now();
                     $orders[$order]['updated_at'] = now();
                 }
+            }
+            if (!empty($orders)) {
                 $newSop->orderPvas()->syncWithoutDetaching($orders);
             }
-            if ($exitslip->statut == 1) {
-                $inventoryBefore[] = [
-                    "mouvement_id" => $exitslip->id,
-                    "inventory_type_id" => 3,
-                    "warehouse_id" => $exitslip->from_warehouse,
-                    "productVariationAttributes" => collect($request['productVariationAttributes'])->pluck('id')->toArray()
-                ];
-                InventoryController::store(new Request($inventoryBefore));
-            }
         }
+
+        // Step 9: Snapshot inventory after stock movement when exitslip is active.
+        if ($exitslip->statut == 1) {
+            $inventoryBefore = [[
+                "mouvement_id" => $exitslip->id,
+                "inventory_type_id" => 3,
+                "warehouse_id" => $exitslip->from_warehouse,
+                "productVariationAttributes" => collect($payload['productVariationAttributes'])->pluck('id')->toArray(),
+            ]];
+            InventoryController::store(new Request($inventoryBefore));
+        }
+
+        // Step 10: Return newly created exitslip.
         return $exitslip;
     }
 
@@ -369,24 +436,28 @@ class ExitslipController extends Controller
     }*/
     public function update(Request $requests)
     {
-        $validator = Validator::make($requests->except('_method'), [
-            '*.id' => [ // Validate title field
-                'required', // Title is required
-                function ($attribute, $value, $fail) { // Custom validation rule
-                    // Call the function to rename removed records
+        // Step 1: Read the raw batch payload (exclude HTTP method override field).
+        $payloads = $requests->except('_method');
+
+        // Step 2: Validate exitslip headers and line constraints before mutating anything.
+        $validator = Validator::make($payloads, [
+            '*.id' => [
+                'required',
+                function ($attribute, $value, $fail) {
+                    // Ensure the exitslip exists and belongs to the current account scope.
                     $account_id = getAccountUser()->account_id;
-                    $accountUsers = AccountUser::where(['account_id' => $account_id, 'statut' => 1])->get()->pluck('id')->toArray();
+                    $accountUsers = AccountUser::where(['account_id' => $account_id, 'statut' => 1])->pluck('id')->toArray();
                     $titleModel = Mouvement::where(['id' => $value])->whereIn('account_user_id', $accountUsers)->first();
                     if (!$titleModel) {
                         $fail("not exist");
-                    } elseif ($titleModel->statut == 1) {
-                        $fail("not athorized");
                     }
                 },
             ],
             '*.from_warehouse' => [
-                'required', 'int',
+                'required',
+                'int',
                 function ($attribute, $value, $fail) {
+                    // Ensure the source warehouse belongs to the current account.
                     $account = getAccountUser()->account_id;
                     $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->whereNot('warehouse_id', null)->first();
                     if (!$warehouse) {
@@ -395,15 +466,20 @@ class ExitslipController extends Controller
                 },
             ],
             '*.productVariationAttributes.*.id' => [
-                'required', 'numeric',
-                function ($attribute, $value, $fail) use ($requests) {
-                    $keys = explode('.', $attribute); // Sépare la clé en segments
+                'required',
+                'numeric',
+                function ($attribute, $value, $fail) use ($payloads) {
+                    // Ensure each PVA is available in the selected source warehouse.
+                    $keys = explode('.', $attribute);
                     $firstIndex = $keys[0];
-                    $warehouseId = $requests[$firstIndex]['from_warehouse'];
+                    $warehouseId = $payloads[$firstIndex]['from_warehouse'] ?? null;
                     if (!$warehouseId) {
                         $fail("Warehouse ID not found");
                     }
-                    $warehousePva = WarehousePva::where(['product_variation_attribute_id' => $value, 'warehouse_id' => $warehouseId])->first();
+                    $warehousePva = WarehousePva::where([
+                        'product_variation_attribute_id' => $value,
+                        'warehouse_id' => $warehouseId,
+                    ])->first();
                     if (!$warehousePva) {
                         $fail("Warehouse product not found");
                     }
@@ -412,77 +488,145 @@ class ExitslipController extends Controller
             '*.productVariationAttributes.*.quantity' => 'required|numeric',
             '*.productVariationAttributes.*.price' => 'numeric',
         ]);
+
+        // Step 3: Return validation errors immediately if any rule failed.
         if ($validator->fails()) {
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
             ]);
-        };
-        $exitslips = collect($requests->except('_method'))->map(function ($request) {
-            $exitslip_only = collect($request)->only('id', 'to_warehouse', 'from_warehouse', 'description', 'statut');
-            $exitslip = Mouvement::find($exitslip_only['id']);
-            $exitslip->update($exitslip_only->all());
-            if (isset($request['productVariationAttributes'])) {
-                if ($exitslip->statut == 1) {
-                    $inventoryAfter[] = [
-                        "mouvement_id" => $exitslip->id,
-                        "inventory_type_id" => 2,
-                        "warehouse_id" => $exitslip->from_warehouse,
-                        "productVariationAttributes" => collect($request['productVariationAttributes'])->pluck('id')->toArray()
-                    ];
-                    InventoryController::store(new Request($inventoryAfter));
-                }
-                //récupérer les ids produits de la commandes 
-                $exitslipProducts = MouvementPva::where('mouvement_id', $request['id'])->get();
-                $exitslipProductIds = collect($request['productVariationAttributes'])->pluck('id')->toArray();
-                //récupérer les enregistrements a supprimée
-                $mouvementPvaToDeletes = $exitslipProducts->map(function ($exitslipProduct) use ($exitslipProductIds) {
-                    if (!in_array($exitslipProduct->product_variation_attribute_id, $exitslipProductIds))
-                        return $exitslipProduct->id;
-                })->filter();
-                //supprimer les produits manquant
-                $mouvementPvaToDeletes->map(function ($mouvementPvaToDelete) {
-                    $exitslipProduct = MouvementPva::find($mouvementPvaToDelete);
-                    $exitslipProduct->delete();
-                });
-                foreach ($request['productVariationAttributes'] as $pvaData) {
-                    $isExist = MouvementPva::where(['product_variation_attribute_id' => $pvaData['id'], 'mouvement_id' => $exitslip->id, 'statut' => 1])->first();
-                    if ($isExist) {
-                        $isExist->update([
-                            'quantity' => (isset($pvaData['quantity'])) ? $pvaData['quantity'] : $isExist->quantity,
-                            'price' => (isset($pvaData['price'])) ? $pvaData['price'] : $isExist->price,
-                        ]);
-                        if ($exitslip->statut == 1) {
-                            WarehouseController::mouve($isExist, $exitslip);
-                        }
-                    } else {
-                        $newSop = MouvementPva::create([
-                            'product_variation_attribute_id' => $pvaData['id'],
-                            'mouvement_id' => $exitslip->id,
-                            'quantity' => $pvaData["quantity"],
-                            'price' => (isset($pvaData['price'])) ? $pvaData['price'] : 0,
-                            'account_user_id' => getAccountUser()->id,
-                            'created_at' => now(),
-                            'updated_at' => now()
-                        ]);
-                        if ($exitslip->statut == 1) {
-                            WarehouseController::mouve($newSop, $exitslip);
-                        }
+        }
+
+        // Step 4: Process each exitslip update request independently.
+        $exitslips = collect($payloads)->map(function ($payload) {
+            // Step 4.1: Update exitslip header fields first.
+            $exitslipData = collect($payload)->only('id', 'to_warehouse', 'from_warehouse', 'description', 'statut');
+            $exitslip = Mouvement::find($exitslipData['id']);
+
+            // Step 4.2: Keep previous movement state to rollback stock safely.
+            $previousStatut = $exitslip->statut;
+            $previousFromWarehouse = $exitslip->from_warehouse;
+            $previousToWarehouse = $exitslip->to_warehouse;
+
+            // Step 4.3: Persist header changes.
+            $exitslip->update($exitslipData->all());
+
+            // Step 4.4: If no lines are provided, return the refreshed exitslip.
+            if (!isset($payload['productVariationAttributes'])) {
+                return Mouvement::find($exitslip->id);
+            }
+
+            // Step 4.5: Read current lines and incoming lines for synchronization.
+            $existingLines = MouvementPva::where(['mouvement_id' => $exitslip->id, 'statut' => 1])->get();
+            $incomingLines = collect($payload['productVariationAttributes']);
+            $incomingPvaIds = $incomingLines->pluck('id')->toArray();
+
+            // Step 4.6: Revert previous stock effect when the previous movement was active.
+            if ($previousStatut == 1) {
+                foreach ($existingLines as $existingLine) {
+                    if ($previousFromWarehouse) {
+                        $fromWarehousePva = WarehousePva::firstOrCreate(
+                            [
+                                'warehouse_id' => $previousFromWarehouse,
+                                'product_variation_attribute_id' => $existingLine->product_variation_attribute_id,
+                            ],
+                            [
+                                'quantity' => 0,
+                                'statut' => 1,
+                            ]
+                        );
+                        $fromWarehousePva->update(['quantity' => $fromWarehousePva->quantity + $existingLine->quantity]);
+                    }
+
+                    if ($previousToWarehouse) {
+                        $toWarehousePva = WarehousePva::firstOrCreate(
+                            [
+                                'warehouse_id' => $previousToWarehouse,
+                                'product_variation_attribute_id' => $existingLine->product_variation_attribute_id,
+                            ],
+                            [
+                                'quantity' => 0,
+                                'statut' => 1,
+                            ]
+                        );
+                        $toWarehousePva->update(['quantity' => $toWarehousePva->quantity - $existingLine->quantity]);
                     }
                 }
-                if ($exitslip->statut == 1) {
-                    $inventoryBefore[] = [
-                        "mouvement_id" => $exitslip->id,
-                        "inventory_type_id" => 3,
-                        "warehouse_id" => $exitslip->from_warehouse,
-                        "productVariationAttributes" => collect($request['productVariationAttributes'])->pluck('id')->toArray()
-                    ];
-                    InventoryController::store(new Request($inventoryBefore));
+            }
+
+            // Step 4.7: Create inventory snapshot before applying new stock movement.
+            if ($exitslip->statut == 1) {
+                $inventoryAfter = [[
+                    "mouvement_id" => $exitslip->id,
+                    "inventory_type_id" => 2,
+                    "warehouse_id" => $exitslip->from_warehouse,
+                    "productVariationAttributes" => $incomingPvaIds,
+                ]];
+                InventoryController::store(new Request($inventoryAfter));
+            }
+
+            // Step 4.8: Remove mouvement lines that no longer exist in the new payload.
+            $lineIdsToDelete = $existingLines
+                ->filter(function ($line) use ($incomingPvaIds) {
+                    return !in_array($line->product_variation_attribute_id, $incomingPvaIds);
+                })
+                ->pluck('id');
+
+            MouvementPva::whereIn('id', $lineIdsToDelete)->get()->each(function ($lineToDelete) {
+                $lineToDelete->delete();
+            });
+
+            // Step 4.9: Upsert all incoming mouvement lines.
+            foreach ($incomingLines as $pvaData) {
+                $line = MouvementPva::where([
+                    'product_variation_attribute_id' => $pvaData['id'],
+                    'mouvement_id' => $exitslip->id,
+                    'statut' => 1,
+                ])->first();
+
+                if ($line) {
+                    $line->update([
+                        'quantity' => isset($pvaData['quantity']) ? $pvaData['quantity'] : $line->quantity,
+                        'price' => isset($pvaData['price']) ? $pvaData['price'] : $line->price,
+                    ]);
+                    continue;
+                }
+
+                MouvementPva::create([
+                    'product_variation_attribute_id' => $pvaData['id'],
+                    'mouvement_id' => $exitslip->id,
+                    'quantity' => $pvaData['quantity'],
+                    'price' => isset($pvaData['price']) ? $pvaData['price'] : 0,
+                    'account_user_id' => getAccountUser()->id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+
+            // Step 4.10: Apply stock movement from the final synced line set only once.
+            if ($exitslip->statut == 1) {
+                $finalLines = MouvementPva::where(['mouvement_id' => $exitslip->id, 'statut' => 1])->get();
+                foreach ($finalLines as $finalLine) {
+                    WarehouseController::mouve($finalLine, $exitslip);
                 }
             }
-            $exitslip = Mouvement::find($exitslip->id);
-            return $exitslip;
+
+            // Step 4.11: Create inventory snapshot after applying new stock movement.
+            if ($exitslip->statut == 1) {
+                $inventoryBefore = [[
+                    "mouvement_id" => $exitslip->id,
+                    "inventory_type_id" => 3,
+                    "warehouse_id" => $exitslip->from_warehouse,
+                    "productVariationAttributes" => $incomingPvaIds,
+                ]];
+                InventoryController::store(new Request($inventoryBefore));
+            }
+
+            // Step 4.12: Return the refreshed exitslip model for API response.
+            return Mouvement::find($exitslip->id);
         });
+
+        // Step 5: Return success response for the full batch.
         return response()->json([
             'statut' => 1,
             'data' => $exitslips,

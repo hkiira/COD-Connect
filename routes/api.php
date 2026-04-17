@@ -94,7 +94,8 @@ use App\Http\Controllers\{
     SpeedafController,
     SpeedafwController,
     AfraDeliveryController,
-    StockController
+    StockController,
+    MouvementController
 };
 use App\Http\Controllers\API\RegisterController;
 use App\Models\ExpenseType;
@@ -179,6 +180,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('supplier_orders', SupplierOrderController::class);
     Route::resource('supplier_receipts', SupplierReceiptController::class);
     Route::resource('type_mouvements', MouvementTypeController::class);
+    Route::get('mouvements', [MouvementController::class, 'index']);
     Route::resource('deplacements', DeplacementController::class);
     Route::resource('chargements', ChargementController::class);
     Route::resource('tranferts', TransfertController::class);
@@ -228,6 +230,10 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('filterselect/{model}/{id?}', [FilterController::class, 'filterselect']);
     Route::get('woocommerce/{model}/{id?}', [WoocommerceController::class, 'rest']);
     Route::post('woocommerce/{model}/{id?}', [WoocommerceController::class, 'rest']);
+    // WooCommerce Order Management (new dedicated controller)
+    Route::get('wc-orders', [\App\Http\Controllers\WooCommerceOrderController::class, 'getOrdersByStatus']);
+    Route::post('wc-orders/import', [\App\Http\Controllers\WooCommerceOrderController::class, 'importOrders']);
+    Route::get('wc-orders/{id}', [\App\Http\Controllers\WooCommerceOrderController::class, 'showOrder']);
     Route::get('oldsys/{model}/{id?}', [OldSysController::class, 'rest']);
     Route::post('oldsys/{model}/{id?}', [OldSysController::class, 'rest']);
     Route::post('filterselect/{model}/{id?}', [FilterController::class, 'filterselect']);

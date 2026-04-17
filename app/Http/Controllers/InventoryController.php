@@ -14,7 +14,7 @@ use App\Models\SupplierOrderPva;
 use App\Models\SupplierPva;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
-use niklasravnsborg\LaravelPdf\Facades\Pdf as PDF;
+use Barryvdh\DomPDF\Facade\Pdf as PDF;
 
 class InventoryController extends Controller
 {

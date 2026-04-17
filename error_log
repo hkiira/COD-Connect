@@ -1,0 +1,1 @@
+[03-Apr-2026 16:04:10 UTC] PHP Parse error:  syntax error, unexpected token "else", expecting ")" in app/Http/Controllers/PickupController.php on line 822

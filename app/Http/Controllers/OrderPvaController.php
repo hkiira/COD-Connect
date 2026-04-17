@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use niklasravnsborg\LaravelPdf\Facades\Pdf as PDF;
+use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use App\Models\Customer;
 use App\Models\Source;

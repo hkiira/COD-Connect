@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use niklasravnsborg\LaravelPdf\Facades\Pdf as PDF;
+use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use App\Models\Customer;
 use App\Models\Source;
@@ -29,6 +29,7 @@ use App\Models\OrderStatus;
 use App\Services\GoogleSheetsService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class OrderController extends Controller
 {
@@ -541,305 +542,460 @@ class OrderController extends Controller
 
     public static function store(Request $requests, $isImport = 0)
     {
-        $thePva = [];
+        // Normalize incoming payload (array of orders) and remove method spoofing key.
+        $ordersPayload = collect($requests->except('_method'))->values();
 
+        // Cache account context once to avoid repeated helper calls.
+        $accountUser = getAccountUser();
+        $accountId = $accountUser->account_id;
+
+        // This array stores the resolved PVA rows per order index.
+        $resolvedPvas = [];
+
+        // Resolve the pivot id of each offer relation (product, brand, city, etc.).
+        $resolveOfferablePivotIds = function (array $offerIds) {
+            return collect($offerIds)->map(function ($offerId) {
+                $offer = Offer::find($offerId);
+                if (!$offer) {
+                    return null;
+                }
+
+                if ($offer->productVariationAttributes->count() > 0) {
+                    return $offer->productVariationAttributes->first()->pivot->id;
+                }
+                if ($offer->products->count() > 0) {
+                    return $offer->products->first()->pivot->id;
+                }
+                if ($offer->taxonomies->count() > 0) {
+                    return $offer->taxonomies->first()->pivot->id;
+                }
+                if ($offer->sources->count() > 0) {
+                    return $offer->sources->first()->pivot->id;
+                }
+                if ($offer->brands->count() > 0) {
+                    return $offer->brands->first()->pivot->id;
+                }
+                if ($offer->brandSources->count() > 0) {
+                    return $offer->brandSources->first()->pivot->id;
+                }
+                if ($offer->customers->count() > 0) {
+                    return $offer->customers->first()->pivot->id;
+                }
+                if ($offer->customerTypes->count() > 0) {
+                    return $offer->customerTypes->first()->pivot->id;
+                }
+                if ($offer->cities->count() > 0) {
+                    return $offer->cities->first()->pivot->id;
+                }
+                if ($offer->countries->count() > 0) {
+                    return $offer->countries->first()->pivot->id;
+                }
+                if ($offer->regions->count() > 0) {
+                    return $offer->regions->first()->pivot->id;
+                }
+                if ($offer->sectors->count() > 0) {
+                    return $offer->sectors->first()->pivot->id;
+                }
+
+                return null;
+            })->filter()->values()->all();
+        };
+
+        // Generate order code and append brand/source initials when available.
+        $generateOrderCode = function (array $orderData) use ($accountId) {
+            $baseCode = isset($orderData['code']) ? $orderData['code'] : DefaultCodeController::getAccountCode('Order', $accountId);
+
+            if (empty($orderData['brand_source_id'])) {
+                return $baseCode;
+            }
+
+            $brandSource = \App\Models\BrandSource::with(['brand', 'source'])->find($orderData['brand_source_id']);
+            if (!$brandSource || !$brandSource->brand || !$brandSource->source) {
+                return $baseCode;
+            }
+
+            $brandLetter = strtoupper(substr($brandSource->brand->title, 0, 1));
+            $sourceLetter = strtoupper(substr($brandSource->source->title, 0, 1));
+
+            return $baseCode . $brandLetter . $sourceLetter;
+        };
+
+        // Validate payload and resolve product variations when request is not import mode.
         if ($isImport == 0) {
-            $phoneableType = "App\Models\Customers";
-            $validator = Validator::make($requests->except('_method'), [
+            $phoneableType = Customer::class;
+            $validator = Validator::make($ordersPayload->toArray(), [
                 '*.warehouse_id' => [
+                    'nullable',
                     'int',
-                    function ($attribute, $value, $fail) {
-                        $account = getAccountUser()->account_id;
-                        $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->first();
+                    function ($attribute, $value, $fail) use ($accountId) {
+                        if ($value === null) {
+                            return;
+                        }
+                        $warehouse = Warehouse::where(['id' => $value, 'account_id' => $accountId])->first();
                         if (!$warehouse) {
-                            $fail("not exist");
+                            $fail('not exist');
                         }
                     },
                 ],
-                '*.payment_type_id' => 'exists:payment_types,id|max:255',
-                '*.payment_method_id' => 'exists:payment_methods,id|max:255',
-                '*.customer.id' => [ // Validate title field
-                    function ($attribute, $value, $fail) { // Custom validation rule
-                        // Call the function to rename removed records
-                        $account_id = getAccountUser()->account_id;
-                        $titleModel = Customer::where(['id' => $value])->where('account_id', $account_id)->first();
-                        if (!$titleModel) {
-                            $fail("not exist");
+                '*.payment_type_id' => 'nullable|exists:payment_types,id|max:255',
+                '*.payment_method_id' => 'nullable|exists:payment_methods,id|max:255',
+                '*.customer.id' => [
+                    'nullable',
+                    function ($attribute, $value, $fail) use ($accountId) {
+                        if ($value === null) {
+                            return;
+                        }
+                        $customer = Customer::where('id', $value)->where('account_id', $accountId)->first();
+                        if (!$customer) {
+                            $fail('not exist');
                         }
                     },
                 ],
-                '*.customer.name' => 'max:255',
+                '*.customer.name' => 'nullable|max:255',
                 '*.customer.phones.*.title' => [
+                    'nullable',
                     'string',
-                    function ($attribute, $value, $fail) use ($phoneableType) {
-                        $account = getAccountUser()->account_id;
-                        $phone = Phone::where(['title' => $value, 'account_id' => $account])->first();
+                    /*function ($attribute, $value, $fail) use ($phoneableType, $accountId) {
+                        if ($value === null || trim($value) === '') {
+                            return;
+                        }
+                        $phone = Phone::where(['title' => $value, 'account_id' => $accountId])->first();
                         if ($phone) {
-                            $isUnique = \App\Models\Phoneable::where('phone_id', $phone->id)
+                            $exists = \App\Models\Phoneable::where('phone_id', $phone->id)
                                 ->where('phoneable_type', $phoneableType)
-                                ->first();
-                            if ($isUnique) {
+                                ->exists();
+                            if ($exists) {
                                 $fail("A phone '$value' number already taken.");
                             }
                         }
-                    },
+                    },*/
                 ],
-                '*.customer.phones.*.phoneTypes' => 'exists:phone_types,id|max:255',
-                '*.customer.customer_type_id' => 'exists:customer_types,id|max:255',
-                '*.customer.addresses.*.title' => 'max:255',
-                '*.customer.addresses.*.city_id' => 'exists:cities,id|max:255',
-                '*.sector_id' => 'exists:sectors,id|max:255',
-                '*.order_status_id' => 'required|exists:order_statuses,id|max:255',
-                '*.brand_source_id' => 'exists:brand_source,id|max:255',
-                '*.products.*.offers' => 'exists:offers,id|max:255',
-                '*.products.*.attributes' => 'required|exists:attributes,id|max:255',
-                '*.products.*.quantity' => 'required|numeric',
-                '*.products.*.price' => 'numeric',
-                '*.products.*.id' => [
-                    'required',
-                    'int',
-                    function ($attribute, $value, $fail) use ($requests, &$thePva) {
-                        $account = getAccountUser()->account_id;
-                        // Extract index from attribute name
-                        $index = str_replace(['*', '.id'], '', $attribute);
-                        $index1 = str_replace(['*', '.products.'], '', $index);
-                        // Get the ID and title from the request
-                        $dataProduct = [
-                            'attributes' => $requests->input("{$index}.attributes"),
-                            'offers' => $requests->input("{$index}.offers"),
-                            'quantity' => $requests->input("{$index}.quantity"),
-                            'price' => $requests->input("{$index}.price"),
-                            'discount' => $requests->input("{$index}.discount"),
-                        ]; // Get ID from request
-                        $accountUsers = Account::find($account)->accountUsers->pluck('id')->toArray();
-                        $productAttributes = Product::with(['productVariationAttributes.variationAttribute.childVariationAttributes' => function ($vattributes) use ($dataProduct) {
-                            $vattributes->whereIn('attribute_id', $dataProduct['attributes']);
-                        }])->where(['id' => $value])->whereIn("account_user_id", $accountUsers)->first();
-                        if ($productAttributes)
-                            $productAttributes->productVariationAttributes->map(function ($pva) use (&$thePva, $dataProduct, $index1) {
-                                $childs = $pva->variationAttribute->childVariationAttributes->map(function ($child) {
-                                    return $child->attribute_id;
-                                });
-                                $childPvas = $childs->toArray();
-                                sort($childPvas);
-                                sort($dataProduct['attributes']);
-                                if ($childPvas == $dataProduct['attributes']) {
-                                    $offerIds = collect($dataProduct["offers"])->map(function ($offerId) {
-                                        $offer = Offer::find($offerId);
-                                        if (count($offer->productVariationAttributes) > 0) {
-                                            $data = $offer->productVariationAttributes->first()->pivot->id;
-                                        } elseif (count($offer->products) > 0) {
-                                            $data = $offer->products->first()->pivot->id;
-                                        } elseif (count($offer->taxonomies) > 0) {
-                                            $data = $offer->taxonomies->first()->pivot->id;
-                                        } elseif (count($offer->sources) > 0) {
-                                            $data = $offer->sources->first()->pivot->id;
-                                        } elseif (count($offer->brands) > 0) {
-                                            $data = $offer->brands->first()->pivot->id;
-                                        } elseif (count($offer->brandSources) > 0) {
-                                            $data = $offer->brandSources->first()->pivot->id;
-                                        } elseif (count($offer->customers) > 0) {
-                                            $data = $offer->customers->first()->pivot->id;
-                                        } elseif (count($offer->customerTypes) > 0) {
-                                            $data = $offer->customerTypes->first()->pivot->id;
-                                        } elseif (count($offer->cities) > 0) {
-                                            $data = $offer->cities->first()->pivot->id;
-                                        } elseif (count($offer->countries) > 0) {
-                                            $data = $offer->countries->first()->pivot->id;
-                                        } elseif (count($offer->regions) > 0) {
-                                            $data = $offer->regions->first()->pivot->id;
-                                        } elseif (count($offer->sectors) > 0) {
-                                            $data = $offer->sectors->first()->pivot->id;
-                                        }
-                                        return $data;
-                                    })->toArray();
-                                    $thePva[$index1[0]][] = ['id' => $pva->id, 'price' => $dataProduct['price'], 'offerables' => $offerIds, 'quantity' => $dataProduct['quantity']];
-                                }
-                            })->toArray();
-
-                        if (!isset($thePva[$index1[0]])) {
-                            $fail("not Exists");
-                        }
-                    },
-                ],
-                '*.discount' => 'numeric',
-                '*.scarrier_price' => 'numeric',
+                '*.customer.phones.*.phoneTypes' => 'nullable|array',
+                '*.customer.phones.*.phoneTypes.*' => 'exists:phone_types,id|max:255',
+                '*.customer.customer_type_id' => 'nullable|exists:customer_types,id|max:255',
+                '*.customer.addresses.*.title' => 'nullable|max:255',
+                '*.customer.addresses.*.city_id' => 'nullable|exists:cities,id|max:255',
+                '*.sector_id' => 'nullable|exists:sectors,id|max:255',
+                '*.order_status_id' => 'nullable|exists:order_statuses,id|max:255',
+                '*.brand_source_id' => 'nullable|exists:brand_source,id|max:255',
+                '*.products' => 'required|array|min:1',
+                '*.products.*.offers' => 'nullable|array',
+                '*.products.*.offers.*' => 'exists:offers,id|max:255',
+                '*.products.*.attributes' => 'required|array|min:1',
+                '*.products.*.attributes.*' => 'exists:attributes,id|max:255',
+                '*.products.*.quantity' => 'required|numeric|min:1',
+                '*.products.*.price' => 'nullable|numeric',
+                '*.products.*.discount' => 'nullable|numeric',
+                '*.products.*.id' => 'required|int',
+                '*.discount' => 'nullable|numeric',
+                '*.carrier_price' => 'nullable|numeric',
+                '*.scarrier_price' => 'nullable|numeric',
             ]);
+
+            // Stop early when request shape is invalid.
             if ($validator->fails()) {
                 return response()->json([
                     'statut' => 0,
                     'data' => $validator->errors(),
                 ]);
             }
-        }
-        $orders = collect($requests->except('_method'))->map(function ($request, $index) use ($thePva, $isImport) {
-            $customer = null;
-            if (isset($request['customer']['id'])) {
-                $customer = Customer::where('id', $request['customer']['id'])->first();
-                CustomerController::update(new Request([$request['customer']]), $customer->id, $isOrder = 1);
-                return $request;
-            } elseif (isset($request['customer']['phones'])) {
-                /*$phoneWithCustomers = Phone::with('customers')->where('account_id', getAccountUser()->account_id)->whereIn('title', collect($request['customer']['phones'])->pluck('title')->toArray())->whereHas('customers')->orderBy('created_at', 'DESC')->get();
-                if (count($phoneWithCustomers) > 0) {
-                    $customer = $phoneWithCustomers->first()->customers->first();
-                    $request['customer']['id'] = $customer->id;
-                    CustomerController::update(new Request([$request['customer']]), $customer->id, $isOrder = 1);
-                } else {*/
-                    $request['customer']['customer_type_id'] = (isset($request['customer']['customer_type_id'])) ? $request['customer']['customer_type_id'] : 1;
-                    $request['customer']['name'] = $request['customer']['name'] == "  " ?  "client" : $request['customer']['name'];
-                    $customerData = new Request([$request['customer']]);
-                    $customer = CustomerController::store($customerData, 1)->first();
-                // }
-            }
-            $request["account_id"] = getAccountUser()->account_id;
-            $request['order_status_id'] = 4;
-            if ($isImport == 0) {
-                $request['customer_id'] = $customer->id;
-                
-                // --- DUPLICATE CHECK START ---
-                // Check if an order with the same phone number and same products was created recently (e.g., last 5 minutes)
-                if (isset($request['customer']['phones']) && count($request['customer']['phones']) > 0) {
-                    $phoneTitles = collect($request['customer']['phones'])->pluck('title')->toArray();
-                    
-                    // Find recent orders (last 5 minutes) for this account
-                    $recentOrders = Order::where('account_id', $request["account_id"])
-                        ->where('created_at', '>=', now()->subMinutes(5))
-                        ->whereHas('phones', function ($query) use ($phoneTitles) {
-                            $query->whereIn('title', $phoneTitles);
-                        })
-                        ->with('orderPvas')
-                        ->get();
 
-                    foreach ($recentOrders as $recentOrder) {
-                        // Compare products
-                        $recentProductIds = $recentOrder->orderPvas->pluck('product_variation_attribute_id')->sort()->values()->toArray();
-                        $newProductIds = collect($thePva[$index])->pluck('id')->sort()->values()->toArray();
-                        
-                        if ($recentProductIds === $newProductIds) {
-                            // Duplicate found! You can either throw an exception, return the existing order, or skip.
-                            // Here we throw an exception to stop the process.
-                            throw new \Exception("Duplicate order detected for phone number(s): " . implode(', ', $phoneTitles));
+            // Build the list of account users allowed to own products.
+            $accountUsers = Account::find($accountId)?->accountUsers->pluck('id')->toArray() ?? [];
+
+            // Resolve each product to its matching variation based on selected attributes.
+            foreach ($ordersPayload as $orderIndex => $orderData) {
+                $resolvedPvas[$orderIndex] = [];
+
+                foreach (($orderData['products'] ?? []) as $productData) {
+                    $selectedAttributes = collect($productData['attributes'] ?? [])->map(function ($id) {
+                        return (int)$id;
+                    })->sort()->values()->all();
+
+                    $product = Product::with('productVariationAttributes.variationAttribute.childVariationAttributes')
+                        ->where('id', $productData['id'])
+                        ->whereIn('account_user_id', $accountUsers)
+                        ->first();
+
+                    if (!$product) {
+                        return response()->json([
+                            'statut' => 0,
+                            'data' => ["$orderIndex.products" => ['not exist']],
+                        ]);
+                    }
+
+                    $matchedPva = null;
+                    foreach ($product->productVariationAttributes as $pva) {
+                        $pvaAttributes = $pva->variationAttribute->childVariationAttributes
+                            ->pluck('attribute_id')
+                            ->map(function ($id) {
+                                return (int)$id;
+                            })
+                            ->sort()
+                            ->values()
+                            ->all();
+
+                        if ($pvaAttributes === $selectedAttributes) {
+                            $matchedPva = $pva;
+                            break;
                         }
                     }
-                }
-                // --- DUPLICATE CHECK END ---
 
-                // Generate code with brand and source first letters
-                $baseCode = isset($request['code']) ? $request['code'] : DefaultCodeController::getAccountCode('Order', $request["account_id"]);
-                
-                if (isset($request['brand_source_id']) && $request['brand_source_id']) {
-                    $brandSource = \App\Models\BrandSource::with(['brand', 'source'])->find($request['brand_source_id']);
-                    if ($brandSource && $brandSource->brand && $brandSource->source) {
-                        $brandFirstLetter = strtoupper(substr($brandSource->brand->title, 0, 1));
-                        $sourceFirstLetter = strtoupper(substr($brandSource->source->title, 0, 1));
-                        // Insert brand letter at the beginning and source letter at the end
-                        $request['code'] =  $baseCode . $brandFirstLetter .$sourceFirstLetter;
-                    } else {
-                        $request['code'] = $baseCode;
+                    if (!$matchedPva) {
+                        return response()->json([
+                            'statut' => 0,
+                            'data' => ["$orderIndex.products" => ['not Exists']],
+                        ]);
                     }
-                } else {
-                        $request['code'] = $baseCode;
-                }
-            } elseif ($isImport == 1) {
-                $request['customer_id'] = $customer->id;
-            }
-            $request['warehouse_id'] = isset($request['warehouse_id']) ? $request['warehouse_id'] : Warehouse::where('account_id', getAccountUser()->account_id)->first()->id;
-                       
-            $order = Order::create($request);
-            if ($isImport == 1 || $isImport == 2) {
-                $thePva[$index] = $request['order_pva'];
-                if ($order->customer->addresses->first())
-                    $order->addresses()->syncWithoutDetaching([$order->customer->addresses->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
-                if ($order->customer->phones->first())
-                    $order->phones()->syncWithoutDetaching([$order->customer->phones->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
-            } else {
-                foreach ($request["customer"]["addresses"] as $key => $address) {
-                    $order->update(['city_id' => $customer->addresses->where('title', $address['title'])->first()->city_id]);
-                    $order->addresses()->syncWithoutDetaching([$customer->addresses->where('title', $address['title'])->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
-                }
-                foreach ($request["customer"]["phones"] as $key => $phone) {
-                    $order->phones()->syncWithoutDetaching([$customer->phones->where('title', $phone['title'])->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
-                }
-            }
 
-            foreach ($thePva[$index] as $pvaData) {
-                $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
-                $initial_price = Product::find($productVariationAttribute->product_id)->price->first()->price;
-                $productPrice = isset($pvaData['price']) ? $pvaData['price'] : $initial_price;
-                $discount = isset($pvaData['discount']) ? $pvaData['discount'] : 0;
-                $realPrice = (Product::find($productVariationAttribute->product_id)->orderPvas) ? Product::find($productVariationAttribute->product_id)->orderPvas->first()->price : 0;
-                $productVariationAttribute->orders()->attach(
-                    $order->id,
-                    [
-                        'quantity' => $pvaData['quantity'],
-                        'price' => $productPrice,
-                        'realprice' => $realPrice,
-                        'initial_price' => $initial_price,
-                        'discount' => $discount,
-                        'order_status_id' => 4,
-                        'account_user_id' => getAccountUser()->id,
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ]
-                );
-                if (isset($pvaData['offerables']) && count($pvaData['offerables']) > 0) {
-                    VariationOfferableController::store(new Request(['order_id' => $order->id, 'pva' => $productVariationAttribute, 'variations' => $pvaData['offerables']]));
+                    $resolvedPvas[$orderIndex][] = [
+                        'id' => $matchedPva->id,
+                        'price' => $productData['price'] ?? null,
+                        'discount' => $productData['discount'] ?? 0,
+                        'offerables' => $resolveOfferablePivotIds($productData['offers'] ?? []),
+                        'quantity' => $productData['quantity'],
+                    ];
                 }
             }
-            /*$order->orderStatuses()->attach($order->order_status_id, [
-                'account_user_id' => ($isImport == 1 || $isImport == 2) ? $request['account_user_id'] : getAccountUser()->id, 
-                'statut' => 1, 
-                'score' => 10, // Initial score for first status
-                'created_at' => $order->created_at, 
-                'updated_at' => $order->created_at
-            ]);*/
-            if ($isImport == 0) {
-                /*$order->comments()->syncWithoutDetaching([44 => [
-                    'title' => isset($request['status_comment']) ? $request['status_comment'] : 'Nouvelle Commande',
-                    'order_status_id' => 1,
-                    'account_user_id' => getAccountUser()->account_id,
-                    'score' => 0, // Initial score for first comment
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]]);
-                CompensationableController::edit($order->id);*/
-            }
-            
-            // Note: No longer updating order score since we removed the score column
-            // Score is now calculated from account_user_order_status and order_comment tables
+        }
 
-            if ($isImport == 0 && config('google-sheets.enabled')) {
-                try {
-                    app(GoogleSheetsService::class)->appendOrderStatusRow(
-                        $order,
-                        null,
-                        getAccountUser(),
-                        'Nouvelle commande créée'
-                    );
-                    $order->comments()->syncWithoutDetaching([44 => [
-                    'title' => "Sync with Google Sheets",
-                    'order_status_id' => 4,
-                    'account_user_id' => getAccountUser()->account_id,
-                    'score' => 0, // Initial score for first comment
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]]);
-                    $order->sync = true;
-                    $order->save();
-                } catch (\Throwable $e) {
-                    $order->sync = false;
-                    $order->save();
-                    Log::warning('Google Sheets sync failed for order ' . $order->id . ': ' . $e->getMessage());
-                }
-            }
-            
-            $order = Order::with(['customer', 'productVariationAttributes', 'comments', 'orderStatuses', 'addresses', 'phones'])->find($order->id);
-            return $order->id;
-        });
-        return response()->json([
-            'statut' => 1,
-            'data' => $orders,
-        ]);
+        try {
+            // Create all orders in a single transaction to keep data consistent.
+            $orderIds = DB::transaction(function () use ($ordersPayload, $resolvedPvas, $isImport, $accountUser, $accountId, $generateOrderCode) {
+                return $ordersPayload->map(function ($request, $index) use ($resolvedPvas, $isImport, $accountUser, $accountId, $generateOrderCode) {
+                    // Resolve or create the customer linked to the order.
+                    $customer = null;
+                    if (isset($request['customer']['id'])) {
+                        $customer = Customer::where('id', $request['customer']['id'])->where('account_id', $accountId)->first();
+                        if ($customer) {
+                            $updateResult = CustomerController::update(new Request([$request['customer']]), $customer->id, $isOrder = 1);
+                            if ($updateResult instanceof \Illuminate\Http\JsonResponse) {
+                                $payload = $updateResult->getData(true);
+                                $message = isset($payload[1]) ? json_encode($payload[1]) : 'Customer update failed.';
+                                throw new \Exception($message);
+                            }
+                        } 
+                    } elseif (isset($request['customer']['phones'])) {
+                        $request['customer']['customer_type_id'] = $request['customer']['customer_type_id'] ?? 1;
+                        $request['customer']['name'] = (isset($request['customer']['name']) && trim($request['customer']['name']) !== '') ? $request['customer']['name'] : 'client';
+
+                        // Reuse an existing customer when one of the provided phones already exists.
+                        $phoneTitles = collect($request['customer']['phones'])
+                            ->pluck('title')
+                            ->filter()
+                            ->map(function ($title) {
+                                return formatPhoneNumber($title);
+                            })
+                            ->values()
+                            ->all();
+
+                        $phoneWithCustomer = null;
+                        if (!empty($phoneTitles)) {
+                            $phoneWithCustomer = Phone::with('customers')
+                                ->where('account_id', $accountId)
+                                ->whereIn('title', $phoneTitles)
+                                ->whereHas('customers')
+                                ->orderBy('created_at', 'DESC')
+                                ->first();
+                        }
+
+                        if ($phoneWithCustomer && $phoneWithCustomer->customers->first()) {
+                            $customer = $phoneWithCustomer->customers->first();
+                            $request['customer']['id'] = $customer->id;
+
+                            $updateResult = CustomerController::update(new Request([$request['customer']]), $customer->id, $isOrder = 1);
+                            if ($updateResult instanceof \Illuminate\Http\JsonResponse) {
+                                $payload = $updateResult->getData(true);
+                                $message = isset($payload[1]) ? json_encode($payload[1]) : 'Customer update failed.';
+                                throw new \Exception($message);
+                            }
+                        } else {
+                            $customerData = new Request([$request['customer']]);
+                            $customerResult = CustomerController::store($customerData, 1);
+
+                            // CustomerController::store returns a JsonResponse on validation failure even in local mode.
+                            // Unwrap the collection or surface the validation message as an exception.
+                            if ($customerResult instanceof \Illuminate\Http\JsonResponse) {
+                                $payload = $customerResult->getData(true);
+                                $message = isset($payload[1]) ? json_encode($payload[1]) : 'Customer validation failed.';
+                                throw new \Exception($message);
+                            }
+
+                            $customer = $customerResult->first();
+                        }
+                    }
+
+                    // Ensure customer exists when a customer id is required.
+                    if (!$customer) {
+                        throw new \Exception('Customer is required to create order.');
+                    }
+
+                    // Fill required order ownership fields.
+                    $request['account_id'] = $accountId;
+                    $request['customer_id'] = $customer->id;
+                    $request['order_status_id'] = 4;
+
+                    // Apply duplicate guard only for non-import creation flow.
+                    if ($isImport == 0 && isset($request['customer']['phones']) && count($request['customer']['phones']) > 0) {
+                        $phoneTitles = collect($request['customer']['phones'])->pluck('title')->filter()->values()->all();
+
+                        if (count($phoneTitles) > 0) {
+                            $recentOrders = Order::where('account_id', $accountId)
+                                ->where('created_at', '>=', now()->subMinutes(5))
+                                ->whereHas('phones', function ($query) use ($phoneTitles) {
+                                    $query->whereIn('title', $phoneTitles);
+                                })
+                                ->with('orderPvas')
+                                ->get();
+
+                            $newProductIds = collect($resolvedPvas[$index] ?? [])->pluck('id')->sort()->values()->toArray();
+                            foreach ($recentOrders as $recentOrder) {
+                                $recentProductIds = $recentOrder->orderPvas->pluck('product_variation_attribute_id')->sort()->values()->toArray();
+                                if ($recentProductIds === $newProductIds) {
+                                    throw new \Exception('Duplicate order detected for phone number(s): ' . implode(', ', $phoneTitles));
+                                }
+                            }
+                        }
+                    }
+
+                    // Build business order code for non-import flow.
+                    if ($isImport == 0) {
+                        $request['code'] = $generateOrderCode($request);
+                    }
+
+                    // Fallback to first account warehouse when none was sent.
+                    if (!isset($request['warehouse_id'])) {
+                        $warehouse = Warehouse::where('account_id', $accountId)->first();
+                        if (!$warehouse) {
+                            throw new \Exception('No warehouse found for account.');
+                        }
+                        $request['warehouse_id'] = $warehouse->id;
+                    }
+
+                    // Persist the order row.
+                    $order = Order::create($request);
+
+                    // For import mode, attach first customer phone/address and use provided order_pva.
+                    if ($isImport == 1 || $isImport == 2) {
+                        $requestPvas = $request['order_pva'] ?? [];
+
+                        if ($order->customer && $order->customer->addresses->first()) {
+                            $address = $order->customer->addresses->first();
+                            $order->addresses()->syncWithoutDetaching([$address->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+                        }
+
+                        if ($order->customer && $order->customer->phones->first()) {
+                            $phone = $order->customer->phones->first();
+                            $order->phones()->syncWithoutDetaching([$phone->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+                        }
+                    } else {
+                        $requestPvas = $resolvedPvas[$index] ?? [];
+
+                        // Attach customer addresses to the order and set city from matched address.
+                        foreach (($request['customer']['addresses'] ?? []) as $addressData) {
+                            $customerAddress = $customer->addresses->where('title', $addressData['title'] ?? null)->first();
+                            if ($customerAddress) {
+                                $order->update(['city_id' => $customerAddress->city_id]);
+                                $order->addresses()->syncWithoutDetaching([$customerAddress->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+                            }
+                        }
+
+                        // Attach customer phones to the order.
+                        foreach (($request['customer']['phones'] ?? []) as $phoneData) {
+                            $customerPhone = $customer->phones->where('title', $phoneData['title'] ?? null)->first();
+                            if ($customerPhone) {
+                                $order->phones()->syncWithoutDetaching([$customerPhone->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+                            }
+                        }
+                    }
+
+                    // Attach each resolved product variation to order with computed pricing fields.
+                    foreach ($requestPvas as $pvaData) {
+                        $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
+                        if (!$productVariationAttribute) {
+                            continue;
+                        }
+
+                        $product = Product::find($productVariationAttribute->product_id);
+
+                        // price() is morphToMany → always a Collection, but may be empty.
+                        $initialPrice = $product?->price->first()?->price ?? 0;
+
+                        $productPrice = isset($pvaData['price']) ? $pvaData['price'] : $initialPrice;
+                        $discount = isset($pvaData['discount']) ? $pvaData['discount'] : 0;
+
+                        // orderPvas is not defined on Product, so the property is null.
+                        // Use optional() so ->first() on null returns null safely instead of throwing.
+                        $realPrice = optional($product?->orderPvas)->first()?->price ?? 0;
+
+                        $productVariationAttribute->orders()->attach($order->id, [
+                            'quantity' => $pvaData['quantity'],
+                            'price' => $productPrice,
+                            'realprice' => $realPrice,
+                            'initial_price' => $initialPrice,
+                            'discount' => $discount,
+                            'order_status_id' => 4,
+                            'account_user_id' => $accountUser->id,
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ]);
+
+                        // Persist offer variation links when provided.
+                        if (!empty($pvaData['offerables'])) {
+                            VariationOfferableController::store(new Request([
+                                'order_id' => $order->id,
+                                'pva' => $productVariationAttribute,
+                                'variations' => $pvaData['offerables'],
+                            ]));
+                        }
+                    }
+
+                    // Sync order creation status to Google Sheets (if enabled).
+                    if ($isImport == 0 && config('google-sheets.enabled')) {
+                        try {
+                            app(GoogleSheetsService::class)->appendOrderStatusRow(
+                                $order,
+                                null,
+                                $accountUser,
+                                'Nouvelle commande créée'
+                            );
+
+                            $order->comments()->syncWithoutDetaching([44 => [
+                                'title' => 'Sync with Google Sheets',
+                                'order_status_id' => 4,
+                                'account_user_id' => $accountId,
+                                'score' => 0,
+                                'created_at' => now(),
+                                'updated_at' => now(),
+                            ]]);
+
+                            $order->sync = true;
+                            $order->save();
+                        } catch (\Throwable $e) {
+                            $order->sync = false;
+                            $order->save();
+                            Log::warning('Google Sheets sync failed for order ' . $order->id . ': ' . $e->getMessage());
+                        }
+                    }
+
+                    // Return only created order id to preserve endpoint response contract.
+                    return $order->id;
+                });
+            });
+
+            // Return success payload with all created order ids.
+            return response()->json([
+                'statut' => 1,
+                'data' => $orderIds,
+            ]);
+        } catch (\Throwable $e) {
+            // Return a safe error payload and log details for debugging.
+            Log::error('Order store failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'statut' => 0,
+                'data' => $e->getMessage(),
+            ], 422);
+        }
     }
     public function generatePdf($id)
     {
@@ -910,7 +1066,7 @@ class OrderController extends Controller
                 'data' => 'not exist'
             ]);
         if (isset($request['orderInfo'])) {
-            $data['orderInfo'] = $order->only(['id', 'code', 'shipping_code', 'discount', 'created_at', 'updated_at']);
+            $data['orderInfo'] = $order->only(['id', 'code','carrier_price', 'shipping_code', 'discount', 'created_at', 'updated_at']);
             $orderCustomer = $order->customer;
             $data['orderInfo']['customer'] = $orderCustomer
                 ? $orderCustomer->only('id', 'name', 'note')
@@ -965,8 +1121,8 @@ class OrderController extends Controller
             $orderProducts->activeOrderPvas->map(function ($orderPva) use (&$orderDataProducts) {
                 // Créer un tableau avec les données de base du produit
 
-                if (!isset($orderDataProducts[$orderPva->productVariationAttribute->product->id]))
-                    $orderDataProducts[$orderPva->productVariationAttribute->product->id] = [
+                if (!isset($orderDataProducts[$orderPva->id]))
+                    $orderDataProducts[$orderPva->id] = [
                         "id" => $orderPva->productVariationAttribute->product->id,
                         "title" => $orderPva->productVariationAttribute->product->title,
                         "reference" => $orderPva->productVariationAttribute->product->reference,
@@ -974,21 +1130,21 @@ class OrderController extends Controller
                         "principalImage" => $orderPva->productVariationAttribute->product->principalImage,
                         "productType" => $orderPva->productVariationAttribute->product->productType->only(['id', 'title']),
                     ];
-                $orderDataProducts[$orderPva->productVariationAttribute->product->id]['productVariations'][$orderPva->id] = [
+                $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id] = [
                     "id" => $orderPva->id,
                     "price" => $orderPva->price,
                     "discount" => $orderPva->discount,
                     "quantity" => $orderPva->quantity,
                     "order_status_id" => $orderPva->orderStatus->only('id', 'title'),
                 ];
-                $orderDataProducts[$orderPva->productVariationAttribute->product->id]['productVariations'][$orderPva->id]['offers'] = FilterController::filterselect(new Request(), 'offers', $orderPva->id)['data'];
-                $orderDataProducts[$orderPva->productVariationAttribute->product->id]['productVariations'][$orderPva->id]['selectedOffer'] = null;
+                $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['offers'] = FilterController::filterselect(new Request(), 'offers', $orderPva->id)['data'];
+                $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedOffer'] = null;
                 if ($orderPva->offer_variation_id)
-                    $orderDataProducts[$orderPva->productVariationAttribute->product->id]['productVariations'][$orderPva->id]['selectedOffer'] = [
+                    $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedOffer'] = [
                         "id" => $orderPva->offerableVariation->childOfferableVariations->first()->offerable->offer->id,
                         "title" => $orderPva->offerableVariation->childOfferableVariations->first()->offerable->offer->title,
                     ];
-                $orderDataProducts[$orderPva->productVariationAttribute->product->id]['productVariations'][$orderPva->id]['selectedAttributes'] = $orderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
+                $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedAttributes'] = $orderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
                     // Vérifier si l'attribut a un type
                     if ($childVariationAttribute->attribute->typeAttribute) {
                         // Retourner les données formatées pour chaque attribut de variation
@@ -997,10 +1153,10 @@ class OrderController extends Controller
                             "attribute_type" => $childVariationAttribute->attribute->typeAttribute->title,
                             "title" => $childVariationAttribute->attribute->title
                         ];
-                    }
+                    }  
                 })->filter();
                 // Récupérer les variations d'attributs pour chaque produit
-                $orderDataProducts[$orderPva->productVariationAttribute->product->id]['attributes'] = $orderPva->productVariationAttribute->product->productVariationAttributes->flatMap(function ($productVariationAttribute) {
+                $orderDataProducts[$orderPva->id]['attributes'] = $orderPva->productVariationAttribute->product->productVariationAttributes->flatMap(function ($productVariationAttribute) {
                     return $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
                         // Vérifier si l'attribut a un type
                         if ($childVariationAttribute->attribute->typeAttribute) {
@@ -1266,7 +1422,7 @@ class OrderController extends Controller
             }
             $request['note'] = isset($request['note']) ? $request['note'] : null;
             $request['order_status_id'] = $comment['statut'];
-            $order_only = collect($request)->only('warehouse_id', 'discount',  'order_status_id',  'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id','shipping_code','note','meta');
+            $order_only = collect($request)->only('warehouse_id', 'discount',  'order_status_id',  'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id','shipping_code','note','meta','carrier_price');
             
             $order->update($order_only->all());
             $order->activePvas()->update(['order_status_id' => $comment['statut']]);
@@ -1286,7 +1442,7 @@ class OrderController extends Controller
                 $dataReturn['order_id'] = $order->parentOrder->id;
                 $dataReturn['code'] = $order->parentOrder->code . "PR";
                 $dataReturn['is_change'] = $comment['is_change'];
-                $dataReturn['shipping_price'] = isset($request['comment']['shipping_price']) ? $request['comment']['shipping_price'] : 0;
+                $dataReturn['carrier_price'] = isset($request['comment']['carrier_price']) ? $request['comment']['carrier_price'] : 0;
                 $returnOrder = Order::create($dataReturn);
                 $order->activeOrderPvas->map(function ($orderPva) use ($returnOrder) {
                     $orderPva->update(['principale' => 1]);
@@ -1320,9 +1476,9 @@ class OrderController extends Controller
                 $dataNew['order_id'] = $order->id;
                 $dataNew['code'] = $order->code . "-CH";
                 $dataNew['is_change'] = $comment['is_change'];
-                $dataNew['shipping_price'] = isset($request['comment']['shipping_price']) ? $request['comment']['shipping_price'] : 0;
+                $dataNew['carrier_price'] = isset($request['comment']['carrier_price']) ? $request['comment']['carrier_price'] : 0;
                 $dataNew['discount'] = isset($request['comment']['discount']) ? $request['comment']['discount'] : 0;
-                $order_new = collect($dataNew)->only('code', 'warehouse_id', 'adresse', 'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'customer_id', 'order_status_id', 'account_id', 'shipping_price', 'order_id');
+                $order_new = collect($dataNew)->only('code', 'warehouse_id', 'adresse', 'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'customer_id', 'order_status_id', 'account_id', 'carrier_price', 'order_id');
                 //Générer une nouvelle commande pour échanger la commande principale
                 $newOrder = Order::create($order_new->all());
                 $newOrder->orderStatuses()->attach($newOrder->order_status_id, [

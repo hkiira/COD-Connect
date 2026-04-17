@@ -352,7 +352,7 @@ class ShipmentController extends Controller
                 ]);
                 if (isset($request['orders'])) {
                     $orderPvas = self::validateShip(new Request($request['orders']), $shipmentChild, $canceled = 0, $isRetour = ($shipmentType->id == 2) ? 1 : 0);
-                    if ($shipmentChild->statut == 1 && $shipment->shipment_type_id == 2) {
+                    if ($shipment->shipment_type_id == 2) {
                         $productVariationAttributes = [];
                         $orderPvas->flatten()->Map(function ($orderPva) use (&$productVariationAttributes) {
                             if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
@@ -373,7 +373,7 @@ class ShipmentController extends Controller
                         $return = ReturnController::store(new Request($shipmentChildData), $local = 1);
                         $shipmentChild->update(['mouvement_id' => $return->id]);
                     }
-                    if ($shipmentChild->statut == 1 && $shipment->shipment_type_id == 1) {
+                    if ($shipment->shipment_type_id == 1) {
                         $carrierTotal = 0;
                         $total = 0;
                         foreach ($request['orders'] as $orderData) {
@@ -965,13 +965,16 @@ class ShipmentController extends Controller
         $shipments = collect($requests->except('_method'))->map(function ($request) {
             $shipment_only = collect($request)->only('id', 'warehouse_id', 'carrier_id', 'title', 'comment', 'statut');
             $shipment = Shipment::find($shipment_only['id']);
-            if ($shipment->childShipments->first()->statut == 1 && $shipment->shipment_type_id == 1) {
+            $shipmentChild = $shipment->childShipments->first();
+
+            // --- Handle type 1 (delivery) shipment order changes ---
+            if ($shipmentChild->statut == 1 && $shipment->shipment_type_id == 1) {
                 $carrierTotal = 0;
                 $total = 0;
                 
                 if(isset($request['ordersToActive'])){
                     foreach ($request['ordersToActive'] as $orderData) {
-                        $this->validateShip(new Request($request['ordersToActive']), $shipment->childShipments->first(), $isRetour = ($shipment->shipmentType->id == 2) ? 1 : 0);
+                        $this->validateShip(new Request($request['ordersToActive']), $shipmentChild, $isRetour = 0);
                         $order=Order::find($orderData['id']);
                         $carrierTotal += $order->real_carrier_price;
                         $order->activeOrderPvas->map(function ($pva) use (&$total) {
@@ -985,7 +988,7 @@ class ShipmentController extends Controller
                         $order=Order::find($orderData['id']);
                         $carrierTotal += $orderData['carrier_price']-$order->real_carrier_price;
                     }
-                    $this->validateShip(new Request($request['ordersToUpdate']), $shipment->childShipments->first(), $isRetour = ($shipment->shipmentType->id == 2) ? 1 : 0);
+                    $this->validateShip(new Request($request['ordersToUpdate']), $shipmentChild, $isRetour = 0);
                 }
                 if(isset($request['ordersToInactive'])){
                     $ordersToInactive=[];
@@ -1000,7 +1003,7 @@ class ShipmentController extends Controller
                         $totalOrder-=$order->discount;
                         $total -= $totalOrder;
                     }
-                    $this->validateShip(new Request($ordersToInactive), $shipment->childShipments->first(), $canceled = 1, $isRetour = ($shipment->shipmentType->id == 2) ? 1 : 0);
+                    $this->validateShip(new Request($ordersToInactive), $shipmentChild, $canceled = 1, $isRetour = 0);
                 }
                 if($carrierTotal!=0){
                     $transactionData[] = [
@@ -1020,6 +1023,70 @@ class ShipmentController extends Controller
                         ];
                 TransactionController::store(new Request($transactionData));
             }
+
+            // --- Handle type 2 (return) shipment: sync mouvement stock like PickupController ---
+            if ($shipment->shipment_type_id == 2 && (isset($request['ordersToInactive']) || isset($request['ordersToActive']))) {
+
+                // Remove inactive orders from shipment child.
+                if (!empty($request['ordersToInactive'])) {
+                    $ordersToInactiveFormatted = array_map(fn($id) => ['id' => $id], $request['ordersToInactive']);
+                    $this->validateShip(new Request($ordersToInactiveFormatted), $shipmentChild, $canceled = 1, $isRetour = 1);
+                }
+
+                // Add new active orders to shipment child.
+                if (!empty($request['ordersToActive'])) {
+                    $this->validateShip(new Request($request['ordersToActive']), $shipmentChild, $canceled = 0, $isRetour = 1);
+                }
+
+                // Resolve destination warehouse (return movements go to the receival rayon).
+                $warehouse = Warehouse::find($shipment->warehouse_id);
+                $toWarehouseParent = $warehouse ? $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first() : null;
+                $to_warehouse = $toWarehouseParent
+                    ? $toWarehouseParent->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first()
+                    : null;
+
+                if ($to_warehouse) {
+                    // Reload shipmentChild with fresh order PVAs after order status changes.
+                    $shipmentChild = Shipment::with('orders.orderPvas')->find($shipmentChild->id);
+
+                    // Rebuild PVA totals from real current shipment child orders.
+                    $productVariationAttributes = [];
+                    $shipmentChild->orders->each(function ($order) use (&$productVariationAttributes) {
+                        $order->orderPvas->each(function ($orderPva) use (&$productVariationAttributes) {
+                            if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
+                                $productVariationAttributes[$orderPva->product_variation_attribute_id]['quantity'] += $orderPva->quantity;
+                            } else {
+                                $productVariationAttributes[$orderPva->product_variation_attribute_id] = [
+                                    'id'       => $orderPva->product_variation_attribute_id,
+                                    'quantity' => $orderPva->quantity,
+                                ];
+                            }
+                            $productVariationAttributes[$orderPva->product_variation_attribute_id]['orders'][] = $orderPva->id;
+                        });
+                    });
+
+                    $pvaLines = collect($productVariationAttributes)->values()->toArray();
+
+                    if ($shipmentChild->mouvement_id) {
+                        // Update the existing return mouvement with the reconciled PVA lines.
+                        app(ReturnController::class)->update(new Request([[
+                            'id'                       => $shipmentChild->mouvement_id,
+                            'to_warehouse'             => $to_warehouse->id,
+                            'statut'                   => 1,
+                            'productVariationAttributes' => $pvaLines,
+                        ]]));
+                    } elseif (count($pvaLines) > 0) {
+                        // No mouvement yet: create one and link it to the shipment child.
+                        $return = ReturnController::store(new Request([[
+                            'to_warehouse'             => $to_warehouse->id,
+                            'statut'                   => 1,
+                            'productVariationAttributes' => $pvaLines,
+                        ]]), $local = 1);
+                        $shipmentChild->update(['mouvement_id' => $return->id]);
+                    }
+                }
+            }
+
             $shipment = Shipment::with('childShipments.orders')->find($shipment->id);
             return $shipment;
         });

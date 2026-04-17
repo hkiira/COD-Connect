@@ -311,8 +311,18 @@ class ImportController extends Controller
                 }
             }
         }
-        OrderController::store(new Request($data1), $isImport = 2);
-        OrderController::store(new Request($data), $isImport = 1);
+        $storeResponseDraft = OrderController::store(new Request($data1), $isImport = 2);
+        $storePayloadDraft = method_exists($storeResponseDraft, 'getData') ? $storeResponseDraft->getData(true) : [];
+        if (($storePayloadDraft['statut'] ?? 0) != 1) {
+            return $storeResponseDraft;
+        }
+
+        $storeResponseFinal = OrderController::store(new Request($data), $isImport = 1);
+        $storePayloadFinal = method_exists($storeResponseFinal, 'getData') ? $storeResponseFinal->getData(true) : [];
+        if (($storePayloadFinal['statut'] ?? 0) != 1) {
+            return $storeResponseFinal;
+        }
+
         return "Importation Done";
     }
     public function invoices($lastId)
@@ -491,7 +501,12 @@ class ImportController extends Controller
             }
         }
         if ($orderDatas) {
-            OrderController::store(new Request($orderDatas));
+            $storeResponse = OrderController::store(new Request($orderDatas));
+            $storePayload = method_exists($storeResponse, 'getData') ? $storeResponse->getData(true) : [];
+            if (($storePayload['statut'] ?? 0) != 1) {
+                return $storeResponse;
+            }
+
             foreach ($orderToChangeStatus as $key => $orderToChange) {
                 $this->updateStatus($consumer_key, $consumer_secret, $orderToChange, 'completed');
             }

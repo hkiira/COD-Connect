@@ -32,7 +32,7 @@ class Comment extends Model
     // Relation avec les entrepôts enfants
     public function childComments()
     {
-        return $this->hasMany(Comment::class, 'comment_id');
+        return $this->hasMany(Comment::class, 'comment_id')->where('comments.statut', 1);
     }
     public function orderStatuses(){
         return $this->belongsToMany(OrderStatus::class, 'order_status_comment');

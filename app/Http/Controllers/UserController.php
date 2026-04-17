@@ -336,7 +336,7 @@ class UserController extends Controller
     {
         $phoneableType = "App\Models\User";
         $validator = Validator::make($requests->except('_method'), [
-            '*.id' => 'required|exists:account_user,id',
+            '*.id' => 'required|exists:users,id',
             '*.name' => [ // Validate title field
                 'max:255', // Title should not exceed 255 characters
                 function ($attribute, $value, $fail) use ($requests) { // Custom validation rule
@@ -344,11 +344,13 @@ class UserController extends Controller
                     RestoreController::renameRemovedRecords('user', 'name', $value);
                     $index = str_replace(['*', '.name'], '', $attribute);
                     $accountUserId = $requests->input("{$index}.id");
-                    $userId = AccountUser::find($accountUserId)->user_id;
+                    $accountUser = AccountUser::find($accountUserId);
+                    $userId = $accountUser ? $accountUser->user_id : null;
                     $nameModel = User::where('name', $value)->orderBy('created_at', 'desc')->first();
-                    if ($nameModel && $userId != $nameModel->id) {
+                    if ($nameModel && $userId !== null && $userId != $nameModel->id) {
                         $fail("exist");
                     }
+                    // Optionally, handle the case where $userId is null (e.g., log or fail validation)
                 },
             ],
             '*.phones.*.title' => [
@@ -421,7 +423,7 @@ class UserController extends Controller
         $users = collect($requests->except("_method"))->map(function ($request) {
             $request["account_id"] = getAccountUser()->account_id;
             $user_only = collect($request)->only('id', 'name', 'firstname', 'lastname', 'cin', 'birthday', 'statut');
-            $accountUser = AccountUser::where(['account_id' => getAccountUser()->account_id, 'id' => $user_only['id']])->first();
+            $accountUser = AccountUser::where(['account_id' => getAccountUser()->account_id, 'user_id' => $user_only['id']])->first();
             $user = User::find($accountUser->user_id);
             $user->update($user_only->all());
             if (isset($request['phones'])) {

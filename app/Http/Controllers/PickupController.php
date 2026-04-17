@@ -3,7 +3,7 @@
 
 namespace App\Http\Controllers;
 
-use niklasravnsborg\LaravelPdf\Facades\Pdf as PDF;
+use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 use App\Models\Order;
@@ -202,77 +202,77 @@ class PickupController extends Controller
     {
         $request = collect($request->query())->toArray();
         $data = [];
-        if (isset($request['orders']['inactive'])) {
-            $model = 'App\\Models\\Order';
-            //permet de récupérer la liste des regions inactive filtrés
-            $request['orders']['inactive']['where'] = ['column' => 'pickup_id', 'value' => null];
-            $request['orders']['inactive']['whereArray'] = ['column' => 'order_status_id', 'values' => [4]];
-            $request['orders']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $datas = FilterController::searchs(new Request($request['orders']['inactive']), $model, ['id', 'code'], true, []);
-            $datas['data'] = collect($datas['data'])->map(function ($data) {
-                $orderData = $data->only('id', 'code', 'comment', 'order_id', 'pickup_id', 'order_status_id', 'created_at');
-                $orderData['carriers'] = $data->city->activeCarriers->map(function ($carrier) {
-                    return $carrier->only('id', 'title');
-                });
-                $orderData['user'] = $data->userCreated->map(function ($user) {
-                    return [
-                        "id" => $user->id,
-                        "firstname" => $user->user->firstname,
-                        "lastname" => $user->user->lastname,
-                        "images" => $user->user->images,
-                    ];
-                });
-                $orderData['comments'] = $data->lastOrderComments->map(function ($comment) {
-                    return [
-                        "id" => $comment->id,
-                        "title" => $comment->title,
-                        "user" => $comment->accountUser->user,
-                        "status" => $comment->orderStatus,
-                    ];
-                });
-                $orderData['customer'] = $data->customer->only('id', 'name', 'images');
-                $orderData['customer']['phones'] = $data->phones->map(function ($phone) {
-                    return $phone->only('id', 'title');
-                });
-                $orderData['customer']['address'] = $data->addresses->map(function ($address) {
-                    return $address->only('id', 'title', 'city');
-                });
-                $total = 0;
-                $orderData['products'] = $data->productVariationAttributes->map(function ($pva) use (&$total) {
-                    $total += $pva->pivot->price * $pva->pivot->quantity;
-                    $productInfo = [
-                        'id' => $pva->id,
-                        'price' => $pva->pivot->price,
-                        'quantity' => $pva->pivot->quantity,
-                        'images' => $pva->product->images,
-                        'productType' => $pva->product->productType,
-                        'product' => $pva->product->title,
-                        'reference' => $pva->product->reference,
-                        'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
-                            return [
-                                "id" => $child->attribute->id,
-                                "title" => $child->attribute->title,
-                                "typeAttribute" => $child->attribute->typeAttribute->title,
-                            ];
-                        })
-                    ];
-                    return $productInfo;
-                });
-                $orderData['total'] = $total;
-                $orderData['discount'] = 0;
-                $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
-                $orderData['source'] = $data->brandSource->source->only('id', 'title', 'images');
-
-                return $orderData;
+        $inactiveParams = (isset($request['orders']['inactive']) && is_array($request['orders']['inactive']))
+            ? $request['orders']['inactive']
+            : [];
+        $model = 'App\\Models\\Order';
+        $inactiveParams['where'] = ['column' => 'pickup_id', 'value' => null];
+        $inactiveParams['whereArray'] = ['column' => 'order_status_id', 'values' => [4]];
+        $inactiveParams['inAccount'] = ['account_id', getAccountUser()->account_id];
+        $datas = FilterController::searchs(new Request($inactiveParams), $model, ['id', 'code'], true, []);
+        $datas['data'] = collect($datas['data'])->map(function ($data) {
+            $orderData = $data->only('id', 'code', 'comment', 'order_id', 'pickup_id', 'order_status_id', 'created_at');
+            $orderData['carriers'] = $data->city->activeCarriers->map(function ($carrier) {
+                return $carrier->only('id', 'title');
             });
-            // Add pagination fields at the root level as well as inside meta
-            if (isset($datas['meta'])) {
-                $datas['total'] = $datas['meta']['total'] ?? null;
-                $datas['per_page'] = $datas['meta']['per_page'] ?? null;
-                $datas['current_page'] = $datas['meta']['current_page'] ?? null;
-            }
-            $data['orders']['inactive'] = $datas;
+            $orderData['user'] = $data->userCreated->map(function ($user) {
+                return [
+                    "id" => $user->id,
+                    "firstname" => $user->user->firstname,
+                    "lastname" => $user->user->lastname,
+                    "images" => $user->user->images,
+                ];
+            });
+            $orderData['comments'] = $data->lastOrderComments->map(function ($comment) {
+                return [
+                    "id" => $comment->id,
+                    "title" => $comment->title,
+                    "user" => $comment->accountUser->user,
+                    "status" => $comment->orderStatus,
+                ];
+            });
+            $orderData['customer'] = $data->customer->only('id', 'name', 'images');
+            $orderData['customer']['phones'] = $data->phones->map(function ($phone) {
+                return $phone->only('id', 'title');
+            });
+            $orderData['customer']['address'] = $data->addresses->map(function ($address) {
+                return $address->only('id', 'title', 'city');
+            });
+            $total = 0;
+            $orderData['products'] = $data->productVariationAttributes->map(function ($pva) use (&$total) {
+                $total += $pva->pivot->price * $pva->pivot->quantity;
+                $productInfo = [
+                    'id' => $pva->id,
+                    'price' => $pva->pivot->price,
+                    'quantity' => $pva->pivot->quantity,
+                    'images' => $pva->product->images,
+                    'productType' => $pva->product->productType,
+                    'product' => $pva->product->title,
+                    'reference' => $pva->product->reference,
+                    'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
+                        return [
+                            "id" => $child->attribute->id,
+                            "title" => $child->attribute->title,
+                            "typeAttribute" => $child->attribute->typeAttribute->title,
+                        ];
+                    })
+                ];
+                return $productInfo;
+            });
+            $orderData['total'] = $total;
+            $orderData['discount'] = 0;
+            $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
+            $orderData['source'] = $data->brandSource->source->only('id', 'title', 'images');
+
+            return $orderData;
+        });
+        // Add pagination fields at the root level as well as inside meta
+        if (isset($datas['meta'])) {
+            $datas['total'] = $datas['meta']['total'] ?? null;
+            $datas['per_page'] = $datas['meta']['per_page'] ?? null;
+            $datas['current_page'] = $datas['meta']['current_page'] ?? null;
         }
+        $data['orders']['inactive'] = $datas;
 
         return response()->json([
             'statut' => 1,
@@ -362,27 +362,25 @@ class PickupController extends Controller
             $pickup = Pickup::create($pickup_only->all());
             if (isset($request['orders'])) {
                 $orderPvas = self::validatePickup(new Request($request['orders']), $pickup);
-                if ($pickup->statut = 1) {
-                    $productVariationAttributes = [];
-                    collect($orderPvas)->flatten()->Map(function ($orderPva) use (&$productVariationAttributes) {
-                        if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
-                            $productVariationAttributes[$orderPva->product_variation_attribute_id]["quantity"] += $orderPva->quantity;
-                        } else {
-                            $productVariationAttributes[$orderPva->product_variation_attribute_id] = [
-                                "id" => $orderPva->product_variation_attribute_id,
-                                "quantity" => $orderPva->quantity,
-                            ];
-                        }
-                        $productVariationAttributes[$orderPva->product_variation_attribute_id]['orders'][] = $orderPva->id;
-                    });
-                    $pickupData = [
-                        'from_warehouse' => $from_warehouse->id,
-                        'statut' => 1,
-                        'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray()
-                    ];
-                    $exitslip = ExitslipController::store(new Request($pickupData));
-                    $pickup->update(['mouvement_id' => $exitslip->id]);
-                }
+                $productVariationAttributes = [];
+                collect($orderPvas)->flatten()->Map(function ($orderPva) use (&$productVariationAttributes) {
+                    if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
+                        $productVariationAttributes[$orderPva->product_variation_attribute_id]["quantity"] += $orderPva->quantity;
+                    } else {
+                        $productVariationAttributes[$orderPva->product_variation_attribute_id] = [
+                            "id" => $orderPva->product_variation_attribute_id,
+                            "quantity" => $orderPva->quantity,
+                        ];
+                    }
+                    $productVariationAttributes[$orderPva->product_variation_attribute_id]['orders'][] = $orderPva->id;
+                });
+                $pickupData = [
+                    'from_warehouse' => $from_warehouse->id,
+                    'statut' => 1,
+                    'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray()
+                ];
+                $exitslip = ExitslipController::store(new Request($pickupData));
+                $pickup->update(['mouvement_id' => $exitslip->id]);
             }
             return $pickup;
         });
@@ -642,6 +640,9 @@ class PickupController extends Controller
             $data['orders']['active'] =  $orders;
         }
         if (isset($request['orders']['inactive'])) {
+            $request['orders']['inactive'] = (isset($request['orders']['inactive']) && is_array($request['orders']['inactive']))
+                ? $request['orders']['inactive']
+                : [];
             $model = 'App\\Models\\Order';
             //permet de récupérer la liste des regions inactive filtrés
             $request['orders']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
@@ -771,37 +772,56 @@ class PickupController extends Controller
                 $this->validatePickup(new Request($pickup->orders->pluck('id')->toArray()), $pickup);
             }
             $warehouse = Warehouse::find($pickup->warehouse_id);
-            $from_warehouse = $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first()->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first();
+            $fromWarehouseParent = $warehouse ? $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first() : null;
+            $from_warehouse = $fromWarehouseParent ? $fromWarehouseParent->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first() : null;
+
+            $productVariationAttributes = [];
             if (isset($request['ordersToInactive'])) {
                 $this->validatePickup(new Request($request['ordersToInactive']), $pickup, $canceled = 1);
             }
+
             if (isset($request['ordersToActive'])) {
-                $orderPvas = $this->validatePickup(new Request($request['ordersToActive']), $pickup);
-                if ($pickup->statut = 1) {
-                    $productVariationAttributes = [];
-                    collect($orderPvas)->flatMap(function ($orderPva) use (&$productVariationAttributes) {
-                        print($orderPva->first()->product_variation_attribute_id);
-                        if (isset($productVariationAttributes[$orderPva->first()->product_variation_attribute_id])) {
-                            $productVariationAttributes[$orderPva->first()->product_variation_attribute_id]["quantity"] += $orderPva->first()->quantity;
+                $this->validatePickup(new Request($request['ordersToActive']), $pickup);
+            }
+
+            // Keep one mouvement per pickup and sync it with the real current pickup stock.
+            if ((isset($request['ordersToInactive']) || isset($request['ordersToActive'])) && $from_warehouse) {
+                $pickup = Pickup::with('orders.orderPvas')->find($pickup->id);
+                $productVariationAttributes = [];
+                $pickup->orders->each(function ($order) use (&$productVariationAttributes) {
+                    $order->orderPvas->each(function ($orderPva) use (&$productVariationAttributes) {
+                        if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
+                            $productVariationAttributes[$orderPva->product_variation_attribute_id]["quantity"] += $orderPva->quantity;
                         } else {
-                            $productVariationAttributes[$orderPva->first()->product_variation_attribute_id] = [
-                                "id" => $orderPva->first()->product_variation_attribute_id,
-                                "quantity" => $orderPva->first()->quantity,
+                            $productVariationAttributes[$orderPva->product_variation_attribute_id] = [
+                                "id" => $orderPva->product_variation_attribute_id,
+                                "quantity" => $orderPva->quantity,
                             ];
                         }
-                        $productVariationAttributes[$orderPva->first()->product_variation_attribute_id]['orders'][] = $orderPva->first()->id;
+                        $productVariationAttributes[$orderPva->product_variation_attribute_id]['orders'][] = $orderPva->id;
                     });
-                    $pickupData = [
+                });
+
+                $pickupData = [
+                    'from_warehouse' => $from_warehouse->id,
+                    'statut' => 1,
+                    'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray()
+                ];
+
+                if ($pickup->mouvement_id) {
+                    app(ExitslipController::class)->update(new Request([[
+                        'id' => $pickup->mouvement_id,
                         'from_warehouse' => $from_warehouse->id,
                         'statut' => 1,
-                        'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray()
-                    ];
+                        'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray(),
+                    ]]));
+                } elseif (count($pickupData['productVariationAttributes']) > 0) {
                     $exitslip = ExitslipController::store(new Request($pickupData));
                     $pickup->update(['mouvement_id' => $exitslip->id]);
                 }
             }
 
-            $pickup = Pickup::with('orders')->find($pickup->id);
+            return Pickup::with('orders')->find($pickup->id);
         });
         return response()->json([
             'statut' => 1,

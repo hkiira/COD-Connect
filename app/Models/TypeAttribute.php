@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes; // Import the SoftDeletes trait
 
-class typeAttribute extends Model
+class TypeAttribute extends Model
 {
     use SoftDeletes;
     protected $dates = ['deleted_at'];

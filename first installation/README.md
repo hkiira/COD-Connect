@@ -1,2 +1,0 @@
-1-f product 7ta nchofo le cas dial y3zel f store les productVariationAttribute pour chaque offre et chaque supplier
-2- f cas dial bgha yzid des diffrentes mesures 7ta nchofo kifach n géréwhha m3a les productVariationAttibute ila kano mkhatlfine par ex: serie fiha (2*39 2*40 2*41 2*42)

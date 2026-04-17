@@ -11,7 +11,7 @@ use App\Models\Supplier;
 use App\Models\SupplierOrder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
-use niklasravnsborg\LaravelPdf\Facades\Pdf as PDF;
+use Barryvdh\DomPDF\Facade\Pdf as PDF;
 
 class SupplierOrderController extends Controller
 {
@@ -160,7 +160,7 @@ class SupplierOrderController extends Controller
             $products = FilterController::searchs(new Request($request['products']['inactive']), $model, ['id', 'title'], false, $associated)->map(function ($product) use ($pvas) {
                 $productData = $product->only('id', 'title');
                 $productData['productType'] = $product->productType;
-                $productData['productVariations'] = $product->productVariationAttributes->map(function ($productVariationAttribute) use ($product, $pvas) {
+                $productData['productVariations'] = $product->activePvas->map(function ($productVariationAttribute) use ($product, $pvas) {
                     if ($product->product_type_id == 1) {
                         if (in_array($productVariationAttribute->id, $pvas)) {
                             $pvaData = ["id" => $productVariationAttribute->id];

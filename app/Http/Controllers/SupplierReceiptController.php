@@ -225,7 +225,11 @@ class SupplierReceiptController extends Controller
                 'required', 'int',
                 function ($attribute, $value, $fail) use (&$warehouse) {
                     $account = getAccountUser()->account_id;
-                    $warehouse = Warehouse::where(['warehouse_type_id' => 3, 'id' => $value, 'account_id' => $account])->first();
+                    $parentWarehouse = Warehouse::where(['warehouse_type_id' => 1, 'account_id' => $account,'id' => $value])->first()->childWarehouses->first();
+                    if(!$parentWarehouse){
+                        $fail("not exist");
+                    }
+                    $warehouse = Warehouse::where(['warehouse_type_id' => 3, 'warehouse_id' => $parentWarehouse->id, 'account_id' => $account])->first();
                     if (!$warehouse) {
                         $fail("not exist");
                     }
@@ -240,7 +244,6 @@ class SupplierReceiptController extends Controller
                 'data' => $validator->errors(),
             ]);
         };
-
         $supplierReceipts = collect($requests->except('_method'))->map(function ($request) use ($warehouse) {
             $request["account_user_id"] = getAccountUser()->id;
             $account_id = getAccountUser()->account_id;

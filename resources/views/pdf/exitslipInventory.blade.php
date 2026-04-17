@@ -120,10 +120,10 @@
                     </tr>
                     @foreach($fromWarehouse['products'] as $product):
                         <tr>
-                            <td style="font-size: 13px; ">{{$product['title']}}</td>
-                            <td style="font-size: 13px; ">{{$product['before']}}</td>
-                            <td style="font-size: 13px; ">{{$product['after']}}</td>
-                            <td style="font-size: 13px; ">{{$product['quantity']}}</td>
+							<td style="font-size: 13px; ">{{$product['title'] ?? ''}}</td>
+							<td style="font-size: 13px; ">{{$product['before'] ?? 0}}</td>
+							<td style="font-size: 13px; ">{{$product['after'] ?? 0}}</td>
+							<td style="font-size: 13px; ">{{$product['quantity'] ?? 0}}</td>
                         </tr>
                     @endforeach;
             </table>

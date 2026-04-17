@@ -11,7 +11,7 @@ use App\Models\Account;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 
-class sourceController extends Controller
+class SourceController extends Controller
 {
     public static function index(Request $request)
     {

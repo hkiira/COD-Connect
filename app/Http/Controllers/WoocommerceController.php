@@ -323,8 +323,11 @@ class WoocommerceController extends Controller
             $request['products'] = $products;
             if (isset($request['products']))
                 if ($request['products']) {
-                    OrderController::store(new Request([$request]));
-                    $this->updateOrder($order['id'], 'completed');
+                    $storeResponse = OrderController::store(new Request([$request]));
+                    $storePayload = method_exists($storeResponse, 'getData') ? $storeResponse->getData(true) : [];
+                    if (($storePayload['statut'] ?? 0) == 1) {
+                        $this->updateOrder($order['id'], 'completed');
+                    }
                 }
         })->filter()->values()->toArray();
         return response()->json([

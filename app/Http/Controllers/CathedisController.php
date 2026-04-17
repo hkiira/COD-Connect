@@ -813,8 +813,18 @@ class CathedisController extends Controller
                 }
             }
         }
-        OrderController::store(new Request($data), $isImport = 1);
-        OrderController::store(new Request($data1), $isImport = 2);
+        $storeResponseFinal = OrderController::store(new Request($data), $isImport = 1);
+        $storePayloadFinal = method_exists($storeResponseFinal, 'getData') ? $storeResponseFinal->getData(true) : [];
+        if (($storePayloadFinal['statut'] ?? 0) != 1) {
+            return $storeResponseFinal;
+        }
+
+        $storeResponseDraft = OrderController::store(new Request($data1), $isImport = 2);
+        $storePayloadDraft = method_exists($storeResponseDraft, 'getData') ? $storeResponseDraft->getData(true) : [];
+        if (($storePayloadDraft['statut'] ?? 0) != 1) {
+            return $storeResponseDraft;
+        }
+
         return "ok";
     }
     public function orderPvas()
