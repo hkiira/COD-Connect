@@ -124,8 +124,10 @@ class Order extends Model
             ->withPivot('order_status_id', 'account_user_id', 'title');
     }
 
-
-
+    public function review()
+    {
+        return $this->hasOne(Review::class);
+    }
 
     public function customer()
     {
@@ -225,5 +227,10 @@ class Order extends Model
             })->toArray();
             return $product;
         });
+    }
+
+    public function reviewAnswers()
+    {
+        return $this->hasManyThrough(ReviewAnswer::class, Review::class);
     }
 }

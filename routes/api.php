@@ -3,6 +3,8 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
+use App\Http\Controllers\Api\ReviewController;
+use App\Http\Controllers\Api\ReviewQuestionController;
 use App\Http\Controllers\{
     RoleController,
     OrderStatusController,
@@ -263,6 +265,12 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
 
     Route::get('afradelivery/{entity}/{id?}/{type?}', [AfraDeliveryController::class, 'rest']);
     Route::post('afradelivery/{entity}/{id?}/{type?}', [AfraDeliveryController::class, 'rest']);
+    // GET endpoint to fetch the questions for building the form
+    Route::get('/orders/{order}/reviews/questions', [ReviewController::class, 'index']);
+
+    // POST endpoint to submit the review form
+    Route::post('/orders/{order}/reviews', [ReviewController::class, 'store']);
+    Route::apiResource('review-questions', ReviewQuestionController::class);
 
     // Order Management
     // Route::post('/speedafw/orders/create', [SpeedafwController::class, 'createOrder']);
@@ -285,3 +293,4 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
 
     Route::get('/speedafw/debug/api-connection', [SpeedafwController::class, 'testApiConnection']);
 });
+

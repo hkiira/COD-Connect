@@ -55,7 +55,13 @@ class OrderController extends Controller
         }
 
 
-        $ordersQuery = Order::orderBy($filter['sort']['by'], $filter['sort']['order'])->where('account_id', getAccountUser()->account_id);
+        $ordersQuery = Order::orderBy($filter['sort']['by'], $filter['sort']['order'])
+            ->where('account_id', getAccountUser()->account_id)
+            ->withAvg(['reviewAnswers as review_score' => function ($query) {
+                $query->whereHas('question', function ($q) {
+                    $q->where('type', 'stars');
+                });
+            }], 'answer_value');
 
         // Define filter mapping: key => [type, path]
         $filterMap = [
@@ -213,6 +219,7 @@ class OrderController extends Controller
                 $sourceArr['images'] = $source->images->sortByDesc('created_at')->values();
             }
             $orderData['source'] = $sourceArr;
+            $orderData['review_score'] = isset($data->review_score) ? (float)round($data->review_score, 2) : null;
             return $orderData;
         });
 

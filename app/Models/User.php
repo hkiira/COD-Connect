@@ -103,4 +103,9 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(SupplierReceipt::class, 'supplier_order_product_size');
     }
+
+    public function reviews()
+    {
+        return $this->hasMany(Review::class);
+    }
 }

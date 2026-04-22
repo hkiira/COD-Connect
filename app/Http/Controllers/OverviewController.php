@@ -119,10 +119,11 @@ class OverviewController extends Controller
         $prevOffers = DB::table('offers')->where('account_id', $accountId)->whereBetween('created_at', $dates['previous'])->whereNull('deleted_at')->count();
 
         return [
-            'total_revenue'   => $this->formatMetric($currentRevenue, $prevRevenue, true),
-            'total_orders'    => $this->formatMetric($currentOrders, $prevOrders),
-            'avg_order_value' => $this->formatMetric($currentAvgOrderValue, $prevAvgOrderValue, true),
-            'total_offers'    => $this->formatMetric($currentOffers, $prevOffers),
+            'total_revenue'         => $this->formatMetric($currentRevenue, $prevRevenue, true),
+            'total_orders'          => $this->formatMetric($currentOrders, $prevOrders),
+            'avg_order_value'       => $this->formatMetric($currentAvgOrderValue, $prevAvgOrderValue, true),
+            'total_offers'          => $this->formatMetric($currentOffers, $prevOffers),
+            'customer_satisfaction' => $this->getCustomerSatisfaction($dates, $accountId),
         ];
     }
     
@@ -612,6 +613,31 @@ class OverviewController extends Controller
             ->limit(5)
             ->get();
     }
+
+    private function getCustomerSatisfaction($dates, $accountId)
+    {
+        $currentAvg = DB::table('review_answers')
+            ->join('reviews', 'review_answers.review_id', '=', 'reviews.id')
+            ->join('orders', 'reviews.order_id', '=', 'orders.id')
+            ->join('review_questions', 'review_answers.review_question_id', '=', 'review_questions.id')
+            ->where('orders.account_id', $accountId)
+            ->where('review_questions.type', 'stars')
+            ->whereBetween('orders.created_at', $dates['current'])
+            ->avg('review_answers.answer_value');
+
+        $previousAvg = DB::table('review_answers')
+            ->join('reviews', 'review_answers.review_id', '=', 'reviews.id')
+            ->join('orders', 'reviews.order_id', '=', 'orders.id')
+            ->join('review_questions', 'review_answers.review_question_id', '=', 'review_questions.id')
+            ->where('orders.account_id', $accountId)
+            ->where('review_questions.type', 'stars')
+            ->whereBetween('orders.created_at', $dates['previous'])
+            ->avg('review_answers.answer_value');
+
+        return $this->formatMetric($currentAvg, $previousAvg);
+    }
+
+    //endregion
 
     //region Helpers
     private function buildResponse(Request $request, $cacheKey, callable $dataCallback)
