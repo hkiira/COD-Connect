@@ -371,7 +371,8 @@ class ShipmentController extends Controller
                             'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray()
                         ];
                         $return = ReturnController::store(new Request($shipmentChildData), $local = 1);
-                        $shipmentChild->update(['mouvement_id' => $return->id]);
+                        if($return && isset($return->id))
+                            $shipmentChild->update(['mouvement_id' => $return->id]);
                     }
                     if ($shipment->shipment_type_id == 1) {
                         $carrierTotal = 0;

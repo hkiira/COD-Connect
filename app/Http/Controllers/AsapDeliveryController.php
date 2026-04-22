@@ -330,6 +330,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $updatedCode=0;
         foreach ($orders as $order) {
             $asapOrder= $this->getLastStatuses($order->code,$sessionId);
+        return $asapOrder;
             if($asapOrder){
                 // Update the order with ASAP order ID and shipping code
                 $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
@@ -792,7 +793,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
+            "token" => "8a355170e5de449db59061cef47bb515405addc24cd",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -883,8 +884,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $curl = curl_init();
         $headers[] = 'Content-Type: application/json';
         $body = [
-            'username' => 'achkar.abder@gmail.com',
-            'password' => 'STYLMAN',
+            'username' => 'styemen@gmail.com',
+            'password' => 'azerty',
         ];
         $body = http_build_query($body);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);

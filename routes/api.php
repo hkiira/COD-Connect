@@ -95,6 +95,7 @@ use App\Http\Controllers\{
     SpeedafwController,
     AfraDeliveryController,
     StockController,
+    OverviewController,
     MouvementController
 };
 use App\Http\Controllers\API\RegisterController;
@@ -115,7 +116,7 @@ use App\Models\ExpenseType;
 //     return $request->user();
 // });
 Route::post('register_new_account', [RegisterController::class, 'register_new_account']);
-Route::post('login', [RegisterController::class, 'login']);
+Route::post('login', [RegisterController::class, 'login'])->name('login');
 // Route::resource('PhoneTypes', PhoneTypesController::class);
 
 Route::middleware(['VerifyDomain', 'auth.optional'])->group(function () {
@@ -243,7 +244,13 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('orders/test-total/{orderId}', [OrderController::class, 'testCalculateTotal']);
     Route::post('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
     Route::get('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
-    // Speedaf public API
+    Route::get('overviews/sales', [OverviewController::class, 'sales']);
+    Route::get('overviews/logistics', [OverviewController::class, 'logistics']);
+    Route::get('overviews/procurement', [OverviewController::class, 'procurement']);
+    Route::get('overviews/catalog', [OverviewController::class, 'catalog']);
+    Route::get('overviews/finance', [OverviewController::class, 'finance']);
+    Route::get('overviews/administration', [OverviewController::class, 'administration']);
+    // Speedafv public API
     Route::post('speedaf/track-order', [SpeedafController::class, 'trackOrder']);
     // CSP public passthrough
     Route::post('speedaf/track-csp', [SpeedafController::class, 'trackCsp']);
@@ -256,6 +263,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
 
     Route::get('afradelivery/{entity}/{id?}/{type?}', [AfraDeliveryController::class, 'rest']);
     Route::post('afradelivery/{entity}/{id?}/{type?}', [AfraDeliveryController::class, 'rest']);
+
     // Order Management
     // Route::post('/speedafw/orders/create', [SpeedafwController::class, 'createOrder']);
     // Route::post('/speedafw/orders/batch-create', [SpeedafwController::class, 'batchCreateOrders']);
@@ -273,6 +281,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     // // Label Printing
     // Route::post('/speedafw/print-label', [SpeedafwController::class, 'printLabel']);
     
-    // Route::get('/speedafw/debug/encryption', [SpeedafwController::class, 'testEncryption']);
-    // Route::get('/speedafw/debug/api-connection', [SpeedafwController::class, 'testApiConnection']);
+    // Overview Endpoints
+
+    Route::get('/speedafw/debug/api-connection', [SpeedafwController::class, 'testApiConnection']);
 });
