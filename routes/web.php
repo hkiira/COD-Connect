@@ -23,7 +23,6 @@ Route::get('supplier_receipts/print/{id}', [SupplierReceiptController::class, 'g
 Route::get('supplier_orders/print/{id}', [SupplierOrderController::class, 'generatePdf']);
 Route::get('orders/print/{id}', [OrderController::class, 'generatePdf']);
 Route::get('pickups/print/{id}', [PickupController::class, 'generatePdf']);
-Route::get('pickups/print/{id}', [PickupController::class, 'generatePdf']);
 
 Route::get('/', function () {
     return view('welcome');

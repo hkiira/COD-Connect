@@ -985,13 +985,13 @@ class FilterController extends Controller
                 $object = "App\\Models\\OrderStatus";
                 if ($id) {
                     $results = $object::with('comments.childComments')->find($id);
-                    $datas = $results->comments->map(function ($result) {
+                    $datas = $results->comments->sortByDesc('id')->map(function ($result) {
                         $data = ['id' => $result->id, 'title' => $result->title];
                         $data['statuts_childs'] = $result->childComments->map(function ($childComment) {
                             return ['id' => $childComment->id, 'title' => $childComment->title, 'is_change' => $childComment->is_change, 'postponed' => $childComment->postponed];
                         });
                         return $data;
-                    });
+                    })->values();
                 } else {
                     $results = $object::with('comments.childComments')->get();
                     $datas = $results->map(function ($result) {

@@ -98,6 +98,7 @@ use App\Http\Controllers\{
     AfraDeliveryController,
     StockController,
     OverviewController,
+    ScrapController,
     MouvementController
 };
 use App\Http\Controllers\API\RegisterController;
@@ -246,6 +247,8 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('orders/test-total/{orderId}', [OrderController::class, 'testCalculateTotal']);
     Route::post('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
     Route::get('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
+Route::get('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
+Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
     Route::get('overviews/sales', [OverviewController::class, 'sales']);
     Route::get('overviews/logistics', [OverviewController::class, 'logistics']);
     Route::get('overviews/procurement', [OverviewController::class, 'procurement']);
@@ -293,4 +296,11 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
 
     Route::get('/speedafw/debug/api-connection', [SpeedafwController::class, 'testApiConnection']);
 });
+
+// Route::post('deliveryMen', [DeliveryMenController::class, 'index']);
+// Route::post('old_sys', [OldSysController::class, 'index']);
+// Route::get('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
+// Route::post('import', [ImportController::class, 'import']);
+// Route::post('importInventories', [ImportController::class, 'importInventories']);
+// Route::post('checkcities', [SynchronisationController::class, 'checkCities']);
 

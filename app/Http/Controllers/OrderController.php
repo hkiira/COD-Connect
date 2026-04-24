@@ -42,26 +42,24 @@ class OrderController extends Controller
         if (isset($request['pagination'])) {
             $filter['limit'] = isset($request['pagination']['per_page']) ? $request['pagination']['per_page'] : 10;
             $filter['page'] = isset($request['pagination']['current_page']) ? $request['pagination']['current_page'] : 0;
-            if (isset($request['sort']) && isset($request['sort'][0]['column'])) {
-                $filter['sort']['by'] = $request['sort'][0]['column'];
-            } else {
-                $filter['sort']['by'] = 'created_at';
-            }
-            if (isset($request['sort']) && isset($request['sort'][0]['order'])) {
-                $filter['sort']['order'] = $request['sort'][0]['order'];
-            } else {
-                $filter['sort']['order'] = 'desc';
-            }
         }
 
+        $sortBy = $request['sort'][0]['column'] ?? 'created_at';
+        $sortOrder = $request['sort'][0]['order'] ?? 'desc';
 
-        $ordersQuery = Order::orderBy($filter['sort']['by'], $filter['sort']['order'])
-            ->where('account_id', getAccountUser()->account_id)
-            ->withAvg(['reviewAnswers as review_score' => function ($query) {
-                $query->whereHas('question', function ($q) {
-                    $q->where('type', 'stars');
-                });
-            }], 'answer_value');
+        $ordersQuery = Order::where('account_id', getAccountUser()->account_id);
+
+        if ($sortBy === 'total') {
+            $totalSubquery = OrderPva::selectRaw('SUM(price * quantity)')
+                ->whereColumn('order_pva.order_id', 'orders.id')
+                ->whereNotIn('order_pva.order_status_id', [2, 3]);
+
+            $ordersQuery->select('orders.*')
+                ->selectSub($totalSubquery, 'total_value')
+                ->orderBy('total_value', $sortOrder);
+        } else {
+            $ordersQuery->orderBy($sortBy, $sortOrder);
+        }
 
         // Define filter mapping: key => [type, path]
         $filterMap = [
@@ -219,7 +217,6 @@ class OrderController extends Controller
                 $sourceArr['images'] = $source->images->sortByDesc('created_at')->values();
             }
             $orderData['source'] = $sourceArr;
-            $orderData['review_score'] = isset($data->review_score) ? (float)round($data->review_score, 2) : null;
             return $orderData;
         });
 
