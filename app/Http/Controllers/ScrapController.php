@@ -35,6 +35,8 @@ class ScrapController extends Controller
                 return $this->getLastStatuses($id);
             case 'export':
                 return $this->export($id);
+            case 'get_order':
+                return $this->getOrder($id);
             case 'orders':
                 return $this->orders($id);
             case 'pickup':
@@ -148,7 +150,7 @@ class ScrapController extends Controller
     public function import(Request $request){
         try {
             $file = $request->file('file');
-            $import = new class implements \Maatwebsite\Excel\Concerns\ToCollection, \Maatwebsite\Excel\Concerns\WithStartRow {
+            $import = new class implements \Maatwebsite\Excel\Concerns\ToCollection, \Maatwebsite\Excel\Concerns\WithStartRow, \Maatwebsite\Excel\Concerns\WithCustomCsvSettings {
                 public function collection(\Illuminate\Support\Collection $rows)
                 {
                     // No specific processing is needed here for this implementation
@@ -157,6 +159,12 @@ class ScrapController extends Controller
                 public function startRow(): int
                 {
                     return 2; // Start from row 2, skipping the header row
+                }
+                public function getCsvSettings(): array
+                {
+                    return [
+                        'input_encoding' => 'UTF-8'
+                    ];
                 }
             };
 
@@ -239,34 +247,9 @@ class ScrapController extends Controller
         }
         return $data;
     }
-    public function syncOrders(){
-        $pickups = Pickup::where('carrier_id', 22)->get()->pluck('id')->toArray();
-        $orders = Order::where('account_id', getAccountUser()->account_id)
-                      ->whereIn('pickup_id', $pickups)
-                      ->where('shipping_code','non')
-                      ->whereIn('order_status_id', [6, 7])
-                      ->orderBy('created_at', 'desc')
-                      ->get();
-                      return $orders->count();
-        $updatedCode=0;
-        foreach ($orders as $order) {
-            if($order->pickup->carrier_id == 22){
-                $asapOrder= $this->getLastStatuses($order->code);
-                if($asapOrder){
-                    $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
-                    $updatedCode++;
-                }else{
-                    $order->update(['shipping_code' => "non"]);
-                }
-            }elseif($order->pickup->carrier_id == 23){
-                $order->update(['meta' => null, 'shipping_code' => $order->code]);
-                $updatedCode++;
-            }
-        }
-        return $updatedCode;
-    }
-    public function getOrder($code, $sessionId)
+    public function getOrder($code, $sessionId = null)
     {
+        $sessionId= $sessionId ?? $this->login();
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
@@ -276,13 +259,28 @@ class ScrapController extends Controller
             'form_params' => [
                 "state" => "1",
                 "keyword" => $code,
+                "client" => "",
+                "worker" => "",
+                "city" => "",
+                "ids" => "",
+                "st" => "",
+                "change" => "",
+                "stock" => "",
+                "datestart" => "",
+                "dateend" => "",
+                "datestartupdate" => "",
+                "dateendupdate" => "",
+                "start" => "0",
+                "nbpage" => "10",
+                "sortby" => "dateadd",
+                "orderby" => "ASC",
                 "action" => "loadramassages"
             ],
             'headers' => [
                 'Cookie' => $sessionId,
             ]
         ]);
-
+        
         $htmlContent = $response->getBody()->getContents();
         $dom = new \DOMDocument();
         libxml_use_internal_errors(true);
@@ -297,10 +295,28 @@ class ScrapController extends Controller
             if ($cells->length >= 12) {
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
-                $asapCode  = trim($cells->item(11)->textContent);
+                $date  = trim($cells->item(2)->textContent);
+                $destinataire  = utf8_decode(trim($cells->item(3)->textContent));
+                $phone  = trim($cells->item(4)->textContent);
+                $city  = trim($cells->item(5)->textContent);
+                $price  = trim($cells->item(6)->textContent);
+                $state  = utf8_decode(trim($cells->item(7)->textContent));
+                $ischange  = trim($cells->item(8)->textContent);
+                $asapCode  = trim($cells->item(9)->textContent);
+                $code  = trim($cells->item(10)->textContent);
+                $product  = utf8_decode(trim($cells->item(11)->textContent));
                 $data[] = [
                     'id' => $id,
+                    'date' => $date,
+                    'destinataire' => $destinataire,
+                    'phone' => $phone,
+                    'city' => $city,
+                    'price' => $price,
+                    'state' => $state,
+                    'ischange' => $ischange,
                     'asap_code' => $asapCode,
+                    'code' => $code,
+                    'product' => $product,
                 ];
             }
         }
@@ -615,7 +631,9 @@ class ScrapController extends Controller
             'form_params' => [
                 "state" => "1",
                 "type" => "FC",
-                "action" => "loadfactures"
+                "action" => "loadfactures",
+                "start" => "0",
+                "nbpage" => "1000",
             ],
             'headers' => [
                 'Cookie' => $sessionId,
@@ -636,216 +654,192 @@ class ScrapController extends Controller
             if ($cells->length >= 11) {
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
-
+                // Extract the text content from each cell.
+                $employee      = trim($cells->item(1)->textContent);
+                $code          = trim($cells->item(2)->textContent);
+                $nb_colis      = trim($cells->item(3)->textContent);
+                $montant       = trim($cells->item(4)->textContent);
+                $mas_ch        = trim($cells->item(5)->textContent);
+                $note          = trim($cells->item(6)->textContent);
+                $dateCreation  = trim($cells->item(7)->textContent);
+                $dateVersement = trim($cells->item(8)->textContent);
+                $status        = trim($cells->item(9)->textContent);
+                // Get action links from the last cell.
+                $actionCell  = $cells->item(10);
+                $links       = $actionCell->getElementsByTagName('a');
+                $printLink   = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
+                $exportLink  = $links->length > 1 ? $links->item(1)->getAttribute('href') : null;
                 $data[] = [
-                    'id' => $id,
-                    'code' => trim($cells->item(2)->textContent),
+                    'id'             => $id,
+                    'employee'       => $employee,
+                    'code'           => $code,
+                    'nb_colis'       => $nb_colis,
+                    'montant'        => $montant,
+                    'mas_ch'         => $mas_ch,
+                    'note'           => $note,
+                    'date_creation'  => $dateCreation,
+                    'date_versement' => $dateVersement,
+                    'status'         => $status,
+                    'print_link'     => $printLink,
+                    'export_link'    => $exportLink,
                 ];
             }
         }
         return $data;
     }
-    public function syncStatuses()
+    public function syncStatuses(){
+
+    }
+    public function syncOrders()
     {
-        $pickups = Pickup::where('carrier_id', 22)->pluck('id')->toArray();
-        $orders = Order::with('activePhones')->where('account_id', getAccountUser()->account_id)->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->whereIn('order_status_id', [6,9])->orderByDesc('created_at')->get();
-        $sessionId = $this->login();
-        foreach ($orders as $key => $order) {
-            $phone = $order->activePhones->first();
-            if (!$phone) {
-                continue;
-            }
-            $asapHistory = collect($this->getLastStatuses($phone->title))->first();
-            if ($asapHistory) {
-                $id = 0;
-                // Status mapping logic from SynchronisationController
-                switch ($asapHistory['state']) {
-                    case 'En attente de ramassage':
-                        break;
-                    case 'Ramassé':
-                        $id = 65;
-                        break;
-                    case 'Receptionné':
-                        $id = 64;
-                        break;
-                    case 'Receptionné Programé: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi, Dimanche':
-                        $id = 64;
-                        break;
-                    case 'Expédié':
-                        $id = 29;
-                        break;
-                    case 'Reçu par livreur':
-                        $id = 64;
-                        break;
-                    case 'Faux destination':
-                        $id = 62;
-                        break;
-                    case 'Hors zone':
-                        $id = 62;
-                        break;
-                    case 'Hors zone 1':
-                        $id = 62;
-                        break;
-                    case 'En distribution':
-                        $id = 64;
-                        break;
-                    case 'Injoignable':
-                        $id = 31;
-                        break;
-                    case 'Injoignable Programé: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi':
-                        $id = 31;
-                        break;
-                    case 'Pas de réponse':
-                        $id = 42;
-                        break;
-                    case 'Annulé':
-                        $id = 33;
-                        break;
-                    case 'Annulé 1':
-                        $id = 33;
-                        break;
-                    case 'Refusé':
-                        $id = 34;
-                        break;
-                    case 'Refusé 1':
-                        $id = 34;
-                        break;
-                    case 'Changement client':
-                        $id = 64;
-                        break;
-                    case 'Demande de retour':
-                        $id = 33;
-                        break;
-                    case 'Reporté':
-                        $id = 28;
-                        break;
-                    case 'Livré':
-                        $id = 25;
-                        break;
-                    case 'Livré (Changé)':
-                        $id = 25;
-                        break;
-                    case 'Livré (Payé)':
-                        $id = 25;
-                        break;
-                    case 'Retour vers agence casa':
-                        $id = 33;
-                        break;
-                    case 'Retour reçu agence casa':
-                        $id = 33;
-                        break;
-                    case 'Retour client expédié':
-                        $id = 33;
-                        break;
-                    case 'Retour client reçu':
-                        $id = 33;
-                        break;
-                    case 'Interessé':
-                        $id = 64;
-                        break;
-                    case 'Demande de suivi':
-                        $id = 64;
-                        break;
-                    case 'En attente de retour':
-                        $id = 33;
-                        break;
-                    case 'Change':
-                        $id = 64;
-                        break;
-                    case 'Programmé':
-                        $id = 64;
-                        break;
-                    case 'A retourner vers agence principal casa':
-                        $id = 33;
-                        break;
-                    case 'en voyage':
-                        $id = 35;
-                        break;
-                    case 'Pas de réponse 1':
-                        $id = 31;
-                        break;
-                    case 'pas de réponse 2 fois':
-                        $id = 31;
-                        break;
-                    case 'pas de réponse 3 fois':
-                        $id = 31;
-                        break;
-                    case 'pas de réponse 4 fois':
-                        $id = 31;
-                        break;
-                    case 'Pas de réponse LV':
-                        $id = 31;
-                        break;
-                    case 'Pas de réponse 5 fois':
-                        $id = 31;
-                        break;
-                    case 'Pas de réponse ( suivi )':
-                        $id = 31;
-                        break;
-                    case 'Annuler ( suivi ) 1':
-                        $id = 33;
-                        break;
-                    case 'Annuler ( suivi )' :
-                        $id = 33;
-                        break;
-                    case 'Reporté ( suivi )':
-                        $id = 28;
-                        break;
-                    case 'Changement numéro':
-                        $id = 64;
-                        break;
-                    case 'En attente d\'appel du client':
-                        $id = 64;
-                        break;
-                    case 'Numéro Incorrect':
-                        $id = 64;
-                        break;
-                    case 'Injoignable ( suivi )':
-                        $id = 31;
-                        break;
-                    case 'Injoignable 1':
-                        $id = 31;
-                        break;
-                    case 'Double Commande':
-                        $id = 58;
-                        break;
-                    default:
-                        $id = 28;
-                        break;
+        $updatedCount = 0;
+        $chunkSize = 50; // Process 50 orders at a time to prevent timeouts
+
+        $ordersQuery = Order::where('account_id', getAccountUser()->account_id)
+            ->with("activePhones")
+            ->whereIn('pickup_id', Pickup::where('carrier_id', 22)->pluck('id')->toArray())
+            ->whereNull('shipment_id')
+            ->whereIn('order_status_id', [6])
+            ->orderBy('created_at', 'desc');
+        
+        $totalOrders = $ordersQuery->count();
+
+        $ordersQuery->chunkById($chunkSize, function ($orders) use (&$updatedCount) {
+            $orderData = [];
+            foreach ($orders as $order) {
+                $asapHistory = null;
+
+                if ($order->shipping_code && $order->shipping_code !== 'non') {
+                    $asapHistory = collect($this->getOrder($order->shipping_code))->first();
                 }
 
-                if (str_contains($asapHistory['state'], "Reporté")) {
-                    $id = 28;
+                if (!$asapHistory) {
+                    $asapHistory = collect($this->getOrder($order->code))->first();
                 }
-                if (str_contains($asapHistory['state'], "Programmé")) {
-                    $id = 64;
-                }
-                if (str_contains($asapHistory['state'], "pas de réponse")) {
-                    $id = 31;
-                }
-                if (str_contains($asapHistory['state'], "Mise en distribution")) {
-                    $id = 64;
-                }
-                if ($id==0) {
-                     continue;
-                }
-                $orderData = [
-                    [
+                
+                if ($asapHistory) {
+                    $id = 0;
+                    switch ($asapHistory['state']) {
+                        case 'En attente de ramassage':
+                            break;
+                        case 'Ramassé':
+                            $id = 65;
+                            break;
+                        case 'Receptionné':
+                        case 'Receptionné Programé: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi, Dimanche':
+                            $id = 64;
+                            break;
+                        case 'Expédié':
+                            $id = 29;
+                            break;
+                        case 'Reçu par livreur':
+                        case 'Changement client':
+                        case 'Interessé':
+                        case 'Demande de suivi':
+                        case 'Change':
+                        case 'Programmé':
+                        case 'Changement numéro':
+                        case 'En attente d\'appel du client':
+                        case 'Numéro Incorrect':
+                            $id = 64;
+                            break;
+                        case 'Faux destination':
+                        case 'Hors zone':
+                        case 'Hors zone 1':
+                            $id = 62;
+                            break;
+                        case 'Injoignable':
+                        case 'Injoignable Programé: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi':
+                        case 'pas de réponse 2 fois':
+                        case 'pas de réponse 3 fois':
+                        case 'pas de réponse 4 fois':
+                        case 'Pas de réponse LV':
+                        case 'Pas de réponse 5 fois':
+                        case 'Pas de réponse ( suivi )':
+                        case 'Injoignable ( suivi )':
+                        case 'Injoignable 1':
+                            $id = 31;
+                            break;
+                        case 'Pas de réponse':
+                        case 'Pas de réponse 1':
+                            $id = 42;
+                            break;
+                        case 'Annulé':
+                        case 'Annulé 1':
+                        case 'Demande de retour':
+                        case 'Retour vers agence casa':
+                        case 'Retour reçu agence casa':
+                        case 'Retour client expédié':
+                        case 'Retour client reçu':
+                        case 'En attente de retour':
+                        case 'A retourner vers agence principal casa':
+                        case 'Annuler ( suivi ) 1':
+                        case 'Annuler ( suivi )':
+                            $id = 33;
+                            break;
+                        case 'Refusé':
+                        case 'Refusé 1':
+                            $id = 34;
+                            break;
+                        case 'Reporté':
+                        case 'Reporté ( suivi )':
+                            $id = 28;
+                            break;
+                        case 'Livré':
+                        case 'Livré (Changé)':
+                        case 'Livré (Payé)':
+                            $id = 25;
+                            break;
+                        case 'en voyage':
+                            $id = 35;
+                            break;
+                        case 'Double Commande':
+                            $id = 58;
+                            break;
+                        default:
+                            $id = 28;
+                            break;
+                    }
+
+                    if (str_contains($asapHistory['state'], "Reporté")) $id = 28;
+                    if (str_contains($asapHistory['state'], "Programmé")) $id = 64;
+                    if (str_contains($asapHistory['state'], "pas de réponse")) $id = 31;
+                    if (str_contains($asapHistory['state'], "Mise en distribution")) $id = 64;
+
+                    if ($id == 0) {
+                        continue;
+                    }
+
+                    $orderData[] = [
                         "id" => $order->id,
-                        'meta' => $asapHistory['id']? $asapHistory['id']:$order->meta, 
-                        'shipping_code' => $order->shipping_code?$order->shipping_code:$asapHistory['asap_code'],
+                        'meta' => $asapHistory['id'] ?: $order->meta,
+                        'shipping_code' => $asapHistory['asap_code'],
                         "comment" => [
                             "id" => $id,
                             "title" => $asapHistory['state']
                         ]
-                    ]
-                ];
-                OrderController::update(new Request($orderData));
+                    ];
+                    $updatedCount++;
+                }else{
+                    $orderData[] = [
+                        "id" => $order->id,
+                        'shipping_code' => null,
+                        'shipment_id' => null,
+                        'comment' => [
+                            "id" => 29,
+                            "title" => "en cours de traitement"
+                        ]
+                    ];
+                }
             }
-        }
+            if (!empty($orderData)) {
+                OrderController::update(new Request($orderData), $local = 2);
+            }
+        });
+
         return [
-            "statut" => 1,
-            "data" => "Commandes synchronisés avec succès."
+            'success' => true,
+            'message' => "Synchronisation effectuée avec succès. $updatedCount / $totalOrders commandes mises à jour.",
         ];
     }
     public function invoiceOrders($invoiceId)
@@ -898,7 +892,7 @@ class ScrapController extends Controller
                     if ($asapOrder['code'])
                         $order = Order::where('shipping_code', $asapOrder['code'])->first();
                     if ($order)
-                        $orders[] = ['id' => $order->id, 'carrier_price' => $asapOrder['shipping']];
+                        $orders[] = ['id' => $order->id];
                 }
                 $requestData = new Request([['carrier_id' => 22, 'shipment_type_id' => 1, 'warehouse_id' => 30, 'statut' => 1, 'title' => $data['code'], 'orders' => $orders]]);
                 ShipmentController::store($requestData);

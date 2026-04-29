@@ -130,6 +130,7 @@ class ShipmentController extends Controller
             if(!isset($filter['page'])) $filter['page']=0;
             if(!isset($filter['sort']['by'])) $filter['sort']['by']='created_at';
             if(!isset($filter['sort']['order'])) $filter['sort']['order']='desc';
+            
             $ordersQuery = Order::orderBy($filter['sort']['by'], $filter['sort']['order'])->where('account_id', getAccountUser()->account_id);
 
 
@@ -184,14 +185,16 @@ class ShipmentController extends Controller
                         "status" => $comment->orderStatus,
                     ];
                 });
-                $orderData['status'] = $data->orderStatus->only('id', 'title');
-                $orderData['customer'] = $data->customer->only('id', 'name', 'images');
-                $orderData['customer']['phones'] = $data->customer->activePhones->map(function ($phone) {
-                    return $phone->only('id', 'title');
-                });
-                $orderData['customer']['address'] = $data->customer->activeAddresses->map(function ($address) {
-                    return $address->only('id', 'title', 'city');
-                });
+                $orderData['status'] = optional($data->orderStatus)->only('id', 'title');
+                $orderData['customer'] = optional($data->customer)->only('id', 'name', 'images');
+                if ($orderData['customer']) {
+                    $orderData['customer']['phones'] = $data->customer->activePhones->map(function ($phone) {
+                        return $phone->only('id', 'title');
+                    });
+                    $orderData['customer']['address'] = $data->customer->activeAddresses->map(function ($address) {
+                        return $address->only('id', 'title', 'city');
+                    });
+                }
                 $totalOrder = 0;
                 $orderData['products'] = ($data->order_status_id==2 ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
                     $totalOrder += $actfOrderPva->price * $actfOrderPva->quantity;
@@ -221,9 +224,9 @@ class ShipmentController extends Controller
                 $orderData['discount'] = $data->discount;
                 $orderData['carrier_price'] = $data->carrier_price;
                 $orderData['real_carrier_price'] = $data->real_carrier_price;
-                $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
+                $orderData['brand'] = optional(optional($data->brandSource)->brand)->only('id', 'title', 'images');
                 
-                $orderData['source'] = $data->brandSource->source->only('id', 'title', 'images');
+                $orderData['source'] = optional(optional($data->brandSource)->source)->only('id', 'title', 'images');
                 return $orderData;
             });
             $inactiveOrders = [

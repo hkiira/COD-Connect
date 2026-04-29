@@ -137,6 +137,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('deplacements/inventory/{id}', [DeplacementController::class, 'inventoryPdf']);
     Route::get('supplier_receipts/print/{id}', [SupplierReceiptController::class, 'generatePdf']);
     Route::get('supplier_orders/print/{id}', [SupplierOrderController::class, 'generatePdf']);
+    Route::post('orders/{inTransitOrderId}/swap-delivery/{newOrderId}', [OrderController::class, 'swapDelivery']);
     Route::get('orders/print/{id}', [OrderController::class, 'generatePdf']);
     Route::get('pickups/tickets/{id}', [PickupController::class, 'generateTickets']);
     Route::get('pickups/print/{id}', [PickupController::class, 'generatePdf']);

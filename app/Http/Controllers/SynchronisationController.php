@@ -289,38 +289,8 @@ class SynchronisationController extends Controller
         return $data;
     }
     public function syncOrders(){
-        $sessionId = $this->login();
-        $pickups = Pickup::where('carrier_id', 22)->get()->pluck('id')->toArray();
-        // $orders = Order::where('account_id', getAccountUser()->account_id)->whereIn('pickup_id', $pickups)->whereNotNull('pickup_id')->whereIn('order_status_id', [6,7])->orderBy('created_at', 'desc')->limit(200)->get();
-        $orders = Order::where('account_id', getAccountUser()->account_id)
-                      ->whereIn('pickup_id', $pickups)
-                      ->whereNull('shipping_code')
-                      ->whereIn('order_status_id', [6, 7])
-                      ->limit(150)
-                      ->orderBy('created_at', 'desc')
-                      ->get();
-        $updatedCode=0;
-        foreach ($orders as $order) {
-            if($order->pickup->carrier_id == 22){
-                /*$phone = $order->activePhones->first();
-                if (!$phone) {
-                    continue;
-                }*/
-                $asapOrder= $this->getLastStatuses($order->code,$sessionId);
-                if($asapOrder){
-                    // Update the order with ASAP order ID and shipping code
-                    $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
-                    $updatedCode++;
-                }else{
-                    $order->update(['shipping_code' => "non"]);
-                }
-            }elseif($order->pickup->carrier_id == 23){
-                // Update the order with ASAP order ID and shipping code
-                $order->update(['meta' => null, 'shipping_code' => $order->code]);
-                $updatedCode++;
-            }
-        }
-        return $updatedCode;
+        $scrapController=new ScrapController();
+        return $scrapController->syncOrders();
     }
     //katjib la commande men systeme dial ASAP b search
     public function getOrder($code, $sessionId)
@@ -1272,28 +1242,8 @@ class SynchronisationController extends Controller
     }
     public function syncInvoices()
     {
-        $datas = $this->invoices();
-        foreach ($datas as $key => $data) {
-            $hasInvoice = Shipment::where('title', $data['code'])->first();
-            if (!$hasInvoice) {
-                $getAsapOrders = $this->invoiceOrders($data['id']);
-                $orders = [];
-                foreach ($getAsapOrders as $key => $asapOrder) {
-                    $order = null;
-                    if ($asapOrder['code'])
-                        $order = Order::where('shipping_code', $asapOrder['code'])->first();
-                    if ($order)
-                        $orders[] = ['id' => $order->id, 'carrier_price' => $asapOrder['shipping']];
-                }
-                $requestData = new Request([['carrier_id' => 22, 'shipment_type_id' => 1, 'warehouse_id' => 30, 'statut' => 1, 'title' => $data['code'], 'orders' => $orders]]);
-                ShipmentController::store($requestData);
-            }
-        }
-        
-        return [
-            "statut" => 1,
-            "data" => "Factures synchronisées avec succès."
-        ];
+        $scrapedAsap= new ScrapController();
+        return $scrapedAsap->syncInvoices();
     }
     public function syncReturns()
     {

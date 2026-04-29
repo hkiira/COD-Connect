@@ -563,7 +563,6 @@ class OrderController extends Controller
                 if (!$offer) {
                     return null;
                 }
-
                 if ($offer->productVariationAttributes->count() > 0) {
                     return $offer->productVariationAttributes->first()->pivot->id;
                 }
@@ -955,7 +954,7 @@ class OrderController extends Controller
                     }
 
                     // Sync order creation status to Google Sheets (if enabled).
-                    if ($isImport == 0 && config('google-sheets.enabled')) {
+                    if (($order->brandSource->id == 112 || $order->brandSource->id == 108) && $isImport == 0 && config('google-sheets.enabled')) {
                         try {
                             app(GoogleSheetsService::class)->appendOrderStatusRow(
                                 $order,
@@ -967,7 +966,7 @@ class OrderController extends Controller
                             $order->comments()->syncWithoutDetaching([44 => [
                                 'title' => 'Sync with Google Sheets',
                                 'order_status_id' => 4,
-                                'account_user_id' => $accountId,
+                                'account_user_id' => $accountUser->id,
                                 'score' => 0,
                                 'created_at' => now(),
                                 'updated_at' => now(),
@@ -1255,7 +1254,7 @@ class OrderController extends Controller
         // Note: No longer updating orders table score since we removed the column
         // Score is now calculated on-demand from account_user_order_status and order_comment tables
         
-        return ['statut' => $comment->parentComment->current_statut, 'is_change' => $comment->is_change];
+        return ['statut' => $comment->new_statut?$comment->new_statut:$comment->parentComment->current_statut, 'is_change' => $comment->is_change];
     }
 
     public static function update(Request $requests, $local = 0)
@@ -1405,6 +1404,8 @@ class OrderController extends Controller
                 if ($comment['statut'] == 2) {
                     $request['shipping_code'] = null;
                     $request['pickup_id'] = null;
+                }elseif($comment['statut'] == 3){
+                    $request['pickup_id'] = null;
                 }
             }
             //vérifier si le dépôt est changé
@@ -1426,13 +1427,13 @@ class OrderController extends Controller
             }
             $request['note'] = isset($request['note']) ? $request['note'] : null;
             $request['order_status_id'] = $comment['statut'];
-            $order_only = collect($request)->only('warehouse_id', 'discount',  'order_status_id',  'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id','shipping_code','note','meta','carrier_price');
+            $order_only = collect($request)->only('warehouse_id', 'discount',  'order_status_id',  'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id','shipping_code','note','meta','carrier_price','sync');
             
             $order->update($order_only->all());
             $order->activePvas()->update(['order_status_id' => $comment['statut']]);
             //hna kanvérifier wach la commande 3endha parent ila kane 3endha déja parent o parent 3endo child 
             //hna bach ncrée commande d retour pour les commandes CH 
-            if ($order->parentOrder) {
+            if ($order->parentOrder && str_contains($order->code, 'PR') == false) {
                 $dataReturn["account_id"] = getAccountUser()->account_id;
                 $dataReturn['order_status_id'] = 8;
                 $dataReturn['customer_id'] = $order->parentOrder->customer_id;
@@ -1642,10 +1643,12 @@ class OrderController extends Controller
                 CompensationableController::edit($order->id);
                 if ($local == 1)
                     return $order->activeOrderPvas;
+                if($local == 2)
+                    return $order;
                 return $order;
             }
         });
-        if ($local == 1)
+        if ($local == 1 || $local == 2)
             return $orders;
         return response()->json([
             'statut' => 1,
@@ -1655,11 +1658,122 @@ class OrderController extends Controller
 
     public function destroy($id)
     {
-        $SupplierOder = Order::find($id);
-        $SupplierOder->delete();
+        $order = Order::find($id);
+
+        if (!$order) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'not exist'
+            ]);
+        }
+
+        // if ($order->order_status_id != 1) {
+        //     return response()->json([
+        //         'statut' => 0,
+        //         'data' => 'Order can only be deleted if status is 1.'
+        //     ]);
+        // }
+
+        $order->orderPvas()->delete();
+        $order->delete();
+
         return response()->json([
             'statut' => 1,
-            'data' => $SupplierOder,
+            'data' => $order,
         ]);
+    }
+
+    /**
+     * Swaps the delivery details from an in-transit order to a new confirmed order.
+     * This is used when a customer cancels an order that is already out for delivery,
+     * and a new customer order for the same item can take its place.
+     *
+     * @param int $inTransitOrderId The ID of the order that is currently 'in transit' (e.g., status 6).
+     * @param int $newOrderId The ID of the new, confirmed order that will take over the delivery (e.g., status 4).
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function swapDelivery($inTransitOrderId, $newOrderId)
+    {
+        // Basic validation to ensure we have two different, valid IDs.
+        if ($inTransitOrderId == $newOrderId) {
+            return response()->json(['statut' => 0, 'data' => 'The two order IDs must be different.'], 400);
+        }
+
+        try {
+            $response = DB::transaction(function () use ($inTransitOrderId, $newOrderId) {
+                // Lock the two order records to prevent any other processes from changing them during the swap.
+                $inTransitOrder = Order::lockForUpdate()->find($inTransitOrderId);
+                $newOrder = Order::lockForUpdate()->find($newOrderId);
+
+                if (!$inTransitOrder || !$newOrder) {
+                    throw new \Exception('One or both orders could not be found.');
+                }
+
+                // --- Business Logic Validations ---
+                // 1. The original order MUST be "in transit" (we assume status 6) and have a pickup_id.
+                if ($inTransitOrder->order_status_id != 6) {
+                    throw new \Exception("The first order ({$inTransitOrder->code}) is not in transit.");
+                }
+                if (is_null($inTransitOrder->pickup_id)) {
+                    throw new \Exception("The first order ({$inTransitOrder->code}) does not have a pickup ID and cannot be swapped.");
+                }
+
+                // 2. The new order should be in a confirmed but not yet shipped state (we assume status 4).
+                if ($newOrder->order_status_id != 4) {
+                    throw new \Exception("The new order ({$newOrder->code}) is not in a confirmed state ready for shipping.");
+                }
+                if (!is_null($newOrder->pickup_id)) {
+                    throw new \Exception("The new order ({$newOrder->code}) already has a pickup assigned and cannot be swapped.");
+                }
+
+                // --- Execute the Swap ---
+                // 1. Copy delivery details to the new order.
+                $deliveryDetails = [
+                    'pickup_id' => $inTransitOrder->pickup_id,
+                    'shipping_code' => $inTransitOrder->shipping_code,
+                    'carrier_price' => $inTransitOrder->carrier_price,
+                    'real_carrier_price' => $inTransitOrder->real_carrier_price,
+                    // Copy any other relevant delivery/carrier fields here.
+                ];
+                $newOrder->update($deliveryDetails);
+
+                // 2. Clear delivery details from the old order.
+                $inTransitOrder->update([
+                    'pickup_id' => null,
+                    'shipping_code' => null,
+                    // Set other delivery fields to null as needed.
+                ]);
+
+                // 3. Link the new order to the original one for tracking.
+                $newOrder->update(['order_id' => $inTransitOrder->id]);
+                
+                // 4. Add notes for historical tracking.
+                $inTransitOrder->update(['note' => "Delivery swapped to order {$newOrder->code}."]);
+                $newOrder->update(['note' => "Took over delivery from canceled order {$inTransitOrder->code}."]);
+
+
+                // 5. Swap the statuses.
+                $newOrder->update(['order_status_id' => 6]); // New order is now "in transit"
+                $inTransitOrder->update(['order_status_id' => 3]); // Old order is now "Canceled" (or your preferred status)
+
+                return [
+                    'statut' => 1,
+                    'data' => [
+                        'original_order' => $inTransitOrder->id,
+                        'new_order' => $newOrder->id,
+                    ],
+                    'message' => 'Delivery has been successfully swapped.'
+                ];
+            });
+
+            return response()->json($response);
+
+        } catch (\Throwable $e) {
+            Log::error('Order delivery swap failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'statut' => 0,
+                'data' => $e->getMessage(),
+            ], 422);
+        }
     }
 }
