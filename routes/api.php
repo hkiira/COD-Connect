@@ -99,10 +99,13 @@ use App\Http\Controllers\{
     StockController,
     OverviewController,
     ScrapController,
-    MouvementController
+    MouvementController,
+    AnalyticsController,
+    AsapDeliveryWebhookController
 };
 use App\Http\Controllers\API\RegisterController;
 use App\Models\ExpenseType;
+use App\Services\AsapDeliveryService;
 
 /*
 |--------------------------------------------------------------------------
@@ -120,6 +123,8 @@ use App\Models\ExpenseType;
 // });
 Route::post('register_new_account', [RegisterController::class, 'register_new_account']);
 Route::post('login', [RegisterController::class, 'login'])->name('login');
+Route::get('filterselect/wp-cities', [FilterController::class, 'cities']);
+Route::get('webhooks/asap-delivery', [AsapDeliveryWebhookController::class, 'handle'])->middleware('asap.webhook');
 // Route::resource('PhoneTypes', PhoneTypesController::class);
 
 Route::middleware(['VerifyDomain', 'auth.optional'])->group(function () {
@@ -141,6 +146,56 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('orders/print/{id}', [OrderController::class, 'generatePdf']);
     Route::get('pickups/tickets/{id}', [PickupController::class, 'generateTickets']);
     Route::get('pickups/print/{id}', [PickupController::class, 'generatePdf']);
+
+    // ASAP Delivery test endpoints for Postman
+    Route::get('asapdelivery/cities', function (AsapDeliveryService $service) {
+        return response()->json($service->getCities());
+    });
+
+    Route::get('asapdelivery/track/{code}', function (AsapDeliveryService $service, string $code) {
+        return response()->json($service->trackParcel($code));
+    });
+
+    Route::post('asapdelivery/add', function (AsapDeliveryService $service, Request $request) {
+        $data = $request->only([
+            'fullname',
+            'phone',
+            'city',
+            'address',
+            'price',
+            'product',
+            'qty',
+            'note',
+            'code2',
+            'change',
+            'openpackage',
+        ]);
+
+        return response()->json(['code' => $service->addParcel($data)]);
+    });
+
+    Route::get('asapdelivery/list', function (AsapDeliveryService $service) {
+        return response()->json($service->listParcels());
+    });
+
+    Route::post('asapdelivery/update-status', function (AsapDeliveryService $service, Request $request) {
+        $payload = $request->validate([
+            'code' => 'required|string',
+            'state' => 'required|string',
+            'datereported' => 'nullable|string',
+            'note' => 'nullable|string',
+        ]);
+
+        return response()->json([
+            'success' => $service->updateParcelStatus(
+                $payload['code'],
+                $payload['state'],
+                $payload['datereported'] ?? null,
+                $payload['note'] ?? null
+            ),
+        ]);
+    });
+
     Route::resource('expenses', ExpenseController::class);
     Route::resource('expense_types', ExpenseTypeController::class);
     Route::resource('exitslips', ExitslipController::class);
@@ -191,7 +246,14 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('tranferts', TransfertController::class);
     Route::resource('returns', ReturnController::class);
     Route::resource('customer_types', CustomerTypeController::class);
-    Route::resource('customers', CustomerController::class);
+    
+    // CRM Customer Extensions
+    Route::post('customers/merge', [CustomerController::class, 'merge']);
+    Route::post('customers/{id}/log-call', [CustomerController::class, 'logCall']);
+    Route::post('customers/{id}/toggle-blacklist', [CustomerController::class, 'toggleBlacklist']);
+    Route::get('customers/{id}/timeline', [CustomerController::class, 'timeline']);
+
+    Route::apiResource('customers', CustomerController::class);
     Route::resource('payment_types', PaymentTypeController::class);
     Route::resource('payment_methods', PaymentMethodController::class);
     Route::resource('carriers', CarrierController::class);
@@ -202,6 +264,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('bonuses', BonusController::class);
     Route::resource('orders', OrderController::class);
     Route::post('orders/count-by-phones', [OrderController::class, 'countByPhones']);
+    Route::post('orders/exchange', [OrderController::class, 'createExchange']);
     Route::resource('orders_first', OrderfirstController::class);
     Route::resource('order_pvas', OrderPvaController::class);
     Route::resource('order_statuses', OrderStatusController::class);
@@ -275,6 +338,13 @@ Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
     // POST endpoint to submit the review form
     Route::post('/orders/{order}/reviews', [ReviewController::class, 'store']);
     Route::apiResource('review-questions', ReviewQuestionController::class);
+    Route::get('/analytics/kpi', [AnalyticsController::class, 'kpi']);
+    Route::get('/analytics/sales-vs-refusals', [AnalyticsController::class, 'salesVsRefusals']);
+    Route::get('/analytics/size-matrix', [AnalyticsController::class, 'sizeMatrix']);
+    Route::get('/analytics/geographic', [AnalyticsController::class, 'geographic']);
+    Route::get('/analytics/refusal-reasons', [AnalyticsController::class, 'refusalReasons']);
+    Route::get('/analytics/acquisition-sources', [AnalyticsController::class, 'acquisitionSources']);
+    Route::get('/analytics/product-performance', [AnalyticsController::class, 'productPerformance']);
 
     // Order Management
     // Route::post('/speedafw/orders/create', [SpeedafwController::class, 'createOrder']);
@@ -304,4 +374,6 @@ Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
 // Route::post('import', [ImportController::class, 'import']);
 // Route::post('importInventories', [ImportController::class, 'importInventories']);
 // Route::post('checkcities', [SynchronisationController::class, 'checkCities']);
+Route::prefix('analytics')->middleware('auth:sanctum')->group(function () {
+});
 

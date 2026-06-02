@@ -17,6 +17,13 @@ use App\Http\Controllers\DeplacementController;
 |
 */
 
+/*
+|--------------------------------------------------------------------------
+| ASAP Delivery Webhook Route
+|--------------------------------------------------------------------------
+*/
+Route::get('/webhooks/asap-delivery', [App\Http\Controllers\AsapDeliveryWebhookController::class, 'handle'])->middleware('asap.webhook');
+
 Route::get('deplacements/print/{id}', [DeplacementController::class, 'generatePdf']);
 Route::get('deplacements/inventory/{id}', [DeplacementController::class, 'inventoryPdf']);
 Route::get('supplier_receipts/print/{id}', [SupplierReceiptController::class, 'generatePdf']);

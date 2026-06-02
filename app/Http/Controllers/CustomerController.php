@@ -2,253 +2,580 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Customer;
-use App\Models\Image;
+use App\Models\Address;
+use App\Models\Phone;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Auth;
 
 class CustomerController extends Controller
 {
-    public static function index(Request $request)
+    /**
+     * Display a paginated and searchable list of customers.
+     */
+    public function index(Request $request)
     {
-        $request = collect($request->query())->toArray();
-        $associated = [];
-        $model = 'App\\Models\\Customer';
-        $request['inAccount'] = ['account_id', getAccountUser()->account_id];
-        $request['whereNot'] = ['column' => 'Customer_type_id', 'value' => 1];
-        $datas = FilterController::searchs(new Request($request), $model, ['id', 'name'], true, $associated);
-        return $datas;
-    }
+        $perPage = $request->input('pagination.per_page', 15);
+        $currentPage = $request->input('pagination.current_page', 1);
 
-    public function create(Request $request)
-    {
-        $request = collect($request->query())->toArray();
-        $data = [];
-        if (isset($request['sectors']['inactive'])) {
-            $model = 'App\\Models\\Sector';
-            $data['sectors']['inactive'] = FilterController::searchs(new Request($request['sectors']['inactive']), $model, ['id', 'title'], true);
+        $query = Customer::query()->where('customers.account_id', getAccountUser()->account_id);
+
+        // Handle search
+        if ($request->has('search')) {
+            $searchTerm = $request->search;
+            $query->where(function ($q) use ($searchTerm) {
+                $q->where('name', 'like', "%{$searchTerm}%")
+                    ->orWhereHas('phones', function ($phoneQuery) use ($searchTerm) {
+                        $phoneQuery->where('title', 'like', "%{$searchTerm}%");
+                    });
+            });
         }
-        if (isset($request['customerTypes']['inactive'])) {
-            $model = 'App\\Models\\CustomerType';
-            $data['customerTypes']['inactive'] = FilterController::searchs(new Request($request['customerTypes']['inactive']), $model, ['id', 'title'], true);
-        }
+        
+        // Eager load relationships and calculate aggregates efficiently
+        $query->with(['phones', 'addresses.city', 'customerType', 'images'])
+              ->withCount(['orders' => function ($query) {
+                  $query->where('type', 'sale');
+              }])
+              ->with(['latestOrder' => function ($query) {
+                  $query->where('type', 'sale');
+              }])
+              ->select('customers.*')
+              ->selectSub(
+                  DB::table('orders')
+                      ->join('order_pva', 'orders.id', '=', 'order_pva.order_id')
+                      ->selectRaw('sum(order_pva.price * order_pva.quantity)')
+                      ->whereColumn('orders.customer_id', 'customers.id')
+                      ->where('orders.type', 'sale')
+                      ->whereNull('orders.deleted_at'),
+                  'lifetime_value'
+              );
 
-        return response()->json([
-            'statut' => 1,
-            'data' => $data,
-        ]);
-    }
+        $paginator = $query->paginate($perPage, ['*'], 'page', $currentPage);
 
-    public static function store(Request $requests, $local = 0)
-    {
-        // avoir code
-        $phoneableType = "App\Models\Customers";
-        $validator = Validator::make($requests->except('_method'), [
-            '*.name' => 'required|max:255',
-            '*.phones.*.title' => [
-                'string',
-                function ($attribute, $value, $fail) use ($phoneableType) {
-                    $account = getAccountUser()->account_id;
-                    $phone = \App\Models\Phone::where(['title' => $value, 'account_id' => $account])->first();
-                    if ($phone) {
-                        $isUnique = \App\Models\Phoneable::where('phone_id', $phone->id)
-                            ->where('phoneable_type', $phoneableType)
-                            ->first();
-                        if ($isUnique) {
-                            $fail("A phone '$value' number already taken.");
-                        }
-                    }
-                },
-            ],
-            '*.phones.*.phoneTypes' => 'required|exists:phone_types,id|max:255',
-            '*.customer_type_id' => 'exists:customer_types,id|max:255',
-            '*.sector_id' => 'exists:sectors,id|max:255',
-            '*.addresses.*.title' => 'max:255',
-            '*.addresses.*.city_id' => 'exists:cities,id|max:255',
-            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
-            '*.principalImage' => [ // Validate title field
-                'max:255', // Title should not exceed 255 characters
-                function ($attribute, $value, $fail) { // Custom validation rule
-                    // Call the function to rename removed records
-                    $principalImage = Image::where('id', $value)->first();
-                    if ($principalImage && $principalImage->account_id !== getAccountUser()->account_id) {
-                        $fail("not exist");
-                    }
-                },
-            ],
-        ]);
-        if ($validator->fails()) {
-            return response()->json([
-                'Validation Error', $validator->errors()
-            ]);
-        };
-        $customers = collect($requests->except('_method'))->map(function ($request) {
-            $request["account_id"] = getAccountUser()->account_id;
-            $request['code'] = DefaultCodeController::getAccountCode('Customer', $request["account_id"]);
-            $customer_only = collect($request)->only('code', 'name', 'sector_id', 'latitude', 'longtitude', 'ice', 'comment', 'facebook', 'note', 'customer_type_id', 'statut', 'account_id');
-            $customer = Customer::create($customer_only->all());
-            if (isset($request['phones'])) {
-                $request_phone = new Request($request['phones']);
-                $phone = PhoneController::store($request_phone, $local = 1, $customer);
-            }
-
-            if (isset($request['addresses'])) {
-                $request_address = new Request($request['addresses']);
-                $address = AddressController::store($request_address, $local = 1, $customer);
-            }
-
-            if (isset($request['principalImage'])) {
-                $image = Image::find($request['principalImage']);
-                $image->images()->syncWithoutDetaching([
-                    $customer->id => [
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ]
-                ]);
-            } elseif (isset($request['newPrincipalImage'])) {
-                $images[]["image"] = $request['newPrincipalImage'];
-                $imageData = [
-                    'title' => $customer->name,
-                    'type' => 'customer',
-                    'image_type_id' => 11,
-                    'images' => $images
-                ];
-                ImageController::store(new Request([$imageData]), $customer);
-            }
-            $customer = Customer::with(['images', 'phones', 'addresses'])->find($customer->id);
+        $formattedData = $paginator->getCollection()->map(function ($customer) {
+            $primaryAddress = $customer->addresses->first();
             
-            return $customer;
+            return [
+                'id' => $customer->id,
+                'name' => $customer->name,
+                'code' => $customer->code,
+                'note' => $customer->note,
+                'customer_type' => $customer->customerType ? $customer->customerType->only('id', 'title') : null,
+                'primary_phone' => $customer->phones->first() ? $customer->phones->first()->title : null,
+                'primary_address' => $primaryAddress ? ($primaryAddress->title . ', ' . $primaryAddress->city->title) : null,
+                'city' => $primaryAddress ? $primaryAddress->city->title : null,
+                'images' => $customer->images,
+                'orders_count' => $customer->orders_count,
+                'lifetime_value' => (float) $customer->lifetime_value ?? 0,
+                'last_order_date' => $customer->latestOrder ? $customer->latestOrder->created_at->toIso8601String() : null,
+                'created_at' => $customer->created_at->toIso8601String(),
+            ];
         });
-        if ($local == 1)
-            return $customers;
+
         return response()->json([
             'statut' => 1,
-            'data' =>  $customers,
+            'data' => $formattedData,
+            'per_page' => $paginator->perPage(),
+            'current_page' => $paginator->currentPage(),
+            'total' => $paginator->total(),
         ]);
     }
 
-
-    public function show($id)
+    /**
+     * Store a newly created customer in storage.
+     */
+    public static function store(Request $request, $local = 0)
     {
-        $customer = Customer::with(['phones.phoneTypes', 'addresses.city', 'images'])->find($id);
-        if (!$customer) {
-            return response()->json(['statut' => 0, 'message' => 'not exist'], 404);
+        $data = $request->all();
+        // If the request is a single associative array, wrap it in an array so we can process it uniformly.
+        if (!isset($data[0]) || !is_array($data[0])) {
+            $data = [$data];
         }
-        return response()->json(['statut' => 1, 'data' => $customer]);
-    }
 
-    public function edit(Request $request, $id)
-    {
-        $request = collect($request->query())->toArray();
-        $customer = Customer::with(['phones.phoneTypes', 'addresses.city', 'images'])->find($id);
-        if (!$customer) {
-            return response()->json(['statut' => 0, 'message' => 'not exist'], 404);
-        }
-        return response()->json([
-            'statut' => 1,
-            'data' => $customer,
-        ]);
-    }
+        $validator = Validator::make($data, [
+            '*.name' => 'required|string|max:255',
+            '*.email' => 'nullable|email|max:255',
+            '*.customer_type_id' => 'nullable|exists:customer_types,id',
+            '*.note' => 'nullable|string',
 
-    public static function update(Request $requests, $id, $isOrder = 0)
-    {
-        $phoneableType = "App\Models\Customers";
-        $validator = Validator::make($requests->except('_method'), [
-            '*.id' => 'required|exists:customers,id',
-            '*.name' => 'required|max:255',
-            '*.phones.*.title' => [
-                'string',
-                function ($attribute, $value, $fail) use ($phoneableType) {
-                    $account = getAccountUser()->account_id;
-                    $phone = \App\Models\Phone::where(['title' => $value, 'account_id' => $account])->first();
-                    if ($phone) {
-                        $isUnique = \App\Models\Phoneable::where('phone_id', $phone->id)
-                            ->where('phoneable_type', $phoneableType)
-                            ->first();
-                        if ($isUnique) {
-                            $fail("A phone '$value' number already taken.");
-                        }
-                    }
-                },
-            ],
-            '*.phones.*.phoneTypes' => 'exists:phone_types,id|max:255',
-            '*.customer_type_id' => 'exists:customer_types,id|max:255',
-            '*.sector_id' => 'exists:sectors,id|max:255',
-            '*.addresses.*.title' => 'max:255',
-            '*.addresses.*.city_id' => 'exists:cities,id|max:255',
-            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
-            '*.principalImage' => [ // Validate title field
-                'max:255', // Title should not exceed 255 characters
-                function ($attribute, $value, $fail) { // Custom validation rule
-                    // Call the function to rename removed records
-                    $principalImage = Image::where('id', $value)->first();
-                    if ($principalImage && $principalImage->account_id !== getAccountUser()->account_id) {
-                        $fail("not exist");
-                    }
-                },
-            ],
+            '*.phones' => 'nullable|array',
+            '*.phones.*.title' => 'required|string',
+            '*.phones.*.phone_type_id' => 'nullable|exists:phone_types,id',
+
+            '*.addresses' => 'nullable|array',
+            '*.addresses.*.title' => 'required|string',
+            '*.addresses.*.city_id' => 'nullable|exists:cities,id',
         ]);
+
         if ($validator->fails()) {
-            return response()->json([
-                'Validation Error', $validator->errors()
-            ]);
-        };
-        $customers = collect($requests->except('_method'))->map(function ($request) use ($isOrder) {
-            $customer_only = collect($request)->only('name', 'sector_id', 'latitude', 'longtitude', 'ice', 'comment', 'facebook', 'note', 'customer_type_id', 'statut');
-            $customer = Customer::find($request['id']);
-            $customer->update($customer_only->toArray());
-            $phoneOrder = null;
-            $addressOrder = null;
-            if (isset($request['phones'])) {
-                $request_phone = new Request($request['phones']);
-                $phoneOrder = PhoneController::update($request_phone, $customer->id, $local = 1, $customer);
+            if ($local) {
+                // In local mode (called from another controller), throw an exception or return a response
+                return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
             }
+            return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
+        }
 
-            if (isset($request['addresses'])) {
-                $request_address = new Request($request['addresses']);
-                $addressOrder = AddressController::update($request_address, $customer->id, $local = 1, $customer);
+        $customers = DB::transaction(function () use ($data) {
+            $createdCustomers = [];
+            foreach ($data as $item) {
+                $customerData = \Illuminate\Support\Arr::only($item, ['name', 'email', 'customer_type_id', 'note']);
+                $customerData['account_id'] = getAccountUser()->account_id;
+                $customerData['code'] = DefaultCodeController::getAccountCode('Customer', $customerData['account_id']);
+
+                $customer = Customer::create($customerData);
+
+                if (isset($item['phones'])) {
+                    foreach ($item['phones'] as $phoneData) {
+                        $customer->phones()->create([
+                            'title' => $phoneData['title'],
+                            'account_id' => $customerData['account_id']
+                        ]);
+                        // Note: Attaching phone types would require a many-to-many pivot table for phone_phone_type
+                    }
+                }
+
+                if (isset($item['addresses'])) {
+                    $customer->addresses()->createMany($item['addresses']);
+                }
+                
+                $createdCustomers[] = $customer->load('phones', 'addresses');
             }
-            if (isset($request['principalImage'])) {
-                $image = Image::find($request['principalImage']);
-                $image->images()->syncWithoutDetaching([
-                    $customer->id => [
-                        'created_at' => now(),
-                        'updated_at' => now()
-                    ]
-                ]);
-            } elseif (isset($request['newPrincipalImage'])) {
-                $images[]["image"] = $request['newPrincipalImage'];
-                $imageData = [
-                    'title' => $customer->name,
-                    'type' => 'customer',
-                    'image_type_id' => 11,
-                    'images' => $images
-                ];
-                ImageController::store(new Request([$imageData]), $customer);
-            }
-            $customer = Customer::with(['images', 'phones', 'addresses'])->find($customer->id);
-            if ($isOrder == 1)
-                return ['phones' => $phoneOrder, 'addresses' => $addressOrder, 'customer' => $customer];
-            return $customer;
+            return collect($createdCustomers);
         });
-        if ($isOrder == 1)
-            return $customers;
+        
+        if ($local == 1) return $customers;
+
         return response()->json([
             'statut' => 1,
             'data' => $customers,
+            'message' => 'Customer created successfully'
+        ], 201);
+    }
+
+    /**
+     * Display the specified customer with their complete history.
+     */
+    public function show($id)
+    {
+        $customer = Customer::where('account_id', getAccountUser()->account_id)
+            ->with(['phones', 'addresses.city', 'customerType', 'images', 'tags'])
+            ->find($id);
+
+        if (!$customer) {
+            return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
+        }
+
+        // Calculate Stats
+        $stats = DB::table('orders')
+            ->selectRaw('COUNT(id) as total_valid_orders')
+            ->selectRaw('SUM(CASE WHEN order_status_id = 11 THEN 1 ELSE 0 END) as returned_orders')
+            ->where('customer_id', $id)
+            ->where('type', 'sale')
+            ->whereNull('deleted_at')
+            ->first();
+
+        $lifetimeValueResult = DB::table('orders')
+            ->join('order_pva', 'orders.id', '=', 'order_pva.order_id')
+            ->where('orders.customer_id', $id)
+            ->where('orders.type', 'sale')
+            ->whereIn('orders.order_status_id', [7, 10])
+            ->whereNull('orders.deleted_at')
+            ->sum(DB::raw('order_pva.price * order_pva.quantity'));
+
+        $lifetimeValue = (float) $lifetimeValueResult;
+        $totalOrders = (int) ($stats->total_valid_orders ?? 0);
+        $returnedOrders = (int) ($stats->returned_orders ?? 0);
+
+        $averageOrderValue = $totalOrders > 0 ? round($lifetimeValue / $totalOrders, 2) : 0;
+        $returnRate = $totalOrders > 0 ? round(($returnedOrders / $totalOrders) * 100, 2) : 0;
+        $tier = $lifetimeValue > 5000 ? 'VIP' : 'Regular';
+
+        // Manually paginate the orders to format them
+        $ordersPaginator = $customer->orders()
+            ->with([
+                'orderStatus',
+                'orderPvas.productVariationAttribute.product.images',
+                'orderPvas.productVariationAttribute.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+            ])
+            ->orderBy('created_at', 'desc')
+            ->paginate(10);
+
+        $formattedOrders = $ordersPaginator->getCollection()->map(function ($order) {
+            $orderTotal = 0;
+
+            $products = $order->orderPvas->map(function ($orderPva) use (&$orderTotal) {
+                $orderTotal += $orderPva->price * $orderPva->quantity;
+                $pva = $orderPva->productVariationAttribute;
+                
+                if(!$pva) return null;
+
+                $attributesText = $pva->variationAttribute->childVariationAttributes->map(function ($child) {
+                    return $child->attribute->code;
+                })->toArray();
+
+                return [
+                    'order_pva_id' => $orderPva->id,
+                    'product' => $pva->product->title . " " . implode('-', $attributesText),
+                    'reference' => $pva->product->reference,
+                    'quantity' => $orderPva->quantity,
+                    'price' => $orderPva->price,
+                    'images' => $pva->product->images,
+                    'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
+                        return [
+                            "id" => $child->attribute->id,
+                            "title" => $child->attribute->title,
+                            "typeAttribute" => $child->attribute->typeAttribute ? $child->attribute->typeAttribute->title : null,
+                        ];
+                    }),
+                ];
+            })->filter()->values();
+
+            return [
+                'id' => $order->id,
+                'code' => $order->code,
+                'type' => $order->type,
+                'status' => $order->orderStatus ? $order->orderStatus->title : null,
+                'total' => $orderTotal,
+                'date' => $order->created_at->toIso8601String(),
+                'products' => $products,
+            ];
+        });
+
+        $customerData = [
+            'id' => $customer->id,
+            'name' => $customer->name,
+            'code' => $customer->code,
+            'note' => $customer->note,
+            'customer_type' => $customer->customerType ? $customer->customerType->only('id', 'title') : null,
+            'phones' => $customer->phones,
+            'addresses' => $customer->addresses,
+            'images' => $customer->images,
+            'wallet_balance' => (float) $customer->wallet_balance,
+            'discount_percent' => (float) $customer->discount_percent,
+            'is_blacklisted' => (bool) $customer->is_blacklisted,
+            'tags' => $customer->tags,
+            'lifetime_value' => $lifetimeValue,
+            'average_order_value' => $averageOrderValue,
+            'return_rate' => $returnRate,
+            'tier' => $tier,
+            'orders' => [
+                'data' => $formattedOrders,
+                'per_page' => $ordersPaginator->perPage(),
+                'current_page' => $ordersPaginator->currentPage(),
+                'total' => $ordersPaginator->total(),
+            ]
+        ];
+
+        return response()->json(['statut' => 1, 'data' => $customerData]);
+    }
+
+    /**
+     * Update the specified customer in storage.
+     */
+    public static function update(Request $request, $id, $isOrder = 0)
+    {
+        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        if (!$customer) {
+            return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
+        }
+
+        $data = $request->all();
+        if (!isset($data[0]) || !is_array($data[0])) {
+            $data = [$data];
+        }
+
+        $validator = Validator::make($data, [
+            '*.name' => 'sometimes|required|string|max:255',
+            '*.email' => 'sometimes|nullable|email|max:255',
+            '*.customer_type_id' => 'sometimes|nullable|exists:customer_types,id',
+            '*.note' => 'sometimes|nullable|string',
+
+            '*.phones' => 'sometimes|nullable|array',
+            '*.phones.*.id' => 'nullable|exists:phones,id',
+            '*.phones.*.title' => 'required|string',
+            
+            '*.addresses' => 'sometimes|nullable|array',
+            '*.addresses.*.id' => 'nullable|exists:addresses,id',
+            '*.addresses.*.title' => 'required|string',
+            '*.addresses.*.city_id' => 'nullable|exists:cities,id',
+        ]);
+
+        if ($validator->fails()) {
+             if ($isOrder) return response()->json([ 'Validation Error', $validator->errors() ]);
+            return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
+        }
+
+        DB::transaction(function () use ($data, $customer) {
+            $item = $data[0];
+            $customer->update(\Illuminate\Support\Arr::only($item, ['name', 'email', 'customer_type_id', 'note']));
+
+            // Sync Phones
+            if (isset($item['phones'])) {
+                $phoneIds = [];
+                foreach ($item['phones'] as $phoneData) {
+                    if (isset($phoneData['id'])) {
+                        $phone = Phone::find($phoneData['id']);
+                        if ($phone) {
+                            $phone->update(['title' => $phoneData['title']]);
+                            $phoneIds[] = $phone->id;
+                        }
+                    } else {
+                        $newPhone = $customer->phones()->create([
+                            'title' => $phoneData['title'],
+                            'account_id' => $customer->account_id,
+                        ]);
+                        $phoneIds[] = $newPhone->id;
+                    }
+                }
+                // Remove any phones not in the request
+                $customer->phones()->whereNotIn('phones.id', $phoneIds)->delete();
+            }
+
+            // Sync Addresses
+            if (isset($item['addresses'])) {
+                $addressIds = [];
+                foreach ($item['addresses'] as $addressData) {
+                    if (isset($addressData['id'])) {
+                        $address = Address::find($addressData['id']);
+                        if ($address) {
+                            $address->update($addressData);
+                            $addressIds[] = $address->id;
+                        }
+                    } else {
+                        $newAddress = $customer->addresses()->create($addressData);
+                        $addressIds[] = $newAddress->id;
+                    }
+                }
+                // Remove addresses not in the request
+                $customer->addresses()->whereNotIn('addresses.id', $addressIds)->delete();
+            }
+        });
+        
+        $updatedCustomer = $customer->fresh(['phones', 'addresses.city']);
+        
+        if ($isOrder == 1) return collect([['phones' => $updatedCustomer->phones, 'addresses' => $updatedCustomer->addresses, 'customer' => $updatedCustomer]]);
+
+        return response()->json([
+            'statut' => 1,
+            'data' => $updatedCustomer,
+            'message' => 'Customer updated successfully'
         ]);
     }
 
-
-
+    /**
+     * Remove the specified customer from storage.
+     */
     public function destroy($id)
     {
-        $customer = Customer::find($id);
+        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+
+        if (!$customer) {
+            return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
+        }
+
         $customer->delete();
+
+        return response()->json(['statut' => 1, 'message' => 'Customer deleted successfully']);
+    }
+
+    public function logCall(Request $request, $id)
+    {
+        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        if (!$customer) {
+            return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
+        }
+
+        $request->validate([
+            'outcome' => 'required|string|max:255',
+            'notes' => 'nullable|string',
+        ]);
+
+        $call = $customer->calls()->create([
+            'outcome' => $request->outcome,
+            'notes' => $request->notes,
+        ]);
+
+        return response()->json(['statut' => 1, 'message' => 'Call logged successfully', 'data' => $call]);
+    }
+
+    public function toggleBlacklist($id)
+    {
+        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        if (!$customer) {
+            return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
+        }
+
+        $customer->is_blacklisted = !$customer->is_blacklisted;
+        $customer->save();
+
         return response()->json([
             'statut' => 1,
-            'data' => $customer,
+            'message' => 'Blacklist status toggled',
+            'is_blacklisted' => $customer->is_blacklisted
         ]);
+    }
+
+    public function timeline($id)
+    {
+        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        if (!$customer) {
+            return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
+        }
+
+        $timeline = collect();
+
+        // Customer created
+        $timeline->push([
+            'type' => 'customer_created',
+            'date' => $customer->created_at,
+            'description' => 'Customer profile was created.',
+            'data' => null
+        ]);
+
+        // Orders & Returns
+        $orders = $customer->orders()->with(['orderStatus', 'parentOrder'])->get();
+        foreach ($orders as $order) {
+            $eventType = 'order_placed';
+            $description = 'Order #' . $order->code . ' was placed.';
+
+            if ($order->type === 'return') {
+                $eventType = 'return_created';
+                $description = 'Return Order #' . $order->code . ' was created.';
+            } elseif ($order->type === 'sale' && $order->order_id) {
+                // Check parent order type to distinguish between exchange and swap
+                if ($order->parentOrder && $order->parentOrder->type === 'return') {
+                    $eventType = 'exchange_created';
+                    $description = 'Exchange Order #' . $order->code . ' was created from Return #' . $order->parentOrder->code . '.';
+                } else if ($order->parentOrder && $order->parentOrder->type === 'sale') {
+                    $eventType = 'delivery_swapped';
+                    $description = 'Order #' . $order->code . ' took over delivery from Order #' . $order->parentOrder->code . '.';
+                }
+            }
+
+            $timeline->push([
+                'type' => $eventType,
+                'date' => $order->created_at,
+                'description' => $description,
+                'data' => [
+                    'order_id' => $order->id,
+                    'code' => $order->code,
+                    'status' => $order->orderStatus ? $order->orderStatus->title : null,
+                ]
+            ]);
+
+            // Assuming order_status_id = 11 is Returned
+            if ($order->order_status_id == 11) {
+                // Approximate return date by updated_at, as we don't have a specific return date field
+                $timeline->push([
+                    'type' => 'return_initiated',
+                    'date' => $order->updated_at,
+                    'description' => 'Order #' . $order->code . ' was returned.',
+                    'data' => [
+                        'order_id' => $order->id,
+                        'code' => $order->code
+                    ]
+                ]);
+            }
+        }
+
+        // CRM Calls
+        $calls = $customer->calls()->get();
+        foreach ($calls as $call) {
+            $timeline->push([
+                'type' => 'call_logged',
+                'date' => $call->created_at,
+                'description' => 'Customer Call: ' . $call->outcome,
+                'data' => [
+                    'outcome' => $call->outcome,
+                    'notes' => $call->notes
+                ]
+            ]);
+        }
+
+        // Order Calls
+        $orderCalls = \App\Models\OrderCall::whereHas('order', function($query) use ($customer) {
+            $query->where('customer_id', $customer->id);
+        })->get();
+
+        foreach ($orderCalls as $orderCall) {
+            $timeline->push([
+                'type' => 'order_call_logged',
+                'date' => $orderCall->called_at ?? $orderCall->created_at,
+                'description' => 'Order Call (' . ($orderCall->result ?? 'No result') . ')',
+                'data' => [
+                    'order_id' => $orderCall->order_id,
+                    'employee_id' => $orderCall->employee_id,
+                    'call_number' => $orderCall->call_number,
+                    'result' => $orderCall->result,
+                    'duration' => $orderCall->call_duration,
+                    'notes' => $orderCall->note
+                ]
+            ]);
+        }
+
+        // Sort by date descending
+        $sortedTimeline = $timeline->filter(function($item) {
+            return !is_null($item['date']);
+        })->sortByDesc('date')->values()->map(function ($item) {
+            $item['date'] = $item['date']->toIso8601String();
+            return $item;
+        });
+
+        return response()->json(['statut' => 1, 'data' => $sortedTimeline]);
+    }
+
+    public function merge(Request $request)
+    {
+        $request->validate([
+            'primary_id' => 'required|exists:customers,id',
+            'secondary_id' => 'required|exists:customers,id|different:primary_id',
+        ]);
+
+        $accountId = getAccountUser()->account_id;
+
+        $primary = Customer::where('account_id', $accountId)->find($request->primary_id);
+        $secondary = Customer::where('account_id', $accountId)->find($request->secondary_id);
+
+        if (!$primary || !$secondary) {
+            return response()->json(['statut' => 0, 'message' => 'One or both customers not found'], 404);
+        }
+
+        DB::beginTransaction();
+
+        try {
+            // Reassign Orders
+            \App\Models\Order::where('customer_id', $secondary->id)->update(['customer_id' => $primary->id]);
+
+            // Reassign Addresses
+            $secondaryAddresses = $secondary->addresses()->pluck('addresses.id')->toArray();
+            if (!empty($secondaryAddresses)) {
+                $primary->addresses()->syncWithoutDetaching($secondaryAddresses);
+                $secondary->addresses()->detach($secondaryAddresses);
+            }
+
+            // Reassign Phones
+            $secondaryPhones = $secondary->phones()->pluck('phones.id')->toArray();
+            if (!empty($secondaryPhones)) {
+                $primary->phones()->syncWithoutDetaching($secondaryPhones);
+                $secondary->phones()->detach($secondaryPhones);
+            }
+
+            // Reassign Calls
+            \App\Models\CustomerCall::where('customer_id', $secondary->id)->update(['customer_id' => $primary->id]);
+
+            // Soft Delete Secondary Customer
+            $secondary->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'statut' => 1,
+                'message' => 'Customers merged successfully. Secondary customer has been archived.'
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['statut' => 0, 'message' => 'Merge failed: ' . $e->getMessage()], 500);
+        }
     }
 }

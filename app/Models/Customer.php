@@ -11,7 +11,7 @@ class Customer extends Model
     use SoftDeletes;
     use HasFactory;
     protected $dates = ['deleted_at'];
-    protected $fillable = ['code', 'customer_type_id', 'sector_id', 'ice', 'latitude', 'longtitude', 'statut', 'name', 'comment', 'facebook', 'note', 'account_id'];
+    protected $fillable = ['code', 'customer_type_id', 'sector_id', 'ice', 'latitude', 'longtitude', 'statut', 'name', 'comment', 'facebook', 'note', 'account_id', 'wallet_balance', 'discount_percent', 'is_blacklisted'];
     public function phones()
     {
         return $this->morphToMany(Phone::class, 'phoneable')->orderBy('phoneables.created_at', 'desc');
@@ -62,6 +62,21 @@ class Customer extends Model
     public function orders()
     {
         return $this->hasMany(Order::class);
+    }
+
+    public function latestOrder()
+    {
+        return $this->hasOne(Order::class)->latestOfMany();
+    }
+
+    public function tags()
+    {
+        return $this->morphToMany(Tag::class, 'taggable');
+    }
+
+    public function calls()
+    {
+        return $this->hasMany(CustomerCall::class)->orderBy('created_at', 'desc');
     }
 
     public function account_user_order()

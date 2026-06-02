@@ -962,6 +962,9 @@ class SynchronisationController extends Controller
     }
     public function syncStatuses()
     {
+                        $scrapController=new ScrapController();
+        return $scrapController->syncStatuses();
+    /*
         $pickups = Pickup::where('carrier_id', 22)->pluck('id')->toArray();
         $orders = Order::with('activePhones')->where('account_id', getAccountUser()->account_id)->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->whereIn('order_status_id', [6,9])->orderByDesc('created_at')->get();
         // $orders = Order::where('account_id', getAccountUser()->account_id)->where('shipping_code','Non')->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->orderByDesc('created_at')->get();
@@ -1179,7 +1182,7 @@ class SynchronisationController extends Controller
         return [
             "statut" => 1,
             "data" => "Commandes synchronisés avec succès."
-        ];
+        ];*/
         //2,3,4,5,6,9,10,11,14,16,25,26,30,39,40,41,42,58,59 en cours
         //17 livré
         //7,8,12,13,15,18,19,20,21,22,23,24,27,28,29,31 annulées

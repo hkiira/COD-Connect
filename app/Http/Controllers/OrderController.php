@@ -47,7 +47,11 @@ class OrderController extends Controller
         $sortBy = $request['sort'][0]['column'] ?? 'created_at';
         $sortOrder = $request['sort'][0]['order'] ?? 'desc';
 
-        $ordersQuery = Order::where('account_id', getAccountUser()->account_id);
+        $ordersQuery = Order::where('account_id', getAccountUser()->account_id)->withAvg(['reviewAnswers as review_score' => function ($query) {
+                $query->whereHas('question', function ($q) {
+                    $q->where('type', 'stars');
+                });
+            }], 'answer_value');
 
         if ($sortBy === 'total') {
             $totalSubquery = OrderPva::selectRaw('SUM(price * quantity)')
@@ -131,12 +135,46 @@ class OrderController extends Controller
 
         $total = $ordersQuery->count();
         $orders = $ordersQuery
+            ->with([
+                'parentOrder.orderStatus', 'parentOrder.pickup', 'parentOrder.shipment.shipmentType',
+                'childOrders.orderStatus', 'childOrders.pickup', 'childOrders.shipment.shipmentType',
+                'pickup', 'shipment.shipmentType'
+            ])
             ->skip($filter['page'] * $filter['limit'])
             ->take($filter['limit'])
             ->get();
 
         $datas = $orders->map(function ($data) {
-            $orderData = $data->only('id', 'code', 'shipping_code', 'note', 'order_id', 'created_at', 'updated_at');
+            $orderData = $data->only('id', 'code', 'shipping_code', 'note', 'order_id', 'type', 'created_at', 'updated_at', 'pickup_id', 'shipment_id');
+
+            // Include parent and child basic relationship info to map the lineage using eager loading
+            if ($data->parentOrder) {
+                $orderData['parent_order'] = $data->parentOrder->only('id', 'code', 'type', 'pickup_id', 'shipment_id');
+                $orderData['parent_order']['status'] = $data->parentOrder->orderStatus ? $data->parentOrder->orderStatus->only('id', 'title') : null;
+                $orderData['parent_order']['pickup'] = $data->parentOrder->pickup ? $data->parentOrder->pickup->only('id', 'code', 'title') : null;
+                if ($data->parentOrder->shipment) {
+                    $orderData['parent_order']['shipment'] = $data->parentOrder->shipment->only('id', 'code', 'title');
+                    $orderData['parent_order']['shipment']['type'] = $data->parentOrder->shipment->shipmentType ? $data->parentOrder->shipment->shipmentType->only('id', 'code', 'title') : null;
+                } else {
+                    $orderData['parent_order']['shipment'] = null;
+                }
+            } else {
+                $orderData['parent_order'] = null;
+            }
+
+            // Find any child orders that were created from this order (e.g. returns/exchanges)
+            $orderData['child_orders'] = $data->childOrders->map(function ($child) {
+                $childData = $child->only('id', 'code', 'type', 'pickup_id', 'shipment_id');
+                $childData['status'] = $child->orderStatus ? $child->orderStatus->only('id', 'title') : null;
+                $childData['pickup'] = $child->pickup ? $child->pickup->only('id', 'code', 'title') : null;
+                if ($child->shipment) {
+                    $childData['shipment'] = $child->shipment->only('id', 'code', 'title');
+                    $childData['shipment']['type'] = $child->shipment->shipmentType ? $child->shipment->shipmentType->only('id', 'code', 'title') : null;
+                } else {
+                    $childData['shipment'] = null;
+                }
+                return $childData;
+            });
             
             // Calculate score dynamically from account_user_order_status and order_comment tables
             if (!function_exists('calculateTotalOrderScore')) {
@@ -208,8 +246,18 @@ class OrderController extends Controller
             $orderData['total'] = $totalOrder;
             $orderData['discount'] = $data->discount;
             $orderData['carrier_price'] = $data->carrier_price;
-            $orderData['status'] = $data->orderStatus->only('id', 'title');
-            $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
+            $orderData['status'] = $data->orderStatus ? $data->orderStatus->only('id', 'title') : null;
+            $orderData['pickup'] = $data->pickup ? $data->pickup->only('id', 'code', 'title') : null;
+            if ($data->shipment) {
+                $orderData['shipment'] = $data->shipment->only('id', 'code', 'title');
+                $orderData['shipment']['type'] = $data->shipment->shipmentType ? $data->shipment->shipmentType->only('id', 'code', 'title') : null;
+            } elseif ($data->parentOrder && $data->parentOrder->shipment) {
+                $orderData['shipment'] = $data->parentOrder->shipment->only('id', 'code', 'title');
+                $orderData['shipment']['type'] = $data->parentOrder->shipment->shipmentType ? $data->parentOrder->shipment->shipmentType->only('id', 'code', 'title') : null;
+            } else {
+                $orderData['shipment'] = null;
+            }
+            $orderData['brand'] = $data->brandSource && $data->brandSource->brand ? $data->brandSource->brand->only('id', 'title', 'images') : null;
             $orderData['carrier'] = ($data->pickup) ? $data->pickup->carrier->only('id', 'title', 'images') : null;
             $source = $data->brandSource->source;
             $sourceArr = $source->only('id', 'title', 'images');
@@ -217,6 +265,7 @@ class OrderController extends Controller
                 $sourceArr['images'] = $source->images->sortByDesc('created_at')->values();
             }
             $orderData['source'] = $sourceArr;
+            $orderData['review_score'] = isset($data->review_score) ? (float)round($data->review_score, 2) : null;
             return $orderData;
         });
 
@@ -815,7 +864,6 @@ class OrderController extends Controller
                         } else {
                             $customerData = new Request([$request['customer']]);
                             $customerResult = CustomerController::store($customerData, 1);
-
                             // CustomerController::store returns a JsonResponse on validation failure even in local mode.
                             // Unwrap the collection or surface the validation message as an exception.
                             if ($customerResult instanceof \Illuminate\Http\JsonResponse) {
@@ -1069,7 +1117,43 @@ class OrderController extends Controller
                 'data' => 'not exist'
             ]);
         if (isset($request['orderInfo'])) {
-            $data['orderInfo'] = $order->only(['id', 'code','carrier_price', 'shipping_code', 'discount', 'created_at', 'updated_at']);
+            $data['orderInfo'] = $order->only(['id', 'code', 'type', 'carrier_price', 'shipping_code', 'discount', 'created_at', 'updated_at', 'pickup_id', 'shipment_id']);
+
+            // Parent order logic
+            if ($order->order_id) {
+                $parentOrder = Order::with(['orderStatus', 'pickup', 'shipment.shipmentType'])->find($order->order_id);
+                if ($parentOrder) {
+                    $data['orderInfo']['parent_order'] = $parentOrder->only('id', 'code', 'type', 'pickup_id', 'shipment_id');
+                    $data['orderInfo']['parent_order']['status'] = $parentOrder->orderStatus ? $parentOrder->orderStatus->only('id', 'title') : null;
+                    $data['orderInfo']['parent_order']['pickup'] = $parentOrder->pickup ? $parentOrder->pickup->only('id', 'code', 'title') : null;
+                    if ($parentOrder->shipment) {
+                        $data['orderInfo']['parent_order']['shipment'] = $parentOrder->shipment->only('id', 'code', 'title');
+                        $data['orderInfo']['parent_order']['shipment']['type'] = $parentOrder->shipment->shipmentType ? $parentOrder->shipment->shipmentType->only('id', 'code', 'title') : null;
+                    } else {
+                        $data['orderInfo']['parent_order']['shipment'] = null;
+                    }
+                } else {
+                    $data['orderInfo']['parent_order'] = null;
+                }
+            } else {
+                $data['orderInfo']['parent_order'] = null;
+            }
+
+            // Child orders logic
+            $childOrders = Order::with(['orderStatus', 'pickup', 'shipment.shipmentType'])->where('order_id', $order->id)->get();
+            $data['orderInfo']['child_orders'] = $childOrders->map(function ($child) {
+                $childData = $child->only('id', 'code', 'type', 'pickup_id', 'shipment_id');
+                $childData['status'] = $child->orderStatus ? $child->orderStatus->only('id', 'title') : null;
+                $childData['pickup'] = $child->pickup ? $child->pickup->only('id', 'code', 'title') : null;
+                if ($child->shipment) {
+                    $childData['shipment'] = $child->shipment->only('id', 'code', 'title');
+                    $childData['shipment']['type'] = $child->shipment->shipmentType ? $child->shipment->shipmentType->only('id', 'code', 'title') : null;
+                } else {
+                    $childData['shipment'] = null;
+                }
+                return $childData;
+            });
+
             $orderCustomer = $order->customer;
             $data['orderInfo']['customer'] = $orderCustomer
                 ? $orderCustomer->only('id', 'name', 'note')
@@ -1091,12 +1175,21 @@ class OrderController extends Controller
                 })
                 : [];
             $data['orderInfo']['warehouse'] = $order->warehouse;
-            $data['orderInfo']['payment_type'] = $order->paymentType->only('id', 'title');
-            if ($order->shipment)
-                $data['orderInfo']['shipment'] = $order->shipment->only('id', 'title');
-            if ($order->pickup)
-                $data['orderInfo']['pickup'] = $order->pickup->only('id', 'title');
-            $data['orderInfo']['payment_method'] = $order->paymentMethod->only('id', 'title');
+            $data['orderInfo']['payment_type'] = $order->paymentType ? $order->paymentType->only('id', 'title') : null;
+            
+            $data['orderInfo']['pickup'] = $order->pickup ? $order->pickup->only('id', 'code', 'title') : null;
+            
+            if ($order->shipment) {
+                $data['orderInfo']['shipment'] = $order->shipment->only('id', 'code', 'title');
+                $data['orderInfo']['shipment']['type'] = $order->shipment->shipmentType ? $order->shipment->shipmentType->only('id', 'code', 'title') : null;
+            } elseif ($order->parentOrder && $order->parentOrder->shipment) {
+                $data['orderInfo']['shipment'] = $order->parentOrder->shipment->only('id', 'code', 'title');
+                $data['orderInfo']['shipment']['type'] = $order->parentOrder->shipment->shipmentType ? $order->parentOrder->shipment->shipmentType->only('id', 'code', 'title') : null;
+            } else {
+                $data['orderInfo']['shipment'] = null;
+            }
+            
+            $data['orderInfo']['payment_method'] = $order->paymentMethod ? $order->paymentMethod->only('id', 'title') : null;
             $data['orderInfo']['source'] = ["id" => $order->brandSource['id'], "title" => $order->brandSource->source['title']];
             $data['orderInfo']['brand'] = $order->brandSource->brand->only('id', 'title');
             $data['orderInfo']['order_status'] = $order->orderStatus->only('id', 'title');
@@ -1228,10 +1321,10 @@ class OrderController extends Controller
         }
         
         $commentScore = calculateDayBasedScore($order->created_at, now(), $order->id);
-        
+        $orderStatut=$comment->statut==2?$order->order_status_id:($comment->new_statut?$comment->new_statut:$comment->parentComment->current_statut);
         $comment->orders()->attach($order->id, [
             'title' => ($request['title']) ? $request['title'] : $comment->title,
-            'order_status_id' => $comment->parentComment->current_statut,
+            'order_status_id' => $orderStatut,
             'account_user_id' => getAccountUser()->account_id,
             'score' => $commentScore,
             'created_at' => now(),
@@ -1239,7 +1332,7 @@ class OrderController extends Controller
         ]);
         
         // Update order status with score if status is changing
-        if ($comment->is_change) {
+        /*if ($comment->is_change) {
             $statusScore = calculateDayBasedScore($order->created_at, now(), $order->id);
             $order->orderStatuses()->attach($comment->parentComment->current_statut, [
                 'account_user_id' => getAccountUser()->id,
@@ -1248,13 +1341,13 @@ class OrderController extends Controller
                 'created_at' => now(),
                 'updated_at' => now()
             ]);
-        }
+        }*/
         
         // Recalculate total order score
         // Note: No longer updating orders table score since we removed the column
         // Score is now calculated on-demand from account_user_order_status and order_comment tables
         
-        return ['statut' => $comment->new_statut?$comment->new_statut:$comment->parentComment->current_statut, 'is_change' => $comment->is_change];
+        return ['statut' => $orderStatut, 'is_change' => 0];
     }
 
     public static function update(Request $requests, $local = 0)
@@ -1431,142 +1524,14 @@ class OrderController extends Controller
             
             $order->update($order_only->all());
             $order->activePvas()->update(['order_status_id' => $comment['statut']]);
-            //hna kanvérifier wach la commande 3endha parent ila kane 3endha déja parent o parent 3endo child 
-            //hna bach ncrée commande d retour pour les commandes CH 
-            if ($order->parentOrder && str_contains($order->code, 'PR') == false) {
-                $dataReturn["account_id"] = getAccountUser()->account_id;
-                $dataReturn['order_status_id'] = 8;
-                $dataReturn['customer_id'] = $order->parentOrder->customer_id;
-                $dataReturn['city_id'] = $order->parentOrder->city_id;
-                $dataReturn['payment_type_id'] = $order->parentOrder->payment_type_id;
-                $dataReturn['payment_method_id'] = $order->parentOrder->payment_method_id;
-                $dataReturn['brand_source_id'] = $order->parentOrder->brand_source_id;
-                $dataReturn['principale'] = 1;
-                $dataReturn['warehouse_id'] = $order->warehouse_id;
-                $dataReturn['pickup_id'] = $order->pickup_id;
-                $dataReturn['order_id'] = $order->parentOrder->id;
-                $dataReturn['code'] = $order->parentOrder->code . "PR";
-                $dataReturn['is_change'] = $comment['is_change'];
-                $dataReturn['carrier_price'] = isset($request['comment']['carrier_price']) ? $request['comment']['carrier_price'] : 0;
-                $returnOrder = Order::create($dataReturn);
-                $order->activeOrderPvas->map(function ($orderPva) use ($returnOrder) {
-                    $orderPva->update(['principale' => 1]);
-                    $productVariationAttribute = ProductVariationAttribute::find($orderPva->product_variation_attribute_id);
-                    $productVariationAttribute->orders()->attach(
-                        $returnOrder->id,
-                        [
-                            'quantity' => $orderPva->quantity,
-                            'price' => $orderPva->price,
-                            'realprice' => $orderPva->realprice,
-                            'initial_price' => $orderPva->initial_price,
-                            'discount' => $orderPva->discount,
-                            'order_status_id' => 8,
-                            'account_user_id' => getAccountUser()->id,
-                            'created_at' => now(),
-                            'updated_at' => now()
-                        ]
-                    );
-                });
-                return $returnOrder;
-            }
-            if ($comment['is_change'] == 1) {
-                $dataNew["account_id"] = getAccountUser()->account_id;
-                $dataNew['order_status_id'] = 4;
-                $dataNew['customer_id'] = $order->customer_id;
-                $dataNew['city_id'] = $order->city_id;
-                $dataNew['payment_type_id'] = $order->payment_type_id;
-                $dataNew['payment_method_id'] = $order->payment_method_id;
-                $dataNew['brand_source_id'] = $order->brand_source_id;
-                $dataNew['warehouse_id'] = $order->warehouse_id;
-                $dataNew['order_id'] = $order->id;
-                $dataNew['code'] = $order->code . "-CH";
-                $dataNew['is_change'] = $comment['is_change'];
-                $dataNew['carrier_price'] = isset($request['comment']['carrier_price']) ? $request['comment']['carrier_price'] : 0;
-                $dataNew['discount'] = isset($request['comment']['discount']) ? $request['comment']['discount'] : 0;
-                $order_new = collect($dataNew)->only('code', 'warehouse_id', 'adresse', 'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'customer_id', 'order_status_id', 'account_id', 'carrier_price', 'order_id');
-                //Générer une nouvelle commande pour échanger la commande principale
-                $newOrder = Order::create($order_new->all());
-                $newOrder->orderStatuses()->attach($newOrder->order_status_id, [
-                    'account_user_id' => getAccountUser()->id, 
-                    'statut' => 1, 
-                    'score' => 10, // Initial score for new order status
-                    'created_at' => now(), 
-                    'updated_at' => now()
-                ]);
-                $commentData = [
-                    'id' => 38,
-                    'title' => "Nouvelle Commande",
-                ];
-                $comment = OrderController::changeStatus(new Request($commentData), $newOrder);
-
-                //ajouter les produits de la commande a échangé
-                foreach ($productsToActive as $pvaData) {
-                    $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
-                    $initial_price = Product::find($productVariationAttribute->product_id)->price->first()->price;
-                    $productPrice = isset($pvaData['price']) ? $pvaData['price'] : $initial_price;
-                    $discount = isset($pvaData['discount']) ? $pvaData['discount'] : 0;
-                    $realPrice = (Product::find($productVariationAttribute->product_id)->orderPvas) ? Product::find($productVariationAttribute->product_id)->orderPvas->first()->price : 0;
-                    $productVariationAttribute->orders()->attach(
-                        $newOrder->id,
-                        [
-                            'quantity' => $pvaData['quantity'],
-                            'price' => $productPrice,
-                            'realprice' => $realPrice,
-                            'initial_price' => $initial_price,
-                            'discount' => $discount,
-                            'order_status_id' => 4,
-                            'account_user_id' => getAccountUser()->id,
-                            'created_at' => now(),
-                            'updated_at' => now()
-                        ]
-                    );
-                    if (isset($pvaData['offerables']) && count($pvaData['offerables']) > 0) {
-                        VariationOfferableController::store(new Request(['order_id' => $order->id, 'pva' => $productVariationAttribute, 'variations' => $pvaData['offerables']]));
-                    }
-                }
-                return $newOrder;
-            } elseif ($comment['is_change'] == 2) {
-                $dataReturn["account_id"] = getAccountUser()->account_id;
-                $dataReturn['order_status_id'] = 8;
-                $dataReturn['customer_id'] = $order->customer_id;
-                $dataReturn['city_id'] = $order->city_id;
-                $dataReturn['payment_type_id'] = $order->payment_type_id;
-                $dataReturn['payment_method_id'] = $order->payment_method_id;
-                $dataReturn['brand_source_id'] = $order->brand_source_id;
-                $dataReturn['principale'] = 1;
-                $dataReturn['warehouse_id'] = $order->warehouse_id;
-                $dataReturn['order_id'] = $order->id;
-                $dataReturn['code'] = $order->code . "PR";
-                $dataReturn['is_change'] = $comment['is_change'];
-                $dataReturn['shipping_price'] = isset($request['comment']['shipping_price']) ? $request['comment']['shipping_price'] : 0;
-                $returnOrder = Order::create($dataReturn);
-                if (isset($request['productsToUpdate'])) {
-                    $order->activeOrderPvas->map(function ($pva) use ($request, $returnOrder) {
-                        $pvaUpdate = collect($request['productsToUpdate'])->pluck('id')->toArray();
-                        if (in_array($pva->id, $pvaUpdate)) {
-                            $record = collect($request['productsToUpdate'])->where('id', $pva->id)->first();
-                            $shipped_record = $pva;
-                            $canceled_record = $pva;
-                            $canceled_record->quantity = $pva->quantity - $record['quantity'];
-                            $shipped_record->order_status_id = 8;
-                            $shipped_record->order_id = $returnOrder->id;
-                            $shipped_record->quantity = $record['quantity'];
-                            OrderPva::create($shipped_record->toArray());
-                            OrderPva::create($canceled_record->toArray());
-                            $pva->update(['principale' => 1, 'order_status_id' => null]);
-                        }
-                    });
-                }
-                if (isset($request['productsToInactive'])) {
-                    foreach ($request['productsToInactive'] as $pvaInactive) {
-                        $orderPva = OrderPva::find($pvaInactive);
-                        $orderPva->update(['order_status_id' => 8]);
-                    }
-                }
-                return $returnOrder;
-            } else {
-
-                if (isset($request['productsToInactive'])) {
+            
+            // Note: The legacy logic that created "PR" or "CH" specific orders has been removed
+            // since returns and exchanges are now handled by createExchange()
+            
+            // Note: The legacy logic that created "PR" or "CH" specific orders has been removed
+            // since returns and exchanges are now handled by createExchange()
+            
+            if (isset($request['productsToInactive'])) {
                     foreach ($request['productsToInactive'] as $pvaData) {
                         $orderPva = OrderPva::find($pvaData);
                         $orderPva->update(['order_status_id' => 2]);
@@ -1646,7 +1611,6 @@ class OrderController extends Controller
                 if($local == 2)
                     return $order;
                 return $order;
-            }
         });
         if ($local == 1 || $local == 2)
             return $orders;
@@ -1681,6 +1645,155 @@ class OrderController extends Controller
             'statut' => 1,
             'data' => $order,
         ]);
+    }
+
+    /**
+     * Create a new return or exchange transaction for a given customer.
+     * This is the new centralized method for handling all post-sale order adjustments.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function createExchange(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'customer_id' => 'required|exists:customers,id',
+            'resolution_type' => 'required|in:refund,exchange',
+            'shipping_price' => 'nullable|numeric|min:0',
+
+            // Validate the items being returned
+            'items_to_return' => 'required|array|min:1',
+            'items_to_return.*.source_order_pva_id' => 'required|exists:order_pva,id',
+            'items_to_return.*.quantity' => 'required|integer|min:1',
+
+            // Validate the new items for an exchange
+            'items_to_exchange' => 'required_if:resolution_type,exchange|array|min:1',
+            'items_to_exchange.*.pva_id' => 'required|exists:product_variation_attribute,id',
+            'items_to_exchange.*.quantity' => 'required|integer|min:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
+        }
+
+        try {
+            $result = DB::transaction(function () use ($request) {
+                $accountUser = getAccountUser();
+                $accountId = $accountUser->account_id;
+
+                // Fetch the original order to inherit required fields like payment_type_id
+                $firstOriginalPva = OrderPva::find($request->items_to_return[0]['source_order_pva_id']);
+                $originalOrder = $firstOriginalPva ? Order::find($firstOriginalPva->order_id) : null;
+
+                // 1. Create the main "return" order. This acts as the master record for the transaction.
+                // We set order_status_id to 6 (In Transit) because the returned items are moving back to the warehouse.
+                $baseCode = $originalOrder ? $originalOrder->code : DefaultCodeController::getAccountCode('return', $accountId);
+                
+                $returnOrder = Order::create([
+                    'account_id' => $accountId,
+                    'customer_id' => $request->customer_id,
+                    'order_id' => $originalOrder ? $originalOrder->id : null, // Link to original order
+                    'order_status_id' => 6, // 6 = In Transit
+                    'type' => 'return', // This is the crucial part!
+                    'code' => $baseCode . '-RT',
+                    'warehouse_id' => $originalOrder ? $originalOrder->warehouse_id : Warehouse::where('account_id', $accountId)->first()->id ?? 1,
+                    'payment_type_id' => $originalOrder ? $originalOrder->payment_type_id : 1,
+                    'payment_method_id' => $originalOrder ? $originalOrder->payment_method_id : 1,
+                    'brand_source_id' => $originalOrder ? $originalOrder->brand_source_id : 1,
+                    'adresse' => $originalOrder ? $originalOrder->adresse : null,
+                    'city_id' => $originalOrder ? $originalOrder->city_id : null,
+                ]);
+
+                // 2. Add the items being returned to this new order.
+                foreach ($request->items_to_return as $item) {
+                    $originalPva = OrderPva::find($item['source_order_pva_id']);
+                    if (!$originalPva) continue;
+
+                    OrderPva::create([
+                        'order_id' => $returnOrder->id,
+                        'product_variation_attribute_id' => $originalPva->product_variation_attribute_id,
+                        'source_order_pva_id' => $item['source_order_pva_id'], // Link to original item
+                        'quantity' => abs($item['quantity']), // Positive quantity because items are physically coming back
+                        'price' => 0, // Set price to 0 DH for the return
+                        'order_status_id' => 6, // 6 = In Transit
+                        'account_user_id' => $accountUser->id,
+                    ]);
+                }
+
+                $exchangeOrder = null;
+                if ($request->resolution_type === 'exchange') {
+                    // 3. If it's an exchange, create a new "sale" order for the outgoing items.
+                    // This keeps financials clean: a return is a credit, a new sale is a debit.
+                    $exchangeOrder = Order::create([
+                        'account_id' => $accountId,
+                        'customer_id' => $request->customer_id,
+                        'order_id' => $originalOrder ? $originalOrder->id : null, // Link Exchange directly to original order
+                        'order_status_id' => 1, // Example: "Pending"
+                        'type' => 'sale', // It's a new sale to the customer
+                        'code' => $baseCode . '-EX',
+                        'carrier_price' => $request->shipping_price ?? 0,
+                        'warehouse_id' => $returnOrder->warehouse_id,
+                        'payment_type_id' => $returnOrder->payment_type_id,
+                        'payment_method_id' => $returnOrder->payment_method_id,
+                        'brand_source_id' => $returnOrder->brand_source_id,
+                        'adresse' => $returnOrder->adresse,
+                        'city_id' => $returnOrder->city_id,
+                    ]);
+
+                    $shippingPriceTotal = $request->shipping_price ?? 0;
+
+                    foreach ($request->items_to_exchange as $index => $item) {
+                        // Apply the shipping price to the first item so the total matches shipping_price
+                        $itemPrice = ($index === 0 && $shippingPriceTotal > 0) ? ($shippingPriceTotal / abs($item['quantity'])) : 0;
+
+                        OrderPva::create([
+                            'order_id' => $exchangeOrder->id,
+                            'product_variation_attribute_id' => $item['pva_id'],
+                            'quantity' => abs($item['quantity']), // Positive quantity
+                            'price' => $itemPrice, // Set so the total of the order equals shipping_price
+                            'order_status_id' => 1, // "Pending Shipment"
+                            'account_user_id' => $accountUser->id,
+                        ]);
+                    }
+                    
+                    // 4. Update the original order status to "Delivered" (7) because an exchange implies the courier 
+                    // successfully reached the customer to make the swap.
+                    if ($originalOrder && $originalOrder->order_status_id != 7) {
+                        $deliveredComment = \App\Models\Comment::where('new_statut', 7)->first();
+                        if ($deliveredComment) {
+                            $updateRequest = new Request([
+                                [
+                                    'id' => $originalOrder->id,
+                                    'comment' => [
+                                        'id' => $deliveredComment->id,
+                                        'title' => 'Exchange Processed'
+                                    ]
+                                ]
+                            ]);
+                            self::update($updateRequest, 1);
+                        } else {
+                            // Fallback if comment is not found for some reason
+                            $originalOrder->update(['order_status_id' => 7]);
+                        }
+                    }
+                }
+
+                return [
+                    'return_order_id' => $returnOrder->id,
+                    'exchange_order_id' => $exchangeOrder ? $exchangeOrder->id : null,
+                ];
+            });
+
+            return response()->json([
+                'statut' => 1,
+                'data' => $result,
+                'message' => 'Return/exchange processed successfully.'
+            ]);
+
+        } catch (\Throwable $e) {
+            Log::error('Return/Exchange creation failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json(['statut' => 0, 'data' => $e->getMessage()], 500);
+        }
     }
 
     /**

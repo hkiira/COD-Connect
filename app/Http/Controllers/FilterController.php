@@ -11,6 +11,7 @@ use App\Models\Product;
 use App\Models\ProductBrandSource;
 use App\Models\Shipment;
 use App\Models\Supplier;
+use App\Models\City;
 use Illuminate\Support\Facades\Auth;
 
 class FilterController extends Controller
@@ -211,7 +212,6 @@ class FilterController extends Controller
         $conditions = [];
         $with = [];
         $object = null;
-
         switch ($model) {
             case 'cities':
                 $object = "App\\Models\\City";
@@ -606,6 +606,17 @@ class FilterController extends Controller
                     return $data;
                 });
         }
+    }
+    public function cities(Request $request)
+    {
+        $results = City::get();
+        $datas = $results->map(function ($result) {
+            return [
+                "id" => $result->id,
+                "title" => $result->title.($result->titlear ? " - ".$result->titlear : "")
+            ];
+        });
+        return $datas->toArray();
     }
     public static function filterselect(Request $request, $model, $id = null)
     {

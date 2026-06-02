@@ -35,6 +35,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 return $this->updateCities();
             case 'export':
                 return $this->exportOrdersToXlsx();
+            case 'login':
+                return $this->login();
             case 'pickup':
                 return $this->pickup($id);
             case 'sync_invoices':

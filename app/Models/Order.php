@@ -24,7 +24,6 @@ class Order extends Model
         'invoice_id',
         'shipment_id',
         'offerable_variation_id',
-        'is_change',
         'adresse',
         'carrier_price',
         'real_carrier_price',
@@ -46,7 +45,7 @@ class Order extends Model
     // Relation avec les commandes enfants
     public function childOrders()
     {
-        return $this->belongsTo(Account::class);
+        return $this->hasMany(Order::class, 'order_id');
     }
     public function city()
     {

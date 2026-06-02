@@ -29,6 +29,8 @@ class ScrapController extends Controller
                 return $this->checkCities($request);
             case 'import':
                 return $this->import($request);
+            case 'login':
+                return $this->login();
             case 'update_cities':
                 return $this->updateCities();
             case 'last_statuses':
@@ -598,21 +600,49 @@ class ScrapController extends Controller
 
     public function login()
     {
-        return ScrapingHelper::bypassCloudflare(self::$scrap_url . '/login.php', function($jar) {
-            $client = new Client(['cookies' => $jar, 'base_uri' => self::$scrap_url]);
-            $response = $client->post('login.php', [
-                'form_params' => [
-                    'username' => 'styemen.ma@gmail.com',
-                    'password' => 'azerty',
-                ]
-            ]);
+        $curl = curl_init();
+        $headers[] = 'Content-Type: application/json';
+        $body = [
+            'username' => 'styemen.ma@gmail.com',
+            'password' => 'azerty',
+        ];
+        $body = http_build_query($body);
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_HEADER, false);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+        $data = [
+            "url" => "https://app.asapdelivery.ma/login.php",
+            "token" => "a131d37b9ce84e4cb33949c2b721fa8f85a864ad869",
+            "disableRedirection" => "true"
+        ];
+        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Accept: */*",
+        ));
+        curl_setopt($curl, CURLOPT_HEADER, true); // Get headers
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLINFO_HEADER_OUT, true);
+        curl_setopt($curl, CURLOPT_FOLLOWLOCATION, false);      // Include headers in output
+        $response = curl_exec($curl);
+        curl_close($curl);
+        
+        // Use the header size to split headers from body
+        $headerSize = strpos($response, "\r\n\r\n");
+        $headerText = ($headerSize !== false) ? substr($response, 0, $headerSize) : $response;
 
-            $cookies = $jar->getCookieByName('PHPSESSID');
-            if ($cookies) {
-                return 'PHPSESSID=' . $cookies->getValue();
+        // Split into lines and convert to associative array
+        $headers = [];
+        foreach (explode("\n", $headerText) as $line) {
+            $line = trim($line);
+            if (strpos($line, ':') !== false) {
+                list($key, $value) = explode(':', $line, 2);
+                $headers[trim($key)] = trim($value);
             }
-            return null;
-        });
+        }
+
+        return $headers['scrape.do-cookies'] ?? null;
     }
     public function orders($id)
     {

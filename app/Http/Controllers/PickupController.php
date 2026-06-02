@@ -209,12 +209,12 @@ class PickupController extends Controller
         $inactiveParams['where'] = ['column' => 'pickup_id', 'value' => null];
         $inactiveParams['whereArray'] = ['column' => 'order_status_id', 'values' => [4]];
         $inactiveParams['inAccount'] = ['account_id', getAccountUser()->account_id];
-        $datas = FilterController::searchs(new Request($inactiveParams), $model, ['id', 'code'], true, []);
+        $datas = FilterController::searchs(new Request($inactiveParams), $model, ['id', 'code','shipping_code'], true, []);
         $datas['data'] = collect($datas['data'])->map(function ($data) {
             $orderData = $data->only('id', 'code', 'comment', 'order_id', 'pickup_id', 'order_status_id', 'created_at');
-            $orderData['carriers'] = $data->city->activeCarriers->map(function ($carrier) {
+            /*$orderData['carriers'] = $data->city->activeCarriers->map(function ($carrier) {
                 return $carrier->only('id', 'title');
-            });
+            });*/
             $orderData['user'] = $data->userCreated->map(function ($user) {
                 return [
                     "id" => $user->id,
@@ -281,7 +281,7 @@ class PickupController extends Controller
     }
     public static function validatePickup(Request $request, $pickup, $canceled = 0)
     {
-        $comment = ($pickup->statut == 0) ? ['id' => 48, "title" => "En préparation"] : ['id' => 29, "title" => "En cours"];
+        $comment = ($pickup->statut == 0) ? ['id' => 48, "title" => "En préparation"] : ['id' => 81, "title" => "En cours"];
         $pickupId = $pickup->id;
         if ($canceled == 1) {
             $comment = collect($request)->map(function ($orderId) {

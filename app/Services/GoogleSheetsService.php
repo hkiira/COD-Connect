@@ -98,7 +98,7 @@ class GoogleSheetsService
                 }))->map(fn($item) => $item)->toArray()),
                 $quantity,
                 $order->code,
-                $order->is_change ? 1 : 0,
+                ($order->type === 'sale' && $order->order_id) ? 1 : 0, // Using order_id link to represent an exchange/change
                 1,
                 null,
             ]
