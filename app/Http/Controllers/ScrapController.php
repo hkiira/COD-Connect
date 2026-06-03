@@ -75,7 +75,7 @@ class ScrapController extends Controller
     {
         $sessionId = $this->login();
         $pickup = Pickup::where('id', $id)->first();
-        if($pickup->carrier_id==22){
+        if ($pickup->carrier_id == 22) {
             foreach ($pickup->orders()->whereNull('shipping_code')->get() as $key => $order) {
                 $total = 0;
                 $qty = 0;
@@ -83,7 +83,7 @@ class ScrapController extends Controller
                     $total += $activePva->pivot->quantity * $activePva->pivot->price;
                     $qty++;
                 });
-                $total=$total -$order->discount;
+                $total = $total - $order->discount;
                 $data = [
                     'nonce' => '86396d6332ae8331c3cebecb40c538db',
                     'phase' => 'shipping',
@@ -112,19 +112,19 @@ class ScrapController extends Controller
                     'express' => '0',
                     'action' => 'addramassage',
                 ];
-                    $order->update(['meta' => 1]);
-                    $this->createOrder($data, $sessionId);
-                    $asapOrder= $this->getOrder($order->code,$sessionId);
-                    if ($asapOrder) {
-                        $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
-                    }
+                $order->update(['meta' => 1]);
+                $this->createOrder($data, $sessionId);
+                $asapOrder = $this->getOrder($order->code, $sessionId);
+                if ($asapOrder) {
+                    $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
+                }
             }
             return [
                 'success' => true,
                 'message' => 'Synchronisation effectuée avec succès.'
             ];
         }
-    
+
         return [
             'success' => false,
             'message' => 'carrier non supporté pour la synchronisation des ramassages. Seul ASAP est supporté pour le moment.'
@@ -133,23 +133,24 @@ class ScrapController extends Controller
     public function export($id)
     {
         $pickup = Pickup::where('id', $id)->first();
-        if($pickup->carrier_id==24){
+        if ($pickup->carrier_id == 24) {
             $xlsx = new SpeedafController();
-           return $xlsx->exportPickupOrders($id);
-        }elseif($pickup->carrier_id==22){
+            return $xlsx->exportPickupOrders($id);
+        } elseif ($pickup->carrier_id == 22) {
             $xlsx = new AsapDeliveryController();
-           return $xlsx->exportPickupOrders($id);
-        }elseif($pickup->carrier_id==26){
+            return $xlsx->exportPickupOrders($id);
+        } elseif ($pickup->carrier_id == 26) {
             $xlsx = new AfraDeliveryController();
-           return $xlsx->exportPickupOrders($id);
+            return $xlsx->exportPickupOrders($id);
         }
-    
+
         return [
             'success' => false,
             'message' => 'carrier non supporté pour la synchronisation des ramassages.'
         ];
     }
-    public function import(Request $request){
+    public function import(Request $request)
+    {
         try {
             $file = $request->file('file');
             $import = new class implements \Maatwebsite\Excel\Concerns\ToCollection, \Maatwebsite\Excel\Concerns\WithStartRow, \Maatwebsite\Excel\Concerns\WithCustomCsvSettings {
@@ -172,8 +173,9 @@ class ScrapController extends Controller
 
             $importedData = Excel::toCollection($import, $file)->first();
             foreach ($importedData as $item) {
-                $order=Order::where("code",$item[3])->whereNull('shipment_id')->first();
-                if(!$order) continue;
+                $order = Order::where("code", $item[3])->whereNull('shipment_id')->first();
+                if (!$order)
+                    continue;
                 $id = 64;
                 switch ($item[1]) {
                     case 'Livré':
@@ -200,14 +202,14 @@ class ScrapController extends Controller
                 OrderController::update(new Request($orderData));
             }
             return response()->json([
-                'success' => true, 
+                'success' => true,
                 'message' => 'File imported successfully',
                 'count' => $importedData->count()
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Import failed: ' . $e->getMessage()
             ], 400);
         }
@@ -251,7 +253,7 @@ class ScrapController extends Controller
     }
     public function getOrder($code, $sessionId = null)
     {
-        $sessionId= $sessionId ?? $this->login();
+        $sessionId = $sessionId ?? $this->login();
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
@@ -282,7 +284,7 @@ class ScrapController extends Controller
                 'Cookie' => $sessionId,
             ]
         ]);
-        
+
         $htmlContent = $response->getBody()->getContents();
         $dom = new \DOMDocument();
         libxml_use_internal_errors(true);
@@ -297,16 +299,16 @@ class ScrapController extends Controller
             if ($cells->length >= 12) {
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
-                $date  = trim($cells->item(2)->textContent);
-                $destinataire  = utf8_decode(trim($cells->item(3)->textContent));
-                $phone  = trim($cells->item(4)->textContent);
-                $city  = trim($cells->item(5)->textContent);
-                $price  = trim($cells->item(6)->textContent);
-                $state  = utf8_decode(trim($cells->item(7)->textContent));
-                $ischange  = trim($cells->item(8)->textContent);
-                $asapCode  = trim($cells->item(9)->textContent);
-                $code  = trim($cells->item(10)->textContent);
-                $product  = utf8_decode(trim($cells->item(11)->textContent));
+                $date = trim($cells->item(2)->textContent);
+                $destinataire = utf8_decode(trim($cells->item(3)->textContent));
+                $phone = trim($cells->item(4)->textContent);
+                $city = trim($cells->item(5)->textContent);
+                $price = trim($cells->item(6)->textContent);
+                $state = utf8_decode(trim($cells->item(7)->textContent));
+                $ischange = trim($cells->item(8)->textContent);
+                $asapCode = trim($cells->item(9)->textContent);
+                $code = trim($cells->item(10)->textContent);
+                $product = utf8_decode(trim($cells->item(11)->textContent));
                 $data[] = [
                     'id' => $id,
                     'date' => $date,
@@ -383,7 +385,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => 'https://app.asapdelivery.ma',
         ]);
-        
+
         $response = $client->post('/inc/ramassage.php', [
             'headers' => [
                 'Cookie' => $sessionId,
@@ -451,7 +453,7 @@ class ScrapController extends Controller
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 $code = trim($cells->item(2)->textContent);
-                $exportLink  = "exportbls.php?id=" . $id . "&type=BRC&code=" . $code;
+                $exportLink = "exportbls.php?id=" . $id . "&type=BRC&code=" . $code;
 
                 $data[] = [
                     'id' => $id,
@@ -564,34 +566,34 @@ class ScrapController extends Controller
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Get invoice ID from the checkbox input's value.
-                $created          = trim($cells->item(2)->textContent);
-                $receiver      = utf8_decode(trim($cells->item(3)->textContent));
-                $phone       = trim($cells->item(4)->textContent);
-                $address        = trim($cells->item(5)->textContent);
-                $city        = trim($cells->item(6)->textContent);
-                $price  = trim($cells->item(7)->textContent);
+                $created = trim($cells->item(2)->textContent);
+                $receiver = utf8_decode(trim($cells->item(3)->textContent));
+                $phone = trim($cells->item(4)->textContent);
+                $address = trim($cells->item(5)->textContent);
+                $city = trim($cells->item(6)->textContent);
+                $price = trim($cells->item(7)->textContent);
                 // Get action links from the last cell.
-                $state  = trim($cells->item(8)->textContent);
-                $note  = trim($cells->item(9)->textContent);
-                $change  = trim($cells->item(11)->textContent);
-                $asapCode  = trim($cells->item(12)->textContent);
-                $spaceCode  = trim($cells->item(13)->textContent);
-                $product  = trim($cells->item(14)->textContent);
-                $stock  = trim($cells->item(15)->textContent);
+                $state = trim($cells->item(8)->textContent);
+                $note = trim($cells->item(9)->textContent);
+                $change = trim($cells->item(11)->textContent);
+                $asapCode = trim($cells->item(12)->textContent);
+                $spaceCode = trim($cells->item(13)->textContent);
+                $product = trim($cells->item(14)->textContent);
+                $stock = trim($cells->item(15)->textContent);
                 $data[] = [
-                    'id'             => $id,
-                    'created'           => $created,
-                    'receiver'       => $receiver,
-                    'phone'        => $phone,
-                    'address'      => $address,
-                    'city'         => $city,
-                    'price'         => $price,
-                    'state'         => $state,
-                    'change'         => $change,
-                    'asap_code'  => $asapCode,
-                    'space_code'  => $spaceCode,
-                    'product'  => $product,
-                    'stock'  => $stock,
+                    'id' => $id,
+                    'created' => $created,
+                    'receiver' => $receiver,
+                    'phone' => $phone,
+                    'address' => $address,
+                    'city' => $city,
+                    'price' => $price,
+                    'state' => $state,
+                    'change' => $change,
+                    'asap_code' => $asapCode,
+                    'space_code' => $spaceCode,
+                    'product' => $product,
+                    'stock' => $stock,
                 ];
             }
         }
@@ -627,7 +629,7 @@ class ScrapController extends Controller
         curl_setopt($curl, CURLOPT_FOLLOWLOCATION, false);      // Include headers in output
         $response = curl_exec($curl);
         curl_close($curl);
-        
+
         // Use the header size to split headers from body
         $headerSize = strpos($response, "\r\n\r\n");
         $headerText = ($headerSize !== false) ? substr($response, 0, $headerSize) : $response;
@@ -685,39 +687,40 @@ class ScrapController extends Controller
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Extract the text content from each cell.
-                $employee      = trim($cells->item(1)->textContent);
-                $code          = trim($cells->item(2)->textContent);
-                $nb_colis      = trim($cells->item(3)->textContent);
-                $montant       = trim($cells->item(4)->textContent);
-                $mas_ch        = trim($cells->item(5)->textContent);
-                $note          = trim($cells->item(6)->textContent);
-                $dateCreation  = trim($cells->item(7)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $code = trim($cells->item(2)->textContent);
+                $nb_colis = trim($cells->item(3)->textContent);
+                $montant = trim($cells->item(4)->textContent);
+                $mas_ch = trim($cells->item(5)->textContent);
+                $note = trim($cells->item(6)->textContent);
+                $dateCreation = trim($cells->item(7)->textContent);
                 $dateVersement = trim($cells->item(8)->textContent);
-                $status        = trim($cells->item(9)->textContent);
+                $status = trim($cells->item(9)->textContent);
                 // Get action links from the last cell.
-                $actionCell  = $cells->item(10);
-                $links       = $actionCell->getElementsByTagName('a');
-                $printLink   = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
-                $exportLink  = $links->length > 1 ? $links->item(1)->getAttribute('href') : null;
+                $actionCell = $cells->item(10);
+                $links = $actionCell->getElementsByTagName('a');
+                $printLink = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
+                $exportLink = $links->length > 1 ? $links->item(1)->getAttribute('href') : null;
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'code'           => $code,
-                    'nb_colis'       => $nb_colis,
-                    'montant'        => $montant,
-                    'mas_ch'         => $mas_ch,
-                    'note'           => $note,
-                    'date_creation'  => $dateCreation,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'code' => $code,
+                    'nb_colis' => $nb_colis,
+                    'montant' => $montant,
+                    'mas_ch' => $mas_ch,
+                    'note' => $note,
+                    'date_creation' => $dateCreation,
                     'date_versement' => $dateVersement,
-                    'status'         => $status,
-                    'print_link'     => $printLink,
-                    'export_link'    => $exportLink,
+                    'status' => $status,
+                    'print_link' => $printLink,
+                    'export_link' => $exportLink,
                 ];
             }
         }
         return $data;
     }
-    public function syncStatuses(){
+    public function syncStatuses()
+    {
 
     }
     public function syncOrders()
@@ -729,9 +732,9 @@ class ScrapController extends Controller
             ->with("activePhones")
             ->whereIn('pickup_id', Pickup::where('carrier_id', 22)->pluck('id')->toArray())
             ->whereNull('shipment_id')
-            ->whereIn('order_status_id', [6])
+            ->whereIn('order_status_id', [4])
             ->orderBy('created_at', 'desc');
-        
+
         $totalOrders = $ordersQuery->count();
 
         $ordersQuery->chunkById($chunkSize, function ($orders) use (&$updatedCount) {
@@ -746,7 +749,7 @@ class ScrapController extends Controller
                 if (!$asapHistory) {
                     $asapHistory = collect($this->getOrder($order->code))->first();
                 }
-                
+
                 if ($asapHistory) {
                     $id = 0;
                     switch ($asapHistory['state']) {
@@ -831,10 +834,14 @@ class ScrapController extends Controller
                             break;
                     }
 
-                    if (str_contains($asapHistory['state'], "Reporté")) $id = 28;
-                    if (str_contains($asapHistory['state'], "Programmé")) $id = 64;
-                    if (str_contains($asapHistory['state'], "pas de réponse")) $id = 31;
-                    if (str_contains($asapHistory['state'], "Mise en distribution")) $id = 64;
+                    if (str_contains($asapHistory['state'], "Reporté"))
+                        $id = 28;
+                    if (str_contains($asapHistory['state'], "Programmé"))
+                        $id = 64;
+                    if (str_contains($asapHistory['state'], "pas de réponse"))
+                        $id = 31;
+                    if (str_contains($asapHistory['state'], "Mise en distribution"))
+                        $id = 64;
 
                     if ($id == 0) {
                         continue;
@@ -850,7 +857,7 @@ class ScrapController extends Controller
                         ]
                     ];
                     $updatedCount++;
-                }else{
+                } else {
                     $orderData[] = [
                         "id" => $order->id,
                         'shipping_code' => null,
@@ -928,7 +935,7 @@ class ScrapController extends Controller
                 ShipmentController::store($requestData);
             }
         }
-        
+
         return [
             "statut" => 1,
             "data" => "Factures synchronisées avec succès."
@@ -953,7 +960,7 @@ class ScrapController extends Controller
                 ShipmentController::store($requestData);
             }
         }
-        
+
         return [
             "statut" => 1,
             "data" => "Retours synchronisés avec succès."
@@ -1050,7 +1057,8 @@ class ScrapController extends Controller
                 'statut' => 0,
                 'data' => $validator->errors(),
             ]);
-        };
+        }
+        ;
 
         $cityUpdated = $this->updateCities();
         if (1 == $cityUpdated['statut']) {

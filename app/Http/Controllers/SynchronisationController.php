@@ -75,7 +75,7 @@ class SynchronisationController extends Controller
     {
         $sessionId = $this->login();
         $pickup = Pickup::where('id', $id)->first();
-        if($pickup->carrier_id==22){
+        if ($pickup->carrier_id == 22) {
             foreach ($pickup->orders()->whereNull('shipping_code')->get() as $key => $order) {
                 $total = 0;
                 $qty = 0;
@@ -83,7 +83,7 @@ class SynchronisationController extends Controller
                     $total += $activePva->pivot->quantity * $activePva->pivot->price;
                     $qty++;
                 });
-                $total=$total -$order->discount;
+                $total = $total - $order->discount;
                 $data = [
                     'nonce' => '86396d6332ae8331c3cebecb40c538db',
                     'phase' => 'shipping',
@@ -112,19 +112,19 @@ class SynchronisationController extends Controller
                     'express' => '0',
                     'action' => 'addramassage',
                 ];
-                    $order->update(['meta' => 1]);
-                    $this->createOrder($data, $sessionId);
-                    $asapOrder= $this->getOrder($order->code,$sessionId);
-                    if ($asapOrder) {
-                        $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
-                    }
+                $order->update(['meta' => 1]);
+                $this->createOrder($data, $sessionId);
+                $asapOrder = $this->getOrder($order->code, $sessionId);
+                if ($asapOrder) {
+                    $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
+                }
             }
             return [
                 'success' => true,
                 'message' => 'Synchronisation effectuée avec succès.'
             ];
         }
-    
+
         return [
             'success' => false,
             'message' => 'carrier non supporté pour la synchronisation des ramassages. Seul ASAP est supporté pour le moment.'
@@ -134,24 +134,25 @@ class SynchronisationController extends Controller
     public function export($id)
     {
         $pickup = Pickup::where('id', $id)->first();
-        if($pickup->carrier_id==24){
+        if ($pickup->carrier_id == 24) {
             $xlsx = new SpeedafController();
-           return $xlsx->exportPickupOrders($id);
-        }elseif($pickup->carrier_id==22){
+            return $xlsx->exportPickupOrders($id);
+        } elseif ($pickup->carrier_id == 22) {
             $xlsx = new AsapDeliveryController();
-           return $xlsx->exportPickupOrders($id);
-        }elseif($pickup->carrier_id==26){
+            return $xlsx->exportPickupOrders($id);
+        } elseif ($pickup->carrier_id == 26) {
             $xlsx = new AfraDeliveryController();
-           return $xlsx->exportPickupOrders($id);
+            return $xlsx->exportPickupOrders($id);
         }
-    
+
         return [
             'success' => false,
             'message' => 'carrier non supporté pour la synchronisation des ramassages.'
         ];
 
     }
-    public function import(Request $request){
+    public function import(Request $request)
+    {
         try {
             $file = $request->file('file');
             // Create a custom import class that skips the first row
@@ -179,7 +180,7 @@ class SynchronisationController extends Controller
                             'retourne' => $row[14] ?? '',
                             'remarque' => $row[15] ?? '',
                         ];
-                        
+
                     }
                     return $data;
                 }
@@ -191,12 +192,13 @@ class SynchronisationController extends Controller
             };
 
             Excel::import($import, $file);
-            
+
             // Get the processed data
             $importedData = Excel::toCollection($import, $file)->first();
             foreach ($importedData as $item) {
-                $order=Order::where("code",$item[3])->whereNull('shipment_id')->first();
-                if(!$order) continue;
+                $order = Order::where("code", $item[3])->whereNull('shipment_id')->first();
+                if (!$order)
+                    continue;
                 $id = 64;
                 switch ($item[1]) {
                     case 'Livré':
@@ -223,7 +225,7 @@ class SynchronisationController extends Controller
                 OrderController::update(new Request($orderData));
             }
             return response()->json([
-                'success' => true, 
+                'success' => true,
                 'message' => 'File imported successfully',
                 'data' => $importedData,
                 'count' => $importedData->count()
@@ -231,7 +233,7 @@ class SynchronisationController extends Controller
 
         } catch (\Exception $e) {
             return response()->json([
-                'success' => false, 
+                'success' => false,
                 'message' => 'Import failed: ' . $e->getMessage()
             ], 400);
         }
@@ -288,8 +290,9 @@ class SynchronisationController extends Controller
         }
         return $data;
     }
-    public function syncOrders(){
-        $scrapController=new ScrapController();
+    public function syncOrders()
+    {
+        $scrapController = new ScrapController();
         return $scrapController->syncOrders();
     }
     //katjib la commande men systeme dial ASAP b search
@@ -355,37 +358,37 @@ class SynchronisationController extends Controller
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Extract the text content from each cell.
-                $employee      = trim($cells->item(1)->textContent);
-                $created          = trim($cells->item(2)->textContent);
-                $receiver      = trim($cells->item(3)->textContent);
-                $phone       = trim($cells->item(4)->textContent);
-                $address        = trim($cells->item(5)->textContent);
-                $city        = trim($cells->item(6)->textContent);
-                $price  = trim($cells->item(7)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $created = trim($cells->item(2)->textContent);
+                $receiver = trim($cells->item(3)->textContent);
+                $phone = trim($cells->item(4)->textContent);
+                $address = trim($cells->item(5)->textContent);
+                $city = trim($cells->item(6)->textContent);
+                $price = trim($cells->item(7)->textContent);
                 // Get action links from the last cell.
-                $state  = trim($cells->item(8)->textContent);
-                $note  = trim($cells->item(9)->textContent);
-                $change  = trim($cells->item(10)->textContent);
-                $asapCode  = trim($cells->item(11)->textContent);
-                $spaceCode  = trim($cells->item(12)->textContent);
-                $product  = trim($cells->item(13)->textContent);
-                $stock  = trim($cells->item(14)->textContent);
+                $state = trim($cells->item(8)->textContent);
+                $note = trim($cells->item(9)->textContent);
+                $change = trim($cells->item(10)->textContent);
+                $asapCode = trim($cells->item(11)->textContent);
+                $spaceCode = trim($cells->item(12)->textContent);
+                $product = trim($cells->item(13)->textContent);
+                $stock = trim($cells->item(14)->textContent);
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'created'           => $created,
-                    'receiver'       => $receiver,
-                    'phone'        => $phone,
-                    'address'         => $address,
-                    'city'         => $city,
-                    'price'         => $price,
-                    'state'         => $state,
-                    'note'          => $note,
-                    'change'         => $change,
-                    'asap_code'  => $asapCode,
-                    'space_code'  => $spaceCode,
-                    'product'  => $product,
-                    'stock'  => $stock,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'created' => $created,
+                    'receiver' => $receiver,
+                    'phone' => $phone,
+                    'address' => $address,
+                    'city' => $city,
+                    'price' => $price,
+                    'state' => $state,
+                    'note' => $note,
+                    'change' => $change,
+                    'asap_code' => $asapCode,
+                    'space_code' => $spaceCode,
+                    'product' => $product,
+                    'stock' => $stock,
                 ];
             }
         }
@@ -587,27 +590,27 @@ class SynchronisationController extends Controller
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Extract the text content from each cell.
-                $employee      = trim($cells->item(1)->textContent);
-                $code          = trim($cells->item(2)->textContent);
-                $nb_colis      = trim($cells->item(3)->textContent);
-                $note       = trim($cells->item(4)->textContent);
-                $status        = trim($cells->item(5)->textContent);
-                $dateCreation  = trim($cells->item(6)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $code = trim($cells->item(2)->textContent);
+                $nb_colis = trim($cells->item(3)->textContent);
+                $note = trim($cells->item(4)->textContent);
+                $status = trim($cells->item(5)->textContent);
+                $dateCreation = trim($cells->item(6)->textContent);
                 // Get action links from the last cell.
-                $actionCell  = $cells->item(7);
-                $links       = $actionCell->getElementsByTagName('a');
-                $printLink   = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
-                $exportLink  = "exportbls.php?id=" . $id . "&type=BRC&code=" . $code;
+                $actionCell = $cells->item(7);
+                $links = $actionCell->getElementsByTagName('a');
+                $printLink = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
+                $exportLink = "exportbls.php?id=" . $id . "&type=BRC&code=" . $code;
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'code'           => $code,
-                    'nb_colis'       => $nb_colis,
-                    'note'        => $note,
-                    'status'         => $status,
-                    'date_creation'  => $dateCreation,
-                    'print_link'     => $printLink,
-                    'export_link'    => $exportLink,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'code' => $code,
+                    'nb_colis' => $nb_colis,
+                    'note' => $note,
+                    'status' => $status,
+                    'date_creation' => $dateCreation,
+                    'print_link' => $printLink,
+                    'export_link' => $exportLink,
                 ];
             }
         }
@@ -675,33 +678,33 @@ class SynchronisationController extends Controller
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Extract the text content from each cell.
-                $employee      = trim($cells->item(1)->textContent);
-                $created          = trim($cells->item(2)->textContent);
-                $receiver      = trim($cells->item(3)->textContent);
-                $phone       = trim($cells->item(4)->textContent);
-                $city        = trim($cells->item(5)->textContent);
-                $price  = trim($cells->item(6)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $created = trim($cells->item(2)->textContent);
+                $receiver = trim($cells->item(3)->textContent);
+                $phone = trim($cells->item(4)->textContent);
+                $city = trim($cells->item(5)->textContent);
+                $price = trim($cells->item(6)->textContent);
                 // Get action links from the last cell.
-                $state  = trim($cells->item(7)->textContent);
-                $change  = trim($cells->item(8)->textContent);
-                $asapCode  = trim($cells->item(9)->textContent);
-                $spaceCode  = trim($cells->item(10)->textContent);
-                $product  = trim($cells->item(11)->textContent);
-                $stock  = trim($cells->item(12)->textContent);
+                $state = trim($cells->item(7)->textContent);
+                $change = trim($cells->item(8)->textContent);
+                $asapCode = trim($cells->item(9)->textContent);
+                $spaceCode = trim($cells->item(10)->textContent);
+                $product = trim($cells->item(11)->textContent);
+                $stock = trim($cells->item(12)->textContent);
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'created'           => $created,
-                    'receiver'       => $receiver,
-                    'phone'        => $phone,
-                    'city'         => $city,
-                    'price'         => $price,
-                    'state'         => $state,
-                    'change'         => $change,
-                    'asap_code'  => $asapCode,
-                    'space_code'  => $spaceCode,
-                    'product'  => $product,
-                    'stock'  => $stock,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'created' => $created,
+                    'receiver' => $receiver,
+                    'phone' => $phone,
+                    'city' => $city,
+                    'price' => $price,
+                    'state' => $state,
+                    'change' => $change,
+                    'asap_code' => $asapCode,
+                    'space_code' => $spaceCode,
+                    'product' => $product,
+                    'stock' => $stock,
                 ];
             }
         }
@@ -772,34 +775,34 @@ class SynchronisationController extends Controller
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Get invoice ID from the checkbox input's value.
-                $created          = trim($cells->item(2)->textContent);
-                $receiver      = utf8_decode(trim($cells->item(3)->textContent));
-                $phone       = trim($cells->item(4)->textContent);
-                $address        = trim($cells->item(5)->textContent);
-                $city        = trim($cells->item(6)->textContent);
-                $price  = trim($cells->item(7)->textContent);
+                $created = trim($cells->item(2)->textContent);
+                $receiver = utf8_decode(trim($cells->item(3)->textContent));
+                $phone = trim($cells->item(4)->textContent);
+                $address = trim($cells->item(5)->textContent);
+                $city = trim($cells->item(6)->textContent);
+                $price = trim($cells->item(7)->textContent);
                 // Get action links from the last cell.
-                $state  = trim($cells->item(8)->textContent);
-                $note  = trim($cells->item(9)->textContent);
-                $change  = trim($cells->item(11)->textContent);
-                $asapCode  = trim($cells->item(12)->textContent);
-                $spaceCode  = trim($cells->item(13)->textContent);
-                $product  = trim($cells->item(14)->textContent);
-                $stock  = trim($cells->item(15)->textContent);
+                $state = trim($cells->item(8)->textContent);
+                $note = trim($cells->item(9)->textContent);
+                $change = trim($cells->item(11)->textContent);
+                $asapCode = trim($cells->item(12)->textContent);
+                $spaceCode = trim($cells->item(13)->textContent);
+                $product = trim($cells->item(14)->textContent);
+                $stock = trim($cells->item(15)->textContent);
                 $data[] = [
-                    'id'             => $id,
-                    'created'           => $created,
-                    'receiver'       => $receiver,
-                    'phone'        => $phone,
-                    'address'      => $address,
-                    'city'         => $city,
-                    'price'         => $price,
-                    'state'         => $state,
-                    'change'         => $change,
-                    'asap_code'  => $asapCode,
-                    'space_code'  => $spaceCode,
-                    'product'  => $product,
-                    'stock'  => $stock,
+                    'id' => $id,
+                    'created' => $created,
+                    'receiver' => $receiver,
+                    'phone' => $phone,
+                    'address' => $address,
+                    'city' => $city,
+                    'price' => $price,
+                    'state' => $state,
+                    'change' => $change,
+                    'asap_code' => $asapCode,
+                    'space_code' => $spaceCode,
+                    'product' => $product,
+                    'stock' => $stock,
                 ];
             }
         }
@@ -926,33 +929,33 @@ class SynchronisationController extends Controller
                 $id = $input ? $input->getAttribute('value') : null;
 
                 // Extract the text content from each cell.
-                $employee      = trim($cells->item(1)->textContent);
-                $code          = trim($cells->item(2)->textContent);
-                $nb_colis      = trim($cells->item(3)->textContent);
-                $montant       = trim($cells->item(4)->textContent);
-                $mas_ch        = trim($cells->item(5)->textContent);
-                $note          = trim($cells->item(6)->textContent);
-                $dateCreation  = trim($cells->item(7)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $code = trim($cells->item(2)->textContent);
+                $nb_colis = trim($cells->item(3)->textContent);
+                $montant = trim($cells->item(4)->textContent);
+                $mas_ch = trim($cells->item(5)->textContent);
+                $note = trim($cells->item(6)->textContent);
+                $dateCreation = trim($cells->item(7)->textContent);
                 $dateVersement = trim($cells->item(8)->textContent);
-                $status        = trim($cells->item(9)->textContent);
+                $status = trim($cells->item(9)->textContent);
                 // Get action links from the last cell.
-                $actionCell  = $cells->item(10);
-                $links       = $actionCell->getElementsByTagName('a');
-                $printLink   = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
-                $exportLink  = $links->length > 1 ? $links->item(1)->getAttribute('href') : null;
+                $actionCell = $cells->item(10);
+                $links = $actionCell->getElementsByTagName('a');
+                $printLink = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
+                $exportLink = $links->length > 1 ? $links->item(1)->getAttribute('href') : null;
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'code'           => $code,
-                    'nb_colis'       => $nb_colis,
-                    'montant'        => $montant,
-                    'mas_ch'         => $mas_ch,
-                    'note'           => $note,
-                    'date_creation'  => $dateCreation,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'code' => $code,
+                    'nb_colis' => $nb_colis,
+                    'montant' => $montant,
+                    'mas_ch' => $mas_ch,
+                    'note' => $note,
+                    'date_creation' => $dateCreation,
                     'date_versement' => $dateVersement,
-                    'status'         => $status,
-                    'print_link'     => $printLink,
-                    'export_link'    => $exportLink,
+                    'status' => $status,
+                    'print_link' => $printLink,
+                    'export_link' => $exportLink,
                 ];
             }
         }
@@ -962,227 +965,227 @@ class SynchronisationController extends Controller
     }
     public function syncStatuses()
     {
-                        $scrapController=new ScrapController();
+        $scrapController = new ScrapController();
         return $scrapController->syncStatuses();
-    /*
-        $pickups = Pickup::where('carrier_id', 22)->pluck('id')->toArray();
-        $orders = Order::with('activePhones')->where('account_id', getAccountUser()->account_id)->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->whereIn('order_status_id', [6,9])->orderByDesc('created_at')->get();
-        // $orders = Order::where('account_id', getAccountUser()->account_id)->where('shipping_code','Non')->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->orderByDesc('created_at')->get();
-        $sessionId = $this->login();
-        foreach ($orders as $key => $order) {
-            // if($order->updated_at->diffInDays(now()) > 0) {
-            $phone = $order->activePhones->first();
-            if (!$phone) {
-                continue;
-            }
-            $asapHistory = collect($this->getLastStatuses($phone->title, $sessionId))->first();
-            if ($asapHistory) {
-                $id = 64;
-                switch ($asapHistory['state']) {
-                    case 'En attente de ramassage':
-                        break;
-                    case 'Ramassé':
-                        $id = 65;
-                        break;
-                    case 'Receptionné':
-                        $id = 64;
-                        break;
-                    case 'Receptionné Programé: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi, Dimanche':
-                        $id = 64;
-                        break;
-                    case 'Expédié':
-                        $id = 29;
-                        break;
-                    case 'Reçu par livreur':
-                        $id = 64;
-                        break;
-                    case 'Faux destination':
-                        $id = 62;
-                        break;
-                    case 'Hors zone':
-                        $id = 62;
-                        break;
-                    case 'Hors zone 1':
-                        $id = 62;
-                        break;
-                    case 'En distribution':
-                        $id = 64;
-                        break;
-                    case 'Injoignable':
-                        $id = 31;
-                        break;
-                    case 'Injoignable Programé: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi':
-                        $id = 31;
-                        break;
-                    case 'Pas de réponse':
-                        $id = 42;
-                        break;
-                    case 'Annulé':
-                        $id = 33;
-                        break;
-                    case 'Annulé 1':
-                        $id = 33;
-                        break;
-                    case 'Refusé':
-                        $id = 34;
-                        break;
-                    case 'Refusé 1':
-                        $id = 34;
-                        break;
-                    case 'Changement client':
-                        $id = 64;
-                        break;
-                    case 'Demande de retour':
-                        $id = 33;
-                        break;
-                    case 'Reporté':
-                        $id = 28;
-                        break;
-                    case 'Livré':
-                        $id = 25;
-                        break;
-                    case 'Livré (Changé)':
-                        $id = 25;
-                        break;
-                    case 'Livré (Payé)':
-                        $id = 25;
-                        break;
-                    case 'Retour vers agence casa':
-                        $id = 33;
-                        break;
-                    case 'Retour reçu agence casa':
-                        $id = 33;
-                        break;
-                    case 'Retour client expédié':
-                        $id = 33;
-                        break;
-                    case 'Retour client reçu':
-                        $id = 33;
-                        break;
-                    case 'Interessé':
-                        $id = 64;
-                        break;
-                    case 'Demande de suivi':
-                        $id = 64;
-                        break;
-                    case 'En attente de retour':
-                        $id = 33;
-                        break;
-                    case 'Change':
-                        $id = 64;
-                        break;
-                    case 'Programmé':
-                        $id = 64;
-                        break;
-                    case 'A retourner vers agence principal casa':
-                        $id = 33;
-                        break;
-                    case 'en voyage':
-                        $id = 35;
-                        break;
-                    case 'Pas de réponse 1':
-                        $id = 31;
-                        break;
-                    case 'pas de réponse 2 fois':
-                        $id = 31;
-                        break;
-                    case 'pas de réponse 3 fois':
-                        $id = 31;
-                        break;
-                    case 'pas de réponse 4 fois':
-                        $id = 31;
-                        break;
-                    case 'Pas de réponse LV':
-                        $id = 31;
-                        break;
-                    case 'Pas de réponse 5 fois':
-                        $id = 31;
-                        break;
-                    case 'Pas de réponse ( suivi )':
-                        $id = 31;
-                        break;
-                    case 'Annuler ( suivi ) 1':
-                        $id = 33;
-                        break;
-                    case 'Annuler ( suivi )' :
-                        $id = 33;
-                        break;
-                    case 'Reporté ( suivi )':
-                        $id = 28;
-                        break;
-                    case 'Changement numéro':
-                        $id = 64;
-                        break;
-                    case 'En attente d\'appel du client':
-                        $id = 64;
-                        break;
-                    case 'Numéro Incorrect':
-                        $id = 64;
-                        break;
-                    case 'Injoignable ( suivi )':
-                        $id = 31;
-                        break;
-                    case 'Injoignable 1':
-                        $id = 31;
-                        break;
-                    case 'Double Commande':
-                        $id = 58;
-                        break;
-                    default:
-                        $id = 28;
-                        break;
+        /*
+            $pickups = Pickup::where('carrier_id', 22)->pluck('id')->toArray();
+            $orders = Order::with('activePhones')->where('account_id', getAccountUser()->account_id)->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->whereIn('order_status_id', [6,9])->orderByDesc('created_at')->get();
+            // $orders = Order::where('account_id', getAccountUser()->account_id)->where('shipping_code','Non')->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->orderByDesc('created_at')->get();
+            $sessionId = $this->login();
+            foreach ($orders as $key => $order) {
+                // if($order->updated_at->diffInDays(now()) > 0) {
+                $phone = $order->activePhones->first();
+                if (!$phone) {
+                    continue;
                 }
+                $asapHistory = collect($this->getLastStatuses($phone->title, $sessionId))->first();
+                if ($asapHistory) {
+                    $id = 64;
+                    switch ($asapHistory['state']) {
+                        case 'En attente de ramassage':
+                            break;
+                        case 'Ramassé':
+                            $id = 65;
+                            break;
+                        case 'Receptionné':
+                            $id = 64;
+                            break;
+                        case 'Receptionné Programé: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi, Dimanche':
+                            $id = 64;
+                            break;
+                        case 'Expédié':
+                            $id = 29;
+                            break;
+                        case 'Reçu par livreur':
+                            $id = 64;
+                            break;
+                        case 'Faux destination':
+                            $id = 62;
+                            break;
+                        case 'Hors zone':
+                            $id = 62;
+                            break;
+                        case 'Hors zone 1':
+                            $id = 62;
+                            break;
+                        case 'En distribution':
+                            $id = 64;
+                            break;
+                        case 'Injoignable':
+                            $id = 31;
+                            break;
+                        case 'Injoignable Programé: Lundi, Mardi, Mercredi, Jeudi, Vendredi, Samedi':
+                            $id = 31;
+                            break;
+                        case 'Pas de réponse':
+                            $id = 42;
+                            break;
+                        case 'Annulé':
+                            $id = 33;
+                            break;
+                        case 'Annulé 1':
+                            $id = 33;
+                            break;
+                        case 'Refusé':
+                            $id = 34;
+                            break;
+                        case 'Refusé 1':
+                            $id = 34;
+                            break;
+                        case 'Changement client':
+                            $id = 64;
+                            break;
+                        case 'Demande de retour':
+                            $id = 33;
+                            break;
+                        case 'Reporté':
+                            $id = 28;
+                            break;
+                        case 'Livré':
+                            $id = 25;
+                            break;
+                        case 'Livré (Changé)':
+                            $id = 25;
+                            break;
+                        case 'Livré (Payé)':
+                            $id = 25;
+                            break;
+                        case 'Retour vers agence casa':
+                            $id = 33;
+                            break;
+                        case 'Retour reçu agence casa':
+                            $id = 33;
+                            break;
+                        case 'Retour client expédié':
+                            $id = 33;
+                            break;
+                        case 'Retour client reçu':
+                            $id = 33;
+                            break;
+                        case 'Interessé':
+                            $id = 64;
+                            break;
+                        case 'Demande de suivi':
+                            $id = 64;
+                            break;
+                        case 'En attente de retour':
+                            $id = 33;
+                            break;
+                        case 'Change':
+                            $id = 64;
+                            break;
+                        case 'Programmé':
+                            $id = 64;
+                            break;
+                        case 'A retourner vers agence principal casa':
+                            $id = 33;
+                            break;
+                        case 'en voyage':
+                            $id = 35;
+                            break;
+                        case 'Pas de réponse 1':
+                            $id = 31;
+                            break;
+                        case 'pas de réponse 2 fois':
+                            $id = 31;
+                            break;
+                        case 'pas de réponse 3 fois':
+                            $id = 31;
+                            break;
+                        case 'pas de réponse 4 fois':
+                            $id = 31;
+                            break;
+                        case 'Pas de réponse LV':
+                            $id = 31;
+                            break;
+                        case 'Pas de réponse 5 fois':
+                            $id = 31;
+                            break;
+                        case 'Pas de réponse ( suivi )':
+                            $id = 31;
+                            break;
+                        case 'Annuler ( suivi ) 1':
+                            $id = 33;
+                            break;
+                        case 'Annuler ( suivi )' :
+                            $id = 33;
+                            break;
+                        case 'Reporté ( suivi )':
+                            $id = 28;
+                            break;
+                        case 'Changement numéro':
+                            $id = 64;
+                            break;
+                        case 'En attente d\'appel du client':
+                            $id = 64;
+                            break;
+                        case 'Numéro Incorrect':
+                            $id = 64;
+                            break;
+                        case 'Injoignable ( suivi )':
+                            $id = 31;
+                            break;
+                        case 'Injoignable 1':
+                            $id = 31;
+                            break;
+                        case 'Double Commande':
+                            $id = 58;
+                            break;
+                        default:
+                            $id = 28;
+                            break;
+                    }
 
-                if (str_contains($asapHistory['state'], "Reporté")) {
-                    $id = 28;
-                }
-                if (str_contains($asapHistory['state'], "Programmé")) {
-                    $id = 64;
-                }
-                if (str_contains($asapHistory['state'], "pas de réponse")) {
-                    $id = 31;
-                }
-                if (str_contains($asapHistory['state'], "Mise en distribution")) {
-                    $id = 64;
-                }
-                if ($id==0) {
-                    return [
-                        "statut" => 0,
-                        "data" => "Nouveau statut non défini : ".$asapHistory['state'] . " pour la commande " . $order->code
-                    ];
-                }
-                $orderData = [
-                    [
-                        "id" => $order->id,
-                        'meta' => $asapHistory['id']? $asapHistory['id']:$order->meta, 
-                        'shipping_code' => $order->shipping_code?$order->shipping_code:$asapHistory['asap_code'],
-                        "comment" => [
-                            "id" => $id,
-                            "title" => $asapHistory['state']
+                    if (str_contains($asapHistory['state'], "Reporté")) {
+                        $id = 28;
+                    }
+                    if (str_contains($asapHistory['state'], "Programmé")) {
+                        $id = 64;
+                    }
+                    if (str_contains($asapHistory['state'], "pas de réponse")) {
+                        $id = 31;
+                    }
+                    if (str_contains($asapHistory['state'], "Mise en distribution")) {
+                        $id = 64;
+                    }
+                    if ($id==0) {
+                        return [
+                            "statut" => 0,
+                            "data" => "Nouveau statut non défini : ".$asapHistory['state'] . " pour la commande " . $order->code
+                        ];
+                    }
+                    $orderData = [
+                        [
+                            "id" => $order->id,
+                            'meta' => $asapHistory['id']? $asapHistory['id']:$order->meta, 
+                            'shipping_code' => $order->shipping_code?$order->shipping_code:$asapHistory['asap_code'],
+                            "comment" => [
+                                "id" => $id,
+                                "title" => $asapHistory['state']
+                            ]
                         ]
-                    ]
-                ];
-                OrderController::update(new Request($orderData));
-            }else{
-                // $orderData = [
-                //     [
-                //         "id" => $order->id,
-                //         'meta' => null, 
-                //         'shipping_code' => $asapHistory['asap_code'],
-                //         "comment" => [
-                //             "id" => 64,
-                //             "title" => 'Non traité'
-                //         ]
-                //     ]
-                // ];
-                // OrderController::update(new Request($orderData));
+                    ];
+                    OrderController::update(new Request($orderData));
+                }else{
+                    // $orderData = [
+                    //     [
+                    //         "id" => $order->id,
+                    //         'meta' => null, 
+                    //         'shipping_code' => $asapHistory['asap_code'],
+                    //         "comment" => [
+                    //             "id" => 64,
+                    //             "title" => 'Non traité'
+                    //         ]
+                    //     ]
+                    // ];
+                    // OrderController::update(new Request($orderData));
+                }
+                // }
             }
-            // }
-        }
-        return [
-            "statut" => 1,
-            "data" => "Commandes synchronisés avec succès."
-        ];*/
+            return [
+                "statut" => 1,
+                "data" => "Commandes synchronisés avec succès."
+            ];*/
         //2,3,4,5,6,9,10,11,14,16,25,26,30,39,40,41,42,58,59 en cours
         //17 livré
         //7,8,12,13,15,18,19,20,21,22,23,24,27,28,29,31 annulées
@@ -1228,16 +1231,16 @@ class SynchronisationController extends Controller
                 $city = trim($cells->item(3)->textContent);
                 $status = trim($cells->item(4)->textContent);
                 $price = trim($cells->item(5)->textContent);
-                $shipping  = trim($cells->item(6)->textContent);
+                $shipping = trim($cells->item(6)->textContent);
                 // Get action links from the last cell.
                 $data[] = [
-                    'num'             => $num,
-                    'code'       => $code,
-                    'phone'           => $phone,
-                    'city'       => $city,
-                    'status'         => $status,
-                    'price'  => $price,
-                    'shipping'     => $shipping,
+                    'num' => $num,
+                    'code' => $code,
+                    'phone' => $phone,
+                    'city' => $city,
+                    'status' => $status,
+                    'price' => $price,
+                    'shipping' => $shipping,
                 ];
             }
         }
@@ -1245,7 +1248,7 @@ class SynchronisationController extends Controller
     }
     public function syncInvoices()
     {
-        $scrapedAsap= new ScrapController();
+        $scrapedAsap = new ScrapController();
         return $scrapedAsap->syncInvoices();
     }
     public function syncReturns()
@@ -1267,7 +1270,7 @@ class SynchronisationController extends Controller
                 ShipmentController::store($requestData);
             }
         }
-        
+
         return [
             "statut" => 1,
             "data" => "Retours synchronisés avec succès."
@@ -1367,7 +1370,8 @@ class SynchronisationController extends Controller
                 'statut' => 0,
                 'data' => $validator->errors(),
             ]);
-        };
+        }
+        ;
 
         $cityUpdated = $this->updateCities();
         if (1 == $cityUpdated['statut']) {

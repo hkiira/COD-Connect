@@ -41,6 +41,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 return $this->pickup($id);
             case 'sync_invoices':
                 return $this->syncInvoices();
+            case 'get_order':
+                return $this->getOrder($id);
             case 'sync_orders':
                 return $this->syncOrders();
             case 'sync_statuses':
@@ -64,12 +66,51 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             case 'order_history':
                 return $this->historyOrder($id);
             case 'create_order':
-                return $this->createOrder($id);
+                $order = Order::find($id);
+                if (!$order) {
+                    return ["statut" => 0, "data" => "Commande introuvable"];
+                }
+                $total = 0;
+                $qty = 0;
+                $order->activePvas->map(function ($activePva) use (&$total, &$qty) {
+                    $total += $activePva->pivot->quantity * $activePva->pivot->price;
+                    $qty++;
+                });
+                $total = $total - $order->discount;
+                $data = [
+                    'nonce' => '86396d6332ae8331c3cebecb40c538db',
+                    'phase' => 'shipping',
+                    'state' => '1',
+                    'id' => '0',
+                    'client' => '5986',
+                    'worker' => '',
+                    'fullname' => $order->customer->name,
+                    'phone' => $order->customer->phones->first()->title,
+                    'code' => '',
+                    'code2' => $order->code,
+                    'city' => $order->customer->addresses->first()->city->title ?? $order->city->title,
+                    'address' => $order->customer->addresses->first()->title,
+                    'fromstock' => '0',
+                    'product' => implode("\n", $order->activePvas->map(function ($activePva) {
+                        $variations = $activePva->variationAttribute->childVariationAttributes->map(function ($childVa) {
+                            return $childVa->attribute->title;
+                        });
+                        return $activePva->pivot->quantity . " x " . $activePva->product->title . ' : ' . implode(", ", $variations->toArray());
+                    })->toArray()),
+                    'qty' => $qty,
+                    'price' => $total,
+                    'note' => '',
+                    'change' => '0',
+                    'openpackage' => '0',
+                    'express' => '0',
+                    'action' => 'addramassage',
+                ];
+                return $this->createOrder($data);
             default:
                 return "productsuppliers";
         }
     }
-    
+
     /**
      * Export orders as .xlsx file with columns:
      * customer name, last phone, last address, last address city title, order code, order products
@@ -82,7 +123,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             ->orderByDesc('id')
             ->where("pickup_id", $id) // Filter by pickup_id
             ->get();
-        
+
         $data = $orders->map(function ($order) {
             // 'Destinataire',
             // 'Téléphone',
@@ -95,11 +136,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             // 'Change (0/1)',
             // 'Ouvrir Colis (0/1)',
             return [
-                'Destinataire' => $order->customer->name."-".$order->code,
+                'Destinataire' => $order->customer->name . "-" . $order->code,
                 'Téléphone' => $order->customer->activePhones->last()->title,
                 'Ville' => $order->customer->activeAddresses->first()->city->title ?? '',
                 'Adresse' => $order->customer->activeAddresses->first()->title,
-                'Prix' => $order->calculateActivePvasTotalValue()-$order->discount+$order->shipping_price,
+                'Prix' => $order->calculateActivePvasTotalValue() - $order->discount + $order->shipping_price,
                 'Produit Ref' => implode(" \n ", collect($order->orderPvaTtitle()->map(function ($item) {
                     return $item['product'] . ' ' . implode(' ', $item['attributes']);
                 }))->map(fn($item) => $item)->toArray()),
@@ -109,33 +150,48 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 'Ouvrir Colis (0/1)' => 1,
                 'commentaire' => $order->comment,
                 'date_creation' => $order->created_at->format('Y-m-d H:i:s'),
-                
+
             ];
         });
         // Single row header
         $headings = [
-            'Destinataire', 'Téléphone', 'Ville', 'Adresse', 'Prix',  'Produit Ref', 'Qté', "ID Intern", 'Change (0/1)', 'Ouvrir Colis (0/1)', 'commentaire', 'date_creation'
+            'Destinataire',
+            'Téléphone',
+            'Ville',
+            'Adresse',
+            'Prix',
+            'Produit Ref',
+            'Qté',
+            "ID Intern",
+            'Change (0/1)',
+            'Ouvrir Colis (0/1)',
+            'commentaire',
+            'date_creation'
         ];
 
-        $export = new class($data, $headings) implements \Maatwebsite\Excel\Concerns\FromCollection, \Maatwebsite\Excel\Concerns\WithHeadings, \Maatwebsite\Excel\Concerns\WithStyles {
+        $export = new class ($data, $headings) implements \Maatwebsite\Excel\Concerns\FromCollection, \Maatwebsite\Excel\Concerns\WithHeadings, \Maatwebsite\Excel\Concerns\WithStyles {
             protected $data;
             protected $headings;
-            public function __construct($data, $headings) {
+            public function __construct($data, $headings)
+            {
                 $this->data = $data;
                 $this->headings = $headings;
             }
-            public function collection() {
+            public function collection()
+            {
                 return $this->data;
             }
-            public function headings(): array {
+            public function headings(): array
+            {
                 return $this->headings;
             }
-            public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet) {
+            public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet)
+            {
                 return [
-                    1 => [
-                        'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-                        'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => '366092']],
-                        'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER, 'vertical' => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER]
+                1 => [
+                    'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                    'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => '366092']],
+                    'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER, 'vertical' => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER]
                     ]
                 ];
             }
@@ -160,6 +216,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $htmlContent = curl_exec($curl);
 
         $data = [];
@@ -184,16 +241,16 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $city = trim($cells->item(3)->textContent);
                 $status = trim($cells->item(4)->textContent);
                 $price = trim($cells->item(5)->textContent);
-                $shipping  = trim($cells->item(6)->textContent);
+                $shipping = trim($cells->item(6)->textContent);
                 // Get action links from the last cell.
                 $data[] = [
-                    'num'             => $num,
-                    'code'       => $code,
-                    'phone'           => $phone,
-                    'city'       => $city,
-                    'status'         => $status,
-                    'price'  => $price,
-                    'shipping'     => $shipping,
+                    'num' => $num,
+                    'code' => $code,
+                    'phone' => $phone,
+                    'city' => $city,
+                    'status' => $status,
+                    'price' => $price,
+                    'shipping' => $shipping,
                 ];
             }
         }
@@ -217,6 +274,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $htmlContent = curl_exec($curl);
 
         $data = [];
@@ -258,7 +316,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     {
         $orders = Order::where('account_id', getAccountUser()->account_id)->limit(10)
             ->get();
-        return  $orders->map(function ($order) {
+        return $orders->map(function ($order) {
             return [
                 'Destinataire' => $order->customer->name,
                 'Téléphone' => $order->customer->activePhones->first()->title,
@@ -278,15 +336,17 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
     public function pickup($id)
     {
+        $sessionId = $this->login();
         $pickup = Pickup::where('id', $id)->first();
 
-        foreach ($pickup->orders()->get() as $key => $order) {
+        foreach ($pickup->orders()->whereNull('shipping_code')->get() as $key => $order) {
             $total = 0;
             $qty = 0;
             $order->activePvas->map(function ($activePva) use (&$total, &$qty) {
                 $total += $activePva->pivot->quantity * $activePva->pivot->price;
                 $qty++;
             });
+            $total = $total - $order->discount;
             $data = [
                 'nonce' => '86396d6332ae8331c3cebecb40c538db',
                 'phase' => 'shipping',
@@ -298,7 +358,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 'phone' => $order->customer->phones->first()->title,
                 'code' => '',
                 'code2' => $order->code,
-                'city' => $order->city->title,
+                'city' => $order->customer->addresses->first()->city->title ?? $order->city->title,
                 'address' => $order->customer->addresses->first()->title,
                 'fromstock' => '0',
                 'product' => implode("\n", $order->activePvas->map(function ($activePva) {
@@ -315,25 +375,24 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 'express' => '0',
                 'action' => 'addramassage',
             ];
-            if ($order->meta) {
-                $order->update(['meta' => 1]);
-                $this->createOrder($data);
-            }
-            $asapOrder= $this->getLastStatuses($order->code,$sessionId);
+            $order->update(['meta' => 1]);
+            $this->createOrder($data, $sessionId);
+            $asapOrder = $this->getLastStatuses($order->code, $sessionId);
             if ($asapOrder) {
                 $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
             }
         }
         return $pickup->orders;
     }
-    public function syncOrders(){
+    public function syncOrders()
+    {
         $sessionId = $this->login();
-        $orders = Order::where('account_id', getAccountUser()->account_id)->whereNull('shipment_id')->whereNotNull('pickup_id')->whereNull('shipping_code')->whereNotIn('order_status_id', [2, 3])->limit(10)->get();
-        $updatedCode=0;
+        $orders = Order::where('account_id', getAccountUser()->account_id)->whereNull('shipment_id')->whereNotNull('pickup_id')->whereNull('shipping_code')->whereNotIn('order_status_id', [1, 2, 3, 4, 5])->limit(10)->get();
+        $updatedCode = 0;
         foreach ($orders as $order) {
-            $asapOrder= $this->getLastStatuses($order->code,$sessionId);
-        return $asapOrder;
-            if($asapOrder){
+            $asapOrder = $this->getOrder($order->code, $sessionId);
+            return $asapOrder;
+            if ($asapOrder) {
                 // Update the order with ASAP order ID and shipping code
                 $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
                 $updatedCode++;
@@ -342,10 +401,12 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         return $updatedCode;
     }
     //katjib la commande men systeme dial ASAP b search
-    public function getOrder($code)
+    public function getOrder($code, $sessionId = null)
     {
+        if (!$sessionId) {
+            $sessionId = $this->login();
+        }
         $curl = curl_init();
-        $headers[] = 'Content-Type: application/json';
         $body = [
             "state" => "1",
             "keyword" => $code,
@@ -370,19 +431,20 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
-            "token" => "8a355170e5de449db59061cef47bb515405addc24cd",
+            "token" => "a131d37b9ce84e4cb33949c2b721fa8f85a864ad869",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = curl_exec($curl);
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
@@ -404,88 +466,68 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Get invoice ID from the checkbox input's value.
-                $created          = trim($cells->item(2)->textContent);
-                $receiver      = utf8_decode(trim($cells->item(3)->textContent));
-                $phone       = trim($cells->item(4)->textContent);
-                $address       = utf8_decode(trim($cells->item(5)->textContent));
-                $city        = trim($cells->item(6)->textContent);
+                $created = trim($cells->item(2)->textContent);
+                $receiver = utf8_decode(trim($cells->item(3)->textContent));
+                $phone = trim($cells->item(4)->textContent);
+                $address = utf8_decode(trim($cells->item(5)->textContent));
+                $city = trim($cells->item(6)->textContent);
                 preg_match('/L:\s*(\d+)/', $city, $matches);
-                $delivery        = $matches[1] ?? null;
-                $price  = trim($cells->item(7)->textContent);
-                $status  = utf8_decode(trim($cells->item(8)->textContent));
-                $hasInvoice  = trim($cells->item(9)->textContent);
-                $change  = trim($cells->item(10)->textContent);
-                $asapCode  = trim($cells->item(11)->textContent);
-                $spaceCode  = trim($cells->item(12)->textContent);
+                $delivery = $matches[1] ?? null;
+                $price = trim($cells->item(7)->textContent);
+                $status = utf8_decode(trim($cells->item(8)->textContent));
+                $hasInvoice = trim($cells->item(9)->textContent);
+                $change = trim($cells->item(10)->textContent);
+                $asapCode = trim($cells->item(11)->textContent);
+                $spaceCode = trim($cells->item(12)->textContent);
                 $cleaned = preg_replace('/\s+/', ' ', $status);
                 $data[] = [
-                    'id'             => $id,
-                    'created'           => $created,
-                    'created'           => $created,
-                    'receiver'       => $receiver,
-                    'phone'        => $phone,
-                    'delivery'         => $delivery,
-                    'price'         => $price,
-                    'state'         => $cleaned,
-                    'change'         => $change,
-                    'asap_code'  => $asapCode,
-                    'space_code'  => $spaceCode,
+                    'id' => $id,
+                    'created' => $created,
+                    'created' => $created,
+                    'receiver' => $receiver,
+                    'phone' => $phone,
+                    'delivery' => $delivery,
+                    'price' => $price,
+                    'state' => $cleaned,
+                    'change' => $change,
+                    'asap_code' => $asapCode,
+                    'space_code' => $spaceCode,
                 ];
             }
         }
         return $data;
     }
     //crée une commande dans le systéme de ASAP
-    public function createOrder($data)
+    public function createOrder($data, $sessionId = null)
     {
-        $client = new Client([
-            'base_uri' => 'https://app.asapdelivery.ma',
-            'headers' => ['User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36']
-        ]);
-
-        // Créer un cookie jar pour stocker la session
-        $jar = new CookieJar();
-
-        // 1️⃣ Se connecter
-        $loginResponse = $client->post('/login.php', [
-            'form_params' => [
-                'username' => 'achkar.abder@gmail.com',  // Vérifie que c'est bien "username" and not "email"
-                'password' => 'demarrer',
-            ],
-            'cookies' => $jar,  // Stocker les cookies
-        ]);
-
-        // Récupérer les cookies de session
-        $cookies = $jar->toArray();
-        $sessionId = null;
-        foreach ($cookies as $cookie) {
-            if ($cookie['Name'] === 'PHPSESSID') {
-                $sessionId = $cookie['Value'];
-                break;
-            }
-        }
-
-        if (!$sessionId) {
-            return 'Erreur : Impossible de récupérer PHPSESSID';
-        }
-        // 2 Envoyer les données du formulaire
-        $uploadResponse = $client->post('/inc/ramassage.php', [
-            'headers' => [
-                'Cookie' => "PHPSESSID=$sessionId",  // Garder la session active
-                'Referer' => 'https://app.asapdelivery.ma/ramassage.php',
-                'Origin' => 'https://app.asapdelivery.ma',
-                'X-Requested-With' => 'XMLHttpRequest',
-            ],
-            'form_params' => $data,
-        ]);
-        return $uploadResponse->getBody()->getContents();
+        $sessionId = $sessionId ?? $this->login();
+        $curl = curl_init();
+        $body = http_build_query($data);
+        $scrapeData = [
+            "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
+            "token" => "328893f698c34a058fd070d119731957b909c885d63",
+            "customHeaders" => "true"
+        ];
+        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($scrapeData));
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_HEADER, false);
+        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
+            "Accept: */*",
+            'cookie: ' . $sessionId,
+        ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+        $uploadResponse = curl_exec($curl);
+        curl_close($curl);
+        return $uploadResponse;
     }
     // Récupérer l'historique d'une commande par Order Asap Id
     public function historyOrder($orderId)
     {
         $sessionId = $this->login();
         $curl = curl_init();
-        $headers[] = 'Content-Type: application/json';
         $body = [
             'nonce' => '86396d6332ae8331c3cebecb40c538db',
             "id" => $orderId, //hna les ids dial les colis en attente
@@ -495,7 +537,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
             "token" => "328893f698c34a058fd070d119731957b909c885d63",
@@ -504,62 +545,48 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = curl_exec($curl);
         return $uploadResponse;
     }
     //hadi makhedamach 7ta nchof blanha
     public function createPickup()
     {
-        $client = new Client([
-            'base_uri' => 'https://app.asapdelivery.ma',
-            'headers' => ['User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36']
-        ]);
-
-        // Créer un cookie jar pour stocker la session
-        $jar = new CookieJar();
-
-        // 1️⃣ Se connecter
-        $loginResponse = $client->post('/login.php', [
-            'form_params' => [
-                'username' => 'achkar.abder@gmail.com',  // Vérifie que c'est bien "username" and not "email"
-                'password' => 'demarrer',
-            ],
-            'cookies' => $jar,  // Stocker les cookies
-        ]);
-
-        // Récupérer les cookies de session
-        $cookies = $jar->toArray();
-        $sessionId = null;
-        foreach ($cookies as $cookie) {
-            if ($cookie['Name'] === 'PHPSESSID') {
-                $sessionId = $cookie['Value'];
-                break;
-            }
-        }
-
+        $sessionId = $this->login();
         if (!$sessionId) {
             return 'Erreur : Impossible de récupérer PHPSESSID';
         }
 
-        // 2 Envoyer les données du formulaire
-        $uploadResponse = $client->post('/inc/ramassage.php', [
-            'headers' => [
-                'Cookie' => "PHPSESSID=$sessionId",  // Garder la session active
-                'Referer' => 'https://app.asapdelivery.ma/ramassage.php',
-                'Origin' => 'https://app.asapdelivery.ma',
-                'X-Requested-With' => 'XMLHttpRequest',
-            ],
-            'form_params' => [
-                'nonce' => '86396d6332ae8331c3cebecb40c538db',
-                "ids" => [127343], //hna les ids dial les colis en attente
-                'client' => '5986',
-                'action' => 'createbr1',
-            ],
+        $curl = curl_init();
+        $body = http_build_query([
+            'nonce' => '86396d6332ae8331c3cebecb40c538db',
+            "ids" => [127343], //hna les ids dial les colis en attente
+            'client' => '5986',
+            'action' => 'createbr1',
         ]);
-        return $uploadResponse->getBody()->getContents();
+        $scrapeData = [
+            "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
+            "token" => "328893f698c34a058fd070d119731957b909c885d63",
+            "customHeaders" => "true"
+        ];
+        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($scrapeData));
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_HEADER, false);
+        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
+            "Accept: */*",
+            'cookie: ' . $sessionId,
+        ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+        $uploadResponse = curl_exec($curl);
+        curl_close($curl);
+        return $uploadResponse;
     }
     public function printPickup($id)
     {
@@ -571,10 +598,12 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = curl_exec($curl);
 
         return $uploadResponse;
@@ -606,7 +635,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/bls.php",
             "token" => "8a355170e5de449db59061cef47bb515405addc24cd",
@@ -615,9 +643,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = curl_exec($curl);
 
         // Create a new DOMDocument and load the HTML.
@@ -642,27 +672,27 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Extract the text content from each cell.
-                $employee      = trim($cells->item(1)->textContent);
-                $code          = trim($cells->item(2)->textContent);
-                $nb_colis      = trim($cells->item(3)->textContent);
-                $note       = trim($cells->item(4)->textContent);
-                $status        = trim($cells->item(5)->textContent);
-                $dateCreation  = trim($cells->item(6)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $code = trim($cells->item(2)->textContent);
+                $nb_colis = trim($cells->item(3)->textContent);
+                $note = trim($cells->item(4)->textContent);
+                $status = trim($cells->item(5)->textContent);
+                $dateCreation = trim($cells->item(6)->textContent);
                 // Get action links from the last cell.
-                $actionCell  = $cells->item(7);
-                $links       = $actionCell->getElementsByTagName('a');
-                $printLink   = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
-                $exportLink  = "exportbls.php?id=" . $id . "&type=BRC&code=" . $code;
+                $actionCell = $cells->item(7);
+                $links = $actionCell->getElementsByTagName('a');
+                $printLink = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
+                $exportLink = "exportbls.php?id=" . $id . "&type=BRC&code=" . $code;
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'code'           => $code,
-                    'nb_colis'       => $nb_colis,
-                    'note'        => $note,
-                    'status'         => $status,
-                    'date_creation'  => $dateCreation,
-                    'print_link'     => $printLink,
-                    'export_link'    => $exportLink,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'code' => $code,
+                    'nb_colis' => $nb_colis,
+                    'note' => $note,
+                    'status' => $status,
+                    'date_creation' => $dateCreation,
+                    'print_link' => $printLink,
+                    'export_link' => $exportLink,
                 ];
             }
         }
@@ -695,7 +725,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
             "token" => "328893f698c34a058fd070d119731957b909c885d63",
@@ -704,9 +733,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = curl_exec($curl);
 
         // Create a new DOMDocument and load the HTML.
@@ -731,33 +762,33 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Extract the text content from each cell.
-                $employee      = trim($cells->item(1)->textContent);
-                $created          = trim($cells->item(2)->textContent);
-                $receiver      = trim($cells->item(3)->textContent);
-                $phone       = trim($cells->item(4)->textContent);
-                $city        = trim($cells->item(5)->textContent);
-                $price  = trim($cells->item(6)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $created = trim($cells->item(2)->textContent);
+                $receiver = trim($cells->item(3)->textContent);
+                $phone = trim($cells->item(4)->textContent);
+                $city = trim($cells->item(5)->textContent);
+                $price = trim($cells->item(6)->textContent);
                 // Get action links from the last cell.
-                $state  = trim($cells->item(7)->textContent);
-                $change  = trim($cells->item(8)->textContent);
-                $asapCode  = trim($cells->item(9)->textContent);
-                $spaceCode  = trim($cells->item(10)->textContent);
-                $product  = trim($cells->item(11)->textContent);
-                $stock  = trim($cells->item(12)->textContent);
+                $state = trim($cells->item(7)->textContent);
+                $change = trim($cells->item(8)->textContent);
+                $asapCode = trim($cells->item(9)->textContent);
+                $spaceCode = trim($cells->item(10)->textContent);
+                $product = trim($cells->item(11)->textContent);
+                $stock = trim($cells->item(12)->textContent);
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'created'           => $created,
-                    'receiver'       => $receiver,
-                    'phone'        => $phone,
-                    'city'         => $city,
-                    'price'         => $price,
-                    'state'         => $state,
-                    'change'         => $change,
-                    'asap_code'  => $asapCode,
-                    'space_code'  => $spaceCode,
-                    'product'  => $product,
-                    'stock'  => $stock,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'created' => $created,
+                    'receiver' => $receiver,
+                    'phone' => $phone,
+                    'city' => $city,
+                    'price' => $price,
+                    'state' => $state,
+                    'change' => $change,
+                    'asap_code' => $asapCode,
+                    'space_code' => $spaceCode,
+                    'product' => $product,
+                    'stock' => $stock,
                 ];
             }
         }
@@ -791,7 +822,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
@@ -801,9 +831,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = curl_exec($curl);
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
@@ -825,31 +857,31 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
                 // Get invoice ID from the checkbox input's value.
-                $created          = trim($cells->item(2)->textContent);
-                $receiver      = utf8_decode(trim($cells->item(3)->textContent));
-                $phone       = trim($cells->item(4)->textContent);
-                $address       = utf8_decode(trim($cells->item(5)->textContent));
-                $city        = trim($cells->item(6)->textContent);
+                $created = trim($cells->item(2)->textContent);
+                $receiver = utf8_decode(trim($cells->item(3)->textContent));
+                $phone = trim($cells->item(4)->textContent);
+                $address = utf8_decode(trim($cells->item(5)->textContent));
+                $city = trim($cells->item(6)->textContent);
                 preg_match('/L:\s*(\d+)/', $city, $matches);
-                $delivery        = $matches[1] ?? null;
-                $price  = trim($cells->item(7)->textContent);
-                $status  = utf8_decode(trim($cells->item(8)->textContent));
-                $hasInvoice  = trim($cells->item(9)->textContent);
-                $change  = trim($cells->item(10)->textContent);
-                $asapCode  = trim($cells->item(11)->textContent);
-                $spaceCode  = trim($cells->item(12)->textContent);
+                $delivery = $matches[1] ?? null;
+                $price = trim($cells->item(7)->textContent);
+                $status = utf8_decode(trim($cells->item(8)->textContent));
+                $hasInvoice = trim($cells->item(9)->textContent);
+                $change = trim($cells->item(10)->textContent);
+                $asapCode = trim($cells->item(11)->textContent);
+                $spaceCode = trim($cells->item(12)->textContent);
                 $data[] = [
-                    'id'             => $id,
-                    'created'           => $created,
-                    'created'           => $created,
-                    'receiver'       => $receiver,
-                    'phone'        => $phone,
-                    'delivery'         => $delivery,
-                    'price'         => $price,
-                    'state'         => $status,
-                    'change'         => $change,
-                    'asap_code'  => $asapCode,
-                    'space_code'  => $spaceCode,
+                    'id' => $id,
+                    'created' => $created,
+                    'created' => $created,
+                    'receiver' => $receiver,
+                    'phone' => $phone,
+                    'delivery' => $delivery,
+                    'price' => $price,
+                    'state' => $status,
+                    'change' => $change,
+                    'asap_code' => $asapCode,
+                    'space_code' => $spaceCode,
                 ];
             }
         }
@@ -884,34 +916,47 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     public function login()
     {
         $curl = curl_init();
-        $headers[] = 'Content-Type: application/json';
         $body = [
-            'username' => 'styemen@gmail.com',
+            'username' => 'styemen.ma@gmail.com',
             'password' => 'azerty',
         ];
         $body = http_build_query($body);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
         $data = [
             "url" => "https://app.asapdelivery.ma/login.php",
-            "token" => "8a355170e5de449db59061cef47bb515405addc24cd",
+            "token" => "a131d37b9ce84e4cb33949c2b721fa8f85a864ad869",
             "disableRedirection" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
         ));
         curl_setopt($curl, CURLOPT_HEADER, true); // Get headers
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLINFO_HEADER_OUT, true);
         curl_setopt($curl, CURLOPT_FOLLOWLOCATION, false);      // Include headers in output
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $response = curl_exec($curl);
         curl_close($curl);
-        $header = $this->getHeadersOnly($response);
-        return $header['scrape.do-cookies'];
+
+        // Use the header size to split headers from body
+        $headerSize = strpos($response, "\r\n\r\n");
+        $headerText = ($headerSize !== false) ? substr($response, 0, $headerSize) : $response;
+
+        // Split into lines and convert to associative array
+        $headers = [];
+        foreach (explode("\n", $headerText) as $line) {
+            $line = trim($line);
+            if (strpos($line, ':') !== false) {
+                list($key, $value) = explode(':', $line, 2);
+                $headers[trim($key)] = trim($value);
+            }
+        }
+
+        return $headers['scrape.do-cookies'] ?? null;
     }
     public function orders($statusValue)
     {
@@ -941,7 +986,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
@@ -951,9 +995,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = curl_exec($curl);
 
         // Create a new DOMDocument and load the HTML.
@@ -977,32 +1023,32 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 // Get invoice ID from the checkbox input's value.
                 $input = $cells->item(0)->getElementsByTagName('input')->item(0);
                 $id = $input ? $input->getAttribute('value') : null;
-                $employee      = trim($cells->item(1)->textContent);
-                $created          = trim($cells->item(2)->textContent);
-                $receiver      = trim($cells->item(3)->textContent);
-                $phone       = trim($cells->item(4)->textContent);
-                $address       = trim($cells->item(5)->textContent);
-                $city        = trim($cells->item(6)->textContent);
-                $price  = trim($cells->item(7)->textContent);
-                $status  = trim($cells->item(8)->textContent);
-                $hasInvoice  = trim($cells->item(9)->textContent);
-                $change  = trim($cells->item(10)->textContent);
-                $asapCode  = trim($cells->item(11)->textContent);
-                $spaceCode  = trim($cells->item(12)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $created = trim($cells->item(2)->textContent);
+                $receiver = trim($cells->item(3)->textContent);
+                $phone = trim($cells->item(4)->textContent);
+                $address = trim($cells->item(5)->textContent);
+                $city = trim($cells->item(6)->textContent);
+                $price = trim($cells->item(7)->textContent);
+                $status = trim($cells->item(8)->textContent);
+                $hasInvoice = trim($cells->item(9)->textContent);
+                $change = trim($cells->item(10)->textContent);
+                $asapCode = trim($cells->item(11)->textContent);
+                $spaceCode = trim($cells->item(12)->textContent);
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'created'           => $created,
-                    'receiver'       => $receiver,
-                    'phone'        => $phone,
-                    'address'         => $address,
-                    'city'         => $city,
-                    'price'         => $price,
-                    'state'         => $status,
-                    'hasInvoice'         => $hasInvoice,
-                    'change'         => $change,
-                    'asap_code'  => $asapCode,
-                    'space_code'  => $spaceCode,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'created' => $created,
+                    'receiver' => $receiver,
+                    'phone' => $phone,
+                    'address' => $address,
+                    'city' => $city,
+                    'price' => $price,
+                    'state' => $status,
+                    'hasInvoice' => $hasInvoice,
+                    'change' => $change,
+                    'asap_code' => $asapCode,
+                    'space_code' => $spaceCode,
                 ];
             }
         }
@@ -1027,7 +1073,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/factures.php",
@@ -1037,9 +1082,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = curl_exec($curl);
 
 
@@ -1066,33 +1113,33 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $id = $input ? $input->getAttribute('value') : null;
 
                 // Extract the text content from each cell.
-                $employee      = trim($cells->item(1)->textContent);
-                $code          = trim($cells->item(2)->textContent);
-                $nb_colis      = trim($cells->item(3)->textContent);
-                $montant       = trim($cells->item(4)->textContent);
-                $mas_ch        = trim($cells->item(5)->textContent);
-                $note          = trim($cells->item(6)->textContent);
-                $dateCreation  = trim($cells->item(7)->textContent);
+                $employee = trim($cells->item(1)->textContent);
+                $code = trim($cells->item(2)->textContent);
+                $nb_colis = trim($cells->item(3)->textContent);
+                $montant = trim($cells->item(4)->textContent);
+                $mas_ch = trim($cells->item(5)->textContent);
+                $note = trim($cells->item(6)->textContent);
+                $dateCreation = trim($cells->item(7)->textContent);
                 $dateVersement = trim($cells->item(8)->textContent);
-                $status        = trim($cells->item(9)->textContent);
+                $status = trim($cells->item(9)->textContent);
                 // Get action links from the last cell.
-                $actionCell  = $cells->item(10);
-                $links       = $actionCell->getElementsByTagName('a');
-                $printLink   = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
-                $exportLink  = $links->length > 1 ? $links->item(1)->getAttribute('href') : null;
+                $actionCell = $cells->item(10);
+                $links = $actionCell->getElementsByTagName('a');
+                $printLink = $links->length > 0 ? $links->item(0)->getAttribute('href') : null;
+                $exportLink = $links->length > 1 ? $links->item(1)->getAttribute('href') : null;
                 $data[] = [
-                    'id'             => $id,
-                    'employee'       => $employee,
-                    'code'           => $code,
-                    'nb_colis'       => $nb_colis,
-                    'montant'        => $montant,
-                    'mas_ch'         => $mas_ch,
-                    'note'           => $note,
-                    'date_creation'  => $dateCreation,
+                    'id' => $id,
+                    'employee' => $employee,
+                    'code' => $code,
+                    'nb_colis' => $nb_colis,
+                    'montant' => $montant,
+                    'mas_ch' => $mas_ch,
+                    'note' => $note,
+                    'date_creation' => $dateCreation,
                     'date_versement' => $dateVersement,
-                    'status'         => $status,
-                    'print_link'     => $printLink,
-                    'export_link'    => $exportLink,
+                    'status' => $status,
+                    'print_link' => $printLink,
+                    'export_link' => $exportLink,
                 ];
             }
         }
@@ -1103,7 +1150,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     public function syncStatuses()
     {
         $pickups = Pickup::where('carrier_id', 22)->pluck('id')->toArray();
-        $orders = Order::where('account_id', getAccountUser()->account_id)->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->whereIn('order_status_id', [6,9])->get();
+        $orders = Order::where('account_id', getAccountUser()->account_id)->whereIn('pickup_id', $pickups)->whereNull('shipment_id')->whereIn('order_status_id', [6, 9])->get();
         $sessionId = $this->login();
         foreach ($orders as $key => $order) {
             $asapHistory = collect($this->getLastStatuses($order->code, $sessionId))->first();
@@ -1240,7 +1287,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $orderData = [
                     [
                         "id" => $order->id,
-                        'meta' => $asapHistory['id']? $asapHistory['id']:$asapHistory['asap_code'], 
+                        'meta' => $asapHistory['id'] ? $asapHistory['id'] : $asapHistory['asap_code'],
                         'shipping_code' => $asapHistory['asap_code'],
                         "comment" => [
                             "id" => $id,
@@ -1249,11 +1296,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                     ]
                 ];
                 OrderController::update(new Request($orderData));
-            }else{
+            } else {
                 $orderData = [
                     [
                         "id" => $order->id,
-                        'meta' => null, 
+                        'meta' => null,
                         'shipping_code' => null,
                         'pickup_id' => null,
                         "comment" => [
@@ -1282,7 +1329,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $orders = [];
                 foreach ($getAsapOrders as $key => $asapOrder) {
                     $order = null;
-                    return $asapOrder;
                     if ($asapOrder['code'])
                         $order = Order::where('shipping_code', $asapOrder['code'])->first();
                     if ($order)
@@ -1427,7 +1473,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 'statut' => 0,
                 'data' => $validator->errors(),
             ]);
-        };
+        }
+        ;
 
         $cityUpdated = $this->updateCities();
         if (1 == $cityUpdated['statut']) {
@@ -1435,7 +1482,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $order = Order::find($orderId);
                 $cityExist = $order->city->defaultCarriers()->where(['carrier_id' => 22, 'statut' => 1])->first();
                 if (!$cityExist)
-                    return $cityExist;
+                    return $order->id;
             })->filter()->values()->toArray();
             return [
                 "statut" => 1,
