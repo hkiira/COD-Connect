@@ -34,6 +34,8 @@ class OverviewController extends Controller
                 'revenue_by_day'       => $this->getRevenueByDay($dates, $accountId),
                 'top_selling_products' => $this->getTopSellingProducts($dates, $accountId),
                 'recent_orders'        => $this->getRecentOrders($dates, $accountId),
+                'orders_by_brand'      => $this->getOrdersByBrand($dates, $accountId),
+                'orders_by_source'     => $this->getOrdersBySource($dates, $accountId),
             ];
         });
     }
@@ -123,7 +125,44 @@ class OverviewController extends Controller
             'total_orders'          => $this->formatMetric($currentOrders, $prevOrders),
             'avg_order_value'       => $this->formatMetric($currentAvgOrderValue, $prevAvgOrderValue, true),
             'total_offers'          => $this->formatMetric($currentOffers, $prevOffers),
-            'customer_satisfaction' => $this->getCustomerSatisfaction($dates, $accountId),
+            'customer_satisfaction'  => $this->getCustomerSatisfaction($dates, $accountId),
+            'reviewed_shipped_ratio' => $this->getReviewedShippedRatio($dates, $accountId),
+        ];
+    }
+
+    private function getReviewedShippedRatio($dates, $accountId)
+    {
+        $shippedStatuses = [6, 7, 9, 10, 11];
+
+        $currentShippedCount = Order::where('account_id', $accountId)
+            ->whereIn('order_status_id', $shippedStatuses)
+            ->whereBetween('created_at', $dates['current'])
+            ->count();
+
+        $currentReviewedCount = Order::where('account_id', $accountId)
+            ->whereIn('order_status_id', $shippedStatuses)
+            ->whereBetween('created_at', $dates['current'])
+            ->whereHas('review')
+            ->count();
+
+        $currentRatio = $currentShippedCount > 0 ? ($currentReviewedCount / $currentShippedCount) * 100 : 0;
+
+        $prevShippedCount = Order::where('account_id', $accountId)
+            ->whereIn('order_status_id', $shippedStatuses)
+            ->whereBetween('created_at', $dates['previous'])
+            ->count();
+
+        $prevReviewedCount = Order::where('account_id', $accountId)
+            ->whereIn('order_status_id', $shippedStatuses)
+            ->whereBetween('created_at', $dates['previous'])
+            ->whereHas('review')
+            ->count();
+
+        $prevRatio = $prevShippedCount > 0 ? ($prevReviewedCount / $prevShippedCount) * 100 : 0;
+
+        return [
+            'value' => round($currentRatio, 2),
+            'trend' => $this->calculateTrend($currentRatio, $prevRatio),
         ];
     }
     
@@ -190,6 +229,32 @@ class OverviewController extends Controller
                 'status'     => $order->orderStatus?->title ?? 'N/A',
                 'created_at' => $order->created_at->toDateString(),
             ]);
+    }
+
+    private function getOrdersByBrand($dates, $accountId)
+    {
+        return DB::table('orders')
+            ->join('brand_source', 'orders.brand_source_id', '=', 'brand_source.id')
+            ->join('brands', 'brand_source.brand_id', '=', 'brands.id')
+            ->where('orders.account_id', $accountId)
+            ->whereBetween('orders.created_at', $dates['current'])
+            ->whereNull('orders.deleted_at')
+            ->select('brands.title as brand', DB::raw('count(*) as count'))
+            ->groupBy('brands.id', 'brands.title')
+            ->get();
+    }
+
+    private function getOrdersBySource($dates, $accountId)
+    {
+        return DB::table('orders')
+            ->join('brand_source', 'orders.brand_source_id', '=', 'brand_source.id')
+            ->join('sources', 'brand_source.source_id', '=', 'sources.id')
+            ->where('orders.account_id', $accountId)
+            ->whereBetween('orders.created_at', $dates['current'])
+            ->whereNull('orders.deleted_at')
+            ->select('sources.title as source', DB::raw('count(*) as count'))
+            ->groupBy('sources.id', 'sources.title')
+            ->get();
     }
 
     //endregion
@@ -649,7 +714,10 @@ class OverviewController extends Controller
 
         $data = Cache::remember($fullCacheKey, self::CACHE_TTL, fn() => $dataCallback($dates, $accountId));
 
-        return response()->json(['data' => $data]);
+        return response()->json([
+            'status' => 'success',
+            'data'   => $data,
+        ]);
     }
     
     private function getDateRanges(Request $request): array
