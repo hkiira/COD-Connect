@@ -387,16 +387,27 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     public function syncOrders()
     {
         $sessionId = $this->login();
-        $orders = Order::where('account_id', getAccountUser()->account_id)->whereNull('shipment_id')->whereNotNull('pickup_id')->whereNull('shipping_code')->whereNotIn('order_status_id', [1, 2, 3, 4, 5])->limit(10)->get();
+        $orders = Order::where('account_id', getAccountUser()->account_id)->whereNull('shipping_code')->where('order_status_id', 4)->where('code', 'STMN19515FCSW')->limit(10)->get();
         $updatedCode = 0;
+        $orderData = [];
         foreach ($orders as $order) {
-            $asapOrder = $this->getOrder($order->code, $sessionId);
-            return $asapOrder;
-            if ($asapOrder) {
+            $asapHistory = $this->getOrder($order->code, $sessionId);
+            if ($asapHistory) {
+                $orderData[] = [
+                    "id" => $order->id,
+                    'meta' => $asapHistory[0]['id'] ?: $order->meta,
+                    'shipping_code' => $asapHistory[0]['asap_code'],
+                    "comment" => [
+                        "id" => "29",
+                        "title" => "ajout du code : " . $asapHistory[0]['asap_code']
+                    ]
+                ];
                 // Update the order with ASAP order ID and shipping code
-                $order->update(['meta' => $asapOrder[0]['id'], 'shipping_code' => $asapOrder[0]['asap_code']]);
                 $updatedCode++;
             }
+        }
+        if (!empty($orderData)) {
+            OrderController::update(new Request($orderData), $local = 2);
         }
         return $updatedCode;
     }
@@ -469,24 +480,19 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 $created = trim($cells->item(2)->textContent);
                 $receiver = utf8_decode(trim($cells->item(3)->textContent));
                 $phone = trim($cells->item(4)->textContent);
-                $address = utf8_decode(trim($cells->item(5)->textContent));
-                $city = trim($cells->item(6)->textContent);
-                preg_match('/L:\s*(\d+)/', $city, $matches);
-                $delivery = $matches[1] ?? null;
-                $price = trim($cells->item(7)->textContent);
-                $status = utf8_decode(trim($cells->item(8)->textContent));
-                $hasInvoice = trim($cells->item(9)->textContent);
-                $change = trim($cells->item(10)->textContent);
-                $asapCode = trim($cells->item(11)->textContent);
-                $spaceCode = trim($cells->item(12)->textContent);
+                $city = trim($cells->item(5)->textContent);
+                $price = trim($cells->item(6)->textContent);
+                $status = utf8_decode(trim($cells->item(7)->textContent));
+                $change = trim($cells->item(8)->textContent);
+                $asapCode = trim($cells->item(9)->textContent);
+                $spaceCode = trim($cells->item(10)->textContent);
                 $cleaned = preg_replace('/\s+/', ' ', $status);
                 $data[] = [
                     'id' => $id,
                     'created' => $created,
-                    'created' => $created,
                     'receiver' => $receiver,
                     'phone' => $phone,
-                    'delivery' => $delivery,
+                    'city' => $city,
                     'price' => $price,
                     'state' => $cleaned,
                     'change' => $change,

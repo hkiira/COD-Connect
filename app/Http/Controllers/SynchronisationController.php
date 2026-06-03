@@ -292,8 +292,8 @@ class SynchronisationController extends Controller
     }
     public function syncOrders()
     {
-        $scrapController = new ScrapController();
-        return $scrapController->syncOrders();
+        $asapController = new AsapDeliveryController();
+        return $asapController->syncOrders();
     }
     //katjib la commande men systeme dial ASAP b search
     public function getOrder($code, $sessionId)
