@@ -53,6 +53,18 @@ class OrderController extends Controller
                 });
             }], 'answer_value');
 
+        // Check if reviews filtering is requested
+        $hasReviews = false;
+        if (isset($request['has_reviews'])) {
+            $hasReviews = filter_var($request['has_reviews'], FILTER_VALIDATE_BOOLEAN);
+        } elseif (isset($request['filter']['has_reviews'])) {
+            $hasReviews = filter_var($request['filter']['has_reviews'], FILTER_VALIDATE_BOOLEAN);
+        }
+
+        if ($hasReviews) {
+            $ordersQuery->whereHas('review');
+        }
+
         if ($sortBy === 'total') {
             $totalSubquery = OrderPva::selectRaw('SUM(price * quantity)')
                 ->whereColumn('order_pva.order_id', 'orders.id')
@@ -138,7 +150,8 @@ class OrderController extends Controller
             ->with([
                 'parentOrder.orderStatus', 'parentOrder.pickup', 'parentOrder.shipment.shipmentType',
                 'childOrders.orderStatus', 'childOrders.pickup', 'childOrders.shipment.shipmentType',
-                'pickup', 'shipment.shipmentType'
+                'pickup', 'shipment.shipmentType',
+                'review.answers.question'
             ])
             ->skip($filter['page'] * $filter['limit'])
             ->take($filter['limit'])
@@ -146,6 +159,7 @@ class OrderController extends Controller
 
         $datas = $orders->map(function ($data) {
             $orderData = $data->only('id', 'code', 'shipping_code', 'note', 'order_id', 'type', 'created_at', 'updated_at', 'pickup_id', 'shipment_id');
+            $orderData['reference'] = $data->code;
 
             // Include parent and child basic relationship info to map the lineage using eager loading
             if ($data->parentOrder) {
@@ -207,6 +221,9 @@ class OrderController extends Controller
             });
             if ($data->customer) {
                 $orderData['customer'] = $data->customer->only('id', 'name');
+                $names = explode(' ', $data->customer->name, 2);
+                $orderData['customer']['first_name'] = $names[0] ?? '';
+                $orderData['customer']['last_name'] = $names[1] ?? '';
                 $orderData['customer']['images'] = $data->customer->images;
                 $orderData['customer']['phones'] = $data->customer->phones->map(function ($phone) {
                     return $phone->only('id', 'title');
@@ -215,7 +232,7 @@ class OrderController extends Controller
                     return $address->only('id', 'title', 'city');
                 });
             } else {
-                $orderData['customer'] = ['id' => null, 'name' => null, 'images' => [], 'phones' => [], 'address' => []];
+                $orderData['customer'] = ['id' => null, 'name' => null, 'first_name' => '', 'last_name' => '', 'images' => [], 'phones' => [], 'address' => []];
             }
             $totalOrder = 0;
             $orderData['products'] = ($data->order_status_id==2 ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
@@ -231,6 +248,7 @@ class OrderController extends Controller
                     'images' => $actfOrderPva->productVariationAttribute->product->images->sortByDesc('created_at')->values(),
                     'productType' => $actfOrderPva->productVariationAttribute->product->productType,
                     'product' => $actfOrderPva->productVariationAttribute->product->title . " " . implode('-', $attributes),
+                    'name' => $actfOrderPva->productVariationAttribute->product->title . " " . implode('-', $attributes),
                     'reference' => $actfOrderPva->productVariationAttribute->product->reference,
                     'productsize' => $actfOrderPva->productVariationAttribute->variationAttribute->id,
                     'attributes' => $actfOrderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
@@ -266,6 +284,19 @@ class OrderController extends Controller
             }
             $orderData['source'] = $sourceArr;
             $orderData['review_score'] = isset($data->review_score) ? (float)round($data->review_score, 2) : null;
+            
+            // Format reviews
+            $orderData['reviews'] = [];
+            if ($data->review && $data->review->answers) {
+                $orderData['reviews'] = $data->review->answers->map(function ($answer) {
+                    return [
+                        'id' => $answer->id,
+                        'question_id' => $answer->review_question_id,
+                        'question' => $answer->question ? $answer->question->only('id', 'text', 'type') : null,
+                        'answer' => $answer->answer_value,
+                    ];
+                });
+            }
             return $orderData;
         });
 
@@ -1208,6 +1239,32 @@ class OrderController extends Controller
                         return $phoneType->only('id', 'title');
                     })
                     : []);
+
+            // Format reviews and review score
+            $review = \App\Models\Review::where('order_id', $order->id)->with('answers.question')->first();
+            $reviewsList = [];
+            $starAnswers = [];
+            if ($review && $review->answers) {
+                foreach ($review->answers as $answer) {
+                    $question = $answer->question;
+                    if ($question) {
+                        $reviewsList[] = [
+                            'id' => $answer->id,
+                            'answer' => $answer->answer_value,
+                            'question' => [
+                                'id' => $question->id,
+                                'text' => $question->text,
+                                'type' => $question->type,
+                            ],
+                        ];
+                        if ($question->type === 'stars') {
+                            $starAnswers[] = (float)$answer->answer_value;
+                        }
+                    }
+                }
+            }
+            $data['orderInfo']['reviews'] = $reviewsList;
+            $data['orderInfo']['review_score'] = count($starAnswers) > 0 ? (float)round(array_sum($starAnswers) / count($starAnswers), 2) : null;
         }
         if (isset($request['products']['active'])) {
             // Récupérer les produits du fournisseur avec leurs attributs de variation et types d'attributs
