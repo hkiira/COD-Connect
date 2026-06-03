@@ -27,97 +27,109 @@ use App\Models\Product;
 use App\Models\Account;
 use Illuminate\Support\Facades\Validator;
 
-class OrderfirstController extends Controller
+
+class orderfirstController extends Controller
 {
+
     public function index(Request $request)
     {
-                $cityList = Customer::get()
-                    ->map(function($customer) {
-                        $address = $customer->addresses->first();
-                        return $address ? $address->city ? $address->city->title : null : null;
-                    })
-                    ->filter(); // Remove nulls
-
-                $cityCounts = $cityList->countBy(); // Laravel collection: city => count
-                $orderedCities = $cityCounts->sortDesc();
-
-                $result = $orderedCities->map(function($count, $city) {
-                    return ['city' => $city, 'count' => $count];
-                })->values();
-
-                return $result;
-
         $request = collect($request->query())->toArray();
-        $filter=[];
-        if (isset($request['pagination']) ) {
-            $filter['limit']=isset($request['pagination']['per_page'])?$request['pagination']['per_page']:10;
-            $filter['page']=isset($request['pagination']['current_page'])?$request['pagination']['current_page']:0;
-            $filter['sort']['by']=isset($request['sort']['column'])?$request['sort']['column']:'created_at';
-            $filter['sort']['order']=isset($request['sort']['order'])?$request['sort']['order']:'desc';
-        }
-
-
-        $ordersQuery = Order::orderBy($filter['sort']['by'], $filter['sort']['order']);
-
-        // Define filter mapping: key => [type, path]
-        $filterMap = [
-            'products' => ['relation', 'activeOrderPvas.productVariationAttribute.product', 'id'],
-            'warehouses' => ['column', 'warehouse_id'],
-            'categories' => ['relation', 'activeOrderPvas.productVariationAttribute.product.taxonomies', 'id'],
-            'brands' => ['relation', 'brandSource.brand', 'id'],
-            'sources' => ['relation', 'brandSource.source', 'id'],
-            'customer_types' => ['relation', 'customer', 'customer_type_id'],
-            'cities' => ['relation', 'customer.addresses', 'city_id'],
-            'regions' => ['relation', 'customer.addresses.city.region', 'id'],
-            'countries' => ['relation', 'customer.addresses.city.region.country', 'id'],
-            'status' => ['column', 'order_status_id'],
-            'sectors' => ['column', 'sector_id'],
-        ];
-
-
-        foreach ($filterMap as $key => $info) {
-            if (!empty($request[$key]) && is_array($request[$key])) {
-                if ($info[0] === 'column') {
-                    $ordersQuery = $ordersQuery->whereIn($info[1], $request[$key]);
-                } elseif ($info[0] === 'relation') {
-                    $relation = $info[1];
-                    $column = $info[2];
-                    $ordersQuery = $ordersQuery->whereHas($relation, function ($q) use ($request, $key, $column) {
-                        $q->whereIn($column, $request[$key]);
-                    });
-                }
+        $searchIds = [];
+        if (isset($request['products']) && array_filter($request['products'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['products'] as $productId) {
+                if (Product::find($productId))
+                    $searchIds = array_merge($searchIds, Product::find($productId)->orders->pluck('id')->toArray());
             }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
         }
-
-        // Add search filter for code, customer name, customer phone, and address title
-        if (!empty($request['search']) && is_string($request['search'])) {
-            $search = $request['search'];
-            $ordersQuery = $ordersQuery->where(function ($query) use ($search) {
-                $query->where('code', 'like', "%$search%")
-                    ->orWhereHas('customer', function ($q) use ($search) {
-                        $q->where('name', 'like', "%$search%")
-                            ->orWhereHas('phones', function ($q2) use ($search) {
-                                $q2->where('title', 'like', "%$search%") ;
-                            })
-                            ->orWhereHas('addresses', function ($q3) use ($search) {
-                                $q3->where('title', 'like', "%$search%") ;
-                            });
-                    });
-            });
+        if (isset($request['warehouses']) && array_filter($request['warehouses'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['warehouses'] as $warehouseId) {
+                if (Warehouse::find($warehouseId))
+                    $searchIds = array_merge($searchIds, Warehouse::find($warehouseId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
         }
-
-        $total = $ordersQuery->count();
-        $orders = $ordersQuery
-            ->skip($filter['page'] * $filter['limit'])
-            ->take($filter['limit'])
-            ->get();
-
-        $datas = $orders->map(function ($data) {
-            $orderData = $data->only('id', 'code', 'shipping_code', 'comment', 'order_id', 'created_at', 'updated_at');
-            // Add score to orderData
-            $orderData['score'] = $data->score;
-            if (!$orderData['shipping_code'])
-                $orderData['shipping_code'] = "";
+        if (isset($request['categories']) && array_filter($request['categories'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['categories'] as $taxonomyId) {
+                if (Taxonomy::find($taxonomyId))
+                    $searchIds = array_merge($searchIds, Taxonomy::find($taxonomyId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+        }
+        if (isset($request['brands']) && array_filter($request['brands'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['brands'] as $brandId) {
+                if (Brand::find($brandId))
+                    $searchIds = array_merge($searchIds, Brand::find($brandId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+        }
+        if (isset($request['sources']) && array_filter($request['sources'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['sources'] as $sourceId) {
+                if (Source::find($sourceId))
+                    $searchIds = array_merge($searchIds, Source::find($sourceId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+        }
+        if (isset($request['customer_types']) && array_filter($request['customer_types'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['customer_types'] as $customerTypeId) {
+                if (CustomerType::find($customerTypeId))
+                    $searchIds = array_merge($searchIds, CustomerType::find($customerTypeId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+        }
+        if (isset($request['cities']) && array_filter($request['cities'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['cities'] as $cityId) {
+                if (City::find($cityId))
+                    $searchIds = array_merge($searchIds, City::find($cityId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+        }
+        if (isset($request['regions']) && array_filter($request['regions'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['regions'] as $regionId) {
+                if (Region::find($regionId))
+                    $searchIds = array_merge($searchIds, Region::find($regionId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+        }
+        if (isset($request['countries']) && array_filter($request['countries'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['countries'] as $countryId) {
+                if (Country::find($countryId))
+                    $searchIds = array_merge($searchIds, Country::find($countryId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+        }
+        if (isset($request['sectors']) && array_filter($request['sectors'], function ($value) {
+            return $value !== null;
+        })) {
+            foreach ($request['sectors'] as $sectorId) {
+                if (Sector::find($sectorId))
+                    $searchIds = array_merge($searchIds, Sector::find($sectorId)->orders->pluck('id')->toArray());
+            }
+            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+        }
+        $associated = [];
+        $model = 'App\\Models\\Order';
+        $request['inAccount'] = ['account_id', getAccountUser()->account_id];
+        $datas = FilterController::searchs(new Request($request), $model, ['id', 'code'], false, $associated)->map(function ($data) {
+            $orderData = $data->only('id', 'code', 'comment', 'order_id', 'created_at');
             $orderData['can_change'] = in_array($data->order_status_id, [1, 2, 3, 4, 5]) ? true : false;
             $orderData['user'] = $data->userCreated->map(function ($user) {
                 return [
@@ -128,243 +140,51 @@ class OrderfirstController extends Controller
                 ];
             });
             $orderData['comments'] = $data->lastOrderComments->map(function ($comment) {
-                $data = [
+                return [
                     "id" => $comment->id,
-                    "comment" => $comment->comment_id."",
                     "title" => $comment->title,
-                    "created_at" => $comment->created_at,
                     "user" => $comment->accountUser->user,
-                    "status" => $comment->orderStatus->only('id', 'title', 'statut'),
+                    "status" => $comment->orderStatus,
                 ];
-                $data["status"]['created_at'] = $comment->created_at;
-                return $data;
             });
             $orderData['customer'] = $data->customer->only('id', 'name', 'images');
-            $orderData['customer']['phones'] = $data->customer->phones->map(function ($phone) {
+            $orderData['customer']['phones'] = $data->phones->map(function ($phone) {
                 return $phone->only('id', 'title');
             });
-            $orderData['customer']['address'] = $data->customer->addresses->map(function ($address) {
+            $orderData['customer']['address'] = $data->addresses->map(function ($address) {
                 return $address->only('id', 'title', 'city');
             });
-            $totalOrder = 0;
-            $orderData['products'] = $data->activeOrderPvas->map(function ($actfOrderPva) use (&$totalOrder) {
-                $totalOrder += $actfOrderPva->price * $actfOrderPva->quantity;
-                $attributes = $actfOrderPva->ProductVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
-                    return $child->attribute->code;
-                })->toArray();
+            $total = 0;
+            $orderData['products'] = $data->activePvas->map(function ($pva) use (&$total) {
+                $total += $pva->pivot->price * $pva->pivot->quantity;
                 $productInfo = [
-                    'id' => $actfOrderPva->productVariationAttribute->product->id,
-                    'order_pva' => $actfOrderPva->id,
-                    'price' => $actfOrderPva->price,
-                    'quantity' => $actfOrderPva->quantity,
-                    'images' => $actfOrderPva->productVariationAttribute->product->images->sortByDesc('created_at')->values(),
-                    'productType' => $actfOrderPva->productVariationAttribute->product->productType,
-                    'product' => $actfOrderPva->productVariationAttribute->product->title . " " . implode('-', $attributes),
-                    'reference' => $actfOrderPva->productVariationAttribute->product->reference,
-                    'productsize' => $actfOrderPva->productVariationAttribute->variationAttribute->id,
-                    'attributes' => $actfOrderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
+                    'id' => $pva->id,
+                    'price' => $pva->pivot->price,
+                    'quantity' => $pva->pivot->quantity,
+                    'images' => $pva->product->images,
+                    'productType' => $pva->product->productType,
+                    'product' => $pva->product->title,
+                    'reference' => $pva->product->reference,
+                    'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
                         return [
                             "id" => $child->attribute->id,
                             "title" => $child->attribute->title,
                             "typeAttribute" => $child->attribute->typeAttribute->title,
                         ];
-                    }),
+                    })
                 ];
                 return $productInfo;
             });
-            $orderData['total'] = $totalOrder;
-            $orderData['discount'] = $data->discount;
-            $orderData['carrier_price'] = $data->carrier_price;
-            $orderData['status'] = $data->orderStatus->only('id', 'title');
+            $orderData['total'] = $total;
+            $orderData['discount'] = 0;
             $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
-            $orderData['carrier'] = ($data->pickup) ? $data->pickup->carrier->only('id', 'title', 'images') : null;
             $orderData['source'] = $data->brandSource->source->only('id', 'title', 'images');
+
             return $orderData;
         });
-
-        return [
-            'statut' => 1,
-            'data' => $datas,
-            'per_page' => (string)($filter['limit'] ?? 10),
-            'current_page' => (int)($filter['page'] ?? 0) + 1,
-            'total' => $total
-        ];
+        $filters = HelperFunctions::filterColumns($request, []);
+        return HelperFunctions::getPagination($datas, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
     }
-    // public function index(Request $request)
-    // {
-    //     $request = collect($request->query())->toArray();
-    //     $searchIds = [];
-    //     if (isset($request['products']) && array_filter($request['products'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['products'] as $productId) {
-    //             if (Product::find($productId))
-    //                 $searchIds = array_merge($searchIds, Product::find($productId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['warehouses']) && array_filter($request['warehouses'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['warehouses'] as $warehouseId) {
-    //             if (Warehouse::find($warehouseId))
-    //                 $searchIds = array_merge($searchIds, Warehouse::find($warehouseId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['categories']) && array_filter($request['categories'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['categories'] as $taxonomyId) {
-    //             if (Taxonomy::find($taxonomyId))
-    //                 $searchIds = array_merge($searchIds, Taxonomy::find($taxonomyId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['brands']) && array_filter($request['brands'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['brands'] as $brandId) {
-    //             if (Brand::find($brandId) && Brand::find($brandId)->orders)
-    //                 $searchIds = array_merge($searchIds, Brand::find($brandId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['sources']) && array_filter($request['sources'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['sources'] as $sourceId) {
-    //             if (Source::find($sourceId))
-    //                 $searchIds = array_merge($searchIds, Source::find($sourceId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['customer_types']) && array_filter($request['customer_types'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['customer_types'] as $customerTypeId) {
-    //             if (CustomerType::find($customerTypeId))
-    //                 $searchIds = array_merge($searchIds, CustomerType::find($customerTypeId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['cities']) && array_filter($request['cities'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['cities'] as $cityId) {
-    //             if (City::find($cityId))
-    //                 $searchIds = array_merge($searchIds, City::find($cityId)->activeAddresses->flatMap(function($activeAddress){
-    //                 return $activeAddress->orders->pluck('id');
-    //             })->filter()->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['regions']) && array_filter($request['regions'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['regions'] as $regionId) {
-    //             if (Region::find($regionId))
-    //                 $searchIds = array_merge($searchIds, Region::find($regionId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['countries']) && array_filter($request['countries'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['countries'] as $countryId) {
-    //             if (Country::find($countryId))
-    //                 $searchIds = array_merge($searchIds, Country::find($countryId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['status']) && array_filter($request['status'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         $request['whereArray'] = ['column' => 'order_status_id', 'values' => $request['status']];
-    //     }
-    //     if (isset($request['sectors']) && array_filter($request['sectors'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['sectors'] as $sectorId) {
-    //             if (Sector::find($sectorId))
-    //                 $searchIds = array_merge($searchIds, Sector::find($sectorId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     $associated = [];
-    //     $model = 'App\\Models\\Order';
-    //     $request['inAccount'] = ['account_id', getAccountUser()->account_id];
-    //     $datas = FilterController::searchs(new Request($request), $model, ['id', 'code'], true, $associated);
-    //     $datas['data'] = collect($datas['data'])->map(function ($data) {
-    //         $orderData = $data->only('id', 'code', 'shipping_code', 'comment', 'order_id', 'created_at', 'updated_at');
-    //         if (!$orderData['shipping_code'])
-    //             $orderData['shipping_code'] = "";
-    //         $orderData['can_change'] = in_array($data->order_status_id, [1, 2, 3, 4, 5]) ? true : false;
-    //         $orderData['user'] = $data->userCreated->map(function ($user) {
-    //             return [
-    //                 "id" => $user->id,
-    //                 "firstname" => $user->user->firstname,
-    //                 "lastname" => $user->user->lastname,
-    //                 "images" => $user->user->images,
-    //             ];
-    //         });
-    //         $orderData['comments'] = $data->lastOrderComments->map(function ($comment) {
-    //             $data = [
-    //                 "id" => $comment->id,
-    //                 "title" => $comment->title,
-    //                 "created_at" => $comment->created_at,
-    //                 "user" => $comment->accountUser->user,
-    //                 "status" => $comment->orderStatus->only('id', 'title', 'statut'),
-    //             ];
-    //             $data["status"]['created_at'] = $comment->created_at;
-    //             return $data;
-    //         });
-    //         $orderData['customer'] = $data->customer->only('id', 'name', 'images');
-    //         $orderData['customer']['phones'] = $data->customer->phones->map(function ($phone) {
-    //             return $phone->only('id', 'title');
-    //         });
-    //         $orderData['customer']['address'] = $data->customer->addresses->map(function ($address) {
-    //             return $address->only('id', 'title', 'city');
-    //         });
-    //         $total = 0;
-    //         //hna fine bqayt
-    //         $orderData['products'] = $data->activePvas->map(function ($pva) use (&$total) {
-    //             $total += $pva->pivot->price * $pva->pivot->quantity;
-    //             $attributes = $pva->variationAttribute->childVariationAttributes->map(function ($child) {
-    //                 return $child->attribute->code;
-    //             })->toArray();
-    //             $productInfo = [
-    //                 'id' => $pva->product_id,
-    //                 'order_pva' => $pva->pivot->id,
-    //                 'price' => $pva->pivot->price,
-    //                 'quantity' => $pva->pivot->quantity,
-    //                 'images' => $pva->product->images->sortByDesc('created_at')->values(),
-    //                 'productType' => $pva->product->productType,
-    //                 'product' => $pva->product->title . " " . implode('-', $attributes),
-    //                 'reference' => $pva->product->reference,
-    //                 'productsize' => $pva->variationAttribute->id,
-    //                 'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
-    //                     return [
-    //                         "id" => $child->attribute->id,
-    //                         "title" => $child->attribute->title,
-    //                         "typeAttribute" => $child->attribute->typeAttribute->title,
-    //                     ];
-    //                 }),
-
-    //             ];
-    //             return $productInfo;
-    //         });
-    //         $orderData['total'] = $total;
-    //         $orderData['discount'] = $data->discount;
-    //         $orderData['carrier_price'] = $data->carrier_price;
-    //         $orderData['status'] = $data->orderStatus->only('id', 'title');
-    //         $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
-    //         $orderData['carrier'] = ($data->pickup) ? $data->pickup->carrier->only('id', 'title', 'images') : null;
-    //         $orderData['source'] = $data->brandSource->source->only('id', 'title', 'images');
-    //         return $orderData;
-    //     });
-    //     return $datas;
-    // }
 
     public function create(Request $request)
     {
@@ -424,12 +244,11 @@ class OrderfirstController extends Controller
     public static function store(Request $requests, $isImport = 0)
     {
         $thePva = [];
-
         if ($isImport == 0) {
             $phoneableType = "App\Models\Customers";
             $validator = Validator::make($requests->except('_method'), [
                 '*.warehouse_id' => [
-                    'int',
+                    'required', 'int',
                     function ($attribute, $value, $fail) {
                         $account = getAccountUser()->account_id;
                         $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->first();
@@ -478,13 +297,11 @@ class OrderfirstController extends Controller
                 '*.products.*.quantity' => 'required|numeric',
                 '*.products.*.price' => 'numeric',
                 '*.products.*.id' => [
-                    'required',
-                    'int',
+                    'required', 'int',
                     function ($attribute, $value, $fail) use ($requests, &$thePva) {
                         $account = getAccountUser()->account_id;
                         // Extract index from attribute name
                         $index = str_replace(['*', '.id'], '', $attribute);
-                        $index1 = str_replace(['*', '.products.'], '', $index);
                         // Get the ID and title from the request
                         $dataProduct = [
                             'attributes' => $requests->input("{$index}.attributes"),
@@ -497,49 +314,48 @@ class OrderfirstController extends Controller
                         $productAttributes = Product::with(['productVariationAttributes.variationAttribute.childVariationAttributes' => function ($vattributes) use ($dataProduct) {
                             $vattributes->whereIn('attribute_id', $dataProduct['attributes']);
                         }])->where(['id' => $value])->whereIn("account_user_id", $accountUsers)->first();
-                        if ($productAttributes)
-                            $productAttributes->productVariationAttributes->map(function ($pva) use (&$thePva, $dataProduct, $index1) {
-                                $childs = $pva->variationAttribute->childVariationAttributes->map(function ($child) {
-                                    return $child->attribute_id;
-                                });
-                                $childPvas = $childs->toArray();
-                                sort($childPvas);
-                                sort($dataProduct['attributes']);
-                                if ($childPvas == $dataProduct['attributes']) {
-                                    $offerIds = collect($dataProduct["offers"])->map(function ($offerId) {
-                                        $offer = Offer::find($offerId);
-                                        if (count($offer->productVariationAttributes) > 0) {
-                                            $data = $offer->productVariationAttributes->first()->pivot->id;
-                                        } elseif (count($offer->products) > 0) {
-                                            $data = $offer->products->first()->pivot->id;
-                                        } elseif (count($offer->taxonomies) > 0) {
-                                            $data = $offer->taxonomies->first()->pivot->id;
-                                        } elseif (count($offer->sources) > 0) {
-                                            $data = $offer->sources->first()->pivot->id;
-                                        } elseif (count($offer->brands) > 0) {
-                                            $data = $offer->brands->first()->pivot->id;
-                                        } elseif (count($offer->brandSources) > 0) {
-                                            $data = $offer->brandSources->first()->pivot->id;
-                                        } elseif (count($offer->customers) > 0) {
-                                            $data = $offer->customers->first()->pivot->id;
-                                        } elseif (count($offer->customerTypes) > 0) {
-                                            $data = $offer->customerTypes->first()->pivot->id;
-                                        } elseif (count($offer->cities) > 0) {
-                                            $data = $offer->cities->first()->pivot->id;
-                                        } elseif (count($offer->countries) > 0) {
-                                            $data = $offer->countries->first()->pivot->id;
-                                        } elseif (count($offer->regions) > 0) {
-                                            $data = $offer->regions->first()->pivot->id;
-                                        } elseif (count($offer->sectors) > 0) {
-                                            $data = $offer->sectors->first()->pivot->id;
-                                        }
-                                        return $data;
-                                    })->toArray();
-                                    $thePva[$index1[0]][] = ['id' => $pva->id, 'price' => $dataProduct['price'], 'offerables' => $offerIds, 'quantity' => $dataProduct['quantity']];
-                                }
-                            })->toArray();
+                        $productAttributes->productVariationAttributes->map(function ($pva) use (&$thePva, $dataProduct, $index) {
+                            $childs = $pva->variationAttribute->childVariationAttributes->map(function ($child) use (&$thePva) {
+                                return $child->attribute_id;
+                            });
+                            $childPvas = $childs->toArray();
+                            sort($childPvas);
+                            sort($dataProduct['attributes']);
+                            if ($childPvas == $dataProduct['attributes']) {
+                                $offerIds = collect($dataProduct["offers"])->map(function ($offerId) {
+                                    $offer = Offer::find($offerId);
+                                    if (count($offer->productVariationAttributes) > 0) {
+                                        $data = $offer->productVariationAttributes->first()->pivot->id;
+                                    } elseif (count($offer->products) > 0) {
+                                        $data = $offer->products->first()->pivot->id;
+                                    } elseif (count($offer->taxonomies) > 0) {
+                                        $data = $offer->taxonomies->first()->pivot->id;
+                                    } elseif (count($offer->sources) > 0) {
+                                        $data = $offer->sources->first()->pivot->id;
+                                    } elseif (count($offer->brands) > 0) {
+                                        $data = $offer->brands->first()->pivot->id;
+                                    } elseif (count($offer->brandSources) > 0) {
+                                        $data = $offer->brandSources->first()->pivot->id;
+                                    } elseif (count($offer->customers) > 0) {
+                                        $data = $offer->customers->first()->pivot->id;
+                                    } elseif (count($offer->customerTypes) > 0) {
+                                        $data = $offer->customerTypes->first()->pivot->id;
+                                    } elseif (count($offer->cities) > 0) {
+                                        $data = $offer->cities->first()->pivot->id;
+                                    } elseif (count($offer->countries) > 0) {
+                                        $data = $offer->countries->first()->pivot->id;
+                                    } elseif (count($offer->regions) > 0) {
+                                        $data = $offer->regions->first()->pivot->id;
+                                    } elseif (count($offer->sectors) > 0) {
+                                        $data = $offer->sectors->first()->pivot->id;
+                                    }
+                                    return $data;
+                                })->toArray();
+                                $thePva[$index] = ['id' => $pva->id, 'price' => $dataProduct['price'], 'offerables' => $offerIds, 'quantity' => $dataProduct['quantity']];
+                            }
+                        })->toArray();
 
-                        if (!isset($thePva[$index1[0]])) {
+                        if (!isset($thePva[$index])) {
                             $fail("not Exists");
                         }
                     },
@@ -553,11 +369,10 @@ class OrderfirstController extends Controller
                 ]);
             }
         }
-        $orders = collect($requests->except('_method'))->map(function ($request, $index) use ($thePva, $isImport) {
+        $orders = collect($requests->except('_method'))->map(function ($request) use ($thePva, $isImport) {
             if (isset($request['customer']['id'])) {
-                $customer = Customer::where('id', $request['customer']['id'])->first();
+                $customer = Customer::where('id', $request['customer']['id'])->get()->first();
                 CustomerController::update(new Request([$request['customer']]), $customer->id, $isOrder = 1);
-                return $request;
             } elseif (isset($request['customer']['phones'])) {
                 $phoneWithCustomers = Phone::with('customers')->where('account_id', getAccountUser()->account_id)->whereIn('title', collect($request['customer']['phones'])->pluck('title')->toArray())->whereHas('customers')->orderBy('created_at', 'DESC')->get();
                 if (count($phoneWithCustomers) > 0) {
@@ -566,38 +381,38 @@ class OrderfirstController extends Controller
                     CustomerController::update(new Request([$request['customer']]), $customer->id, $isOrder = 1);
                 } else {
                     $request['customer']['customer_type_id'] = (isset($request['customer']['customer_type_id'])) ? $request['customer']['customer_type_id'] : 1;
-                    $request['customer']['name'] = $request['customer']['name'] == "  " ?  "client" : $request['customer']['name'];
                     $customerData = new Request([$request['customer']]);
                     $customer = CustomerController::store($customerData, 1)->first();
                 }
             }
+
             $request["account_id"] = getAccountUser()->account_id;
+            $request['order_status_id'] = 1;
             if ($isImport == 0) {
                 $request['customer_id'] = $customer->id;
-                $request['order_status_id'] = 1;
-                $request['code'] = isset($request['code']) ? $request['code'] : DefaultCodeController::getAccountCode('Order', $request["account_id"]);
-            } elseif ($isImport == 1) {
-                $request['customer_id'] = $customer->id;
+                $request['code'] = DefaultCodeController::getAccountCode('Order', $request["account_id"]);
             }
-            $request['warehouse_id'] = isset($request['warehouse_id']) ? $request['warehouse_id'] : Warehouse::where('account_id', getAccountUser()->account_id)->first()->id;
-            $order = Order::create($request);
-            if ($isImport == 1 || $isImport == 2) {
-                $thePva[$index] = $request['order_pva'];
+            $order_only = collect($request)->only('code', 'warehouse_id', 'adresse', 'comment', 'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'customer_id', 'order_status_id', 'statut', 'account_id', 'created_at', 'updated_at');
+            $order = Order::create($order_only->all());
+            if ($isImport == 1) {
                 if ($order->customer->addresses->first())
                     $order->addresses()->syncWithoutDetaching([$order->customer->addresses->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
                 if ($order->customer->phones->first())
                     $order->phones()->syncWithoutDetaching([$order->customer->phones->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
             } else {
                 foreach ($request["customer"]["addresses"] as $key => $address) {
-                    $order->update(['city_id' => $customer->addresses->where('title', $address['title'])->first()->city_id]);
-                    $order->addresses()->syncWithoutDetaching([$customer->addresses->where('title', $address['title'])->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+                    if ($address['principal']) {
+                        $order->update(['city_id' => $customer->addresses->where('title', $address['title'])->first()->city_id]);
+                        $order->addresses()->syncWithoutDetaching([$customer->addresses->where('title', $address['title'])->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+                    }
                 }
                 foreach ($request["customer"]["phones"] as $key => $phone) {
-                    $order->phones()->syncWithoutDetaching([$customer->phones->where('title', $phone['title'])->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+                    if ($phone['principal']) {
+                        $order->phones()->syncWithoutDetaching([$customer->phones->where('title', $phone['title'])->first()->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+                    }
                 }
             }
-
-            foreach ($thePva[$index] as $pvaData) {
+            foreach ($thePva as $pvaData) {
                 $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
                 $initial_price = Product::find($productVariationAttribute->product_id)->price->first()->price;
                 $productPrice = isset($pvaData['price']) ? $pvaData['price'] : $initial_price;
@@ -621,10 +436,10 @@ class OrderfirstController extends Controller
                     VariationOfferableController::store(new Request(['order_id' => $order->id, 'pva' => $productVariationAttribute, 'variations' => $pvaData['offerables']]));
                 }
             }
-            $order->orderStatuses()->attach($order->order_status_id, ['account_user_id' => ($isImport == 1 || $isImport == 2) ? $request['account_user_id'] : getAccountUser()->id, 'statut' => 1, 'created_at' => $order->created_at, 'updated_at' => $order->created_at]);
+            $order->orderStatuses()->attach($order->order_status_id, ['account_user_id' => ($isImport == 1) ? $request['account_user_id'] : getAccountUser()->id, 'statut' => 1, 'created_at' => now(), 'updated_at' => now()]);
             if ($isImport == 0) {
                 $order->comments()->syncWithoutDetaching([44 => [
-                    'title' => isset($request['status_comment']) ? $request['status_comment'] : 'Nouvelle Commande',
+                    'title' => 'Nouvelle Commande',
                     'order_status_id' => 1,
                     'account_user_id' => getAccountUser()->account_id,
                     'created_at' => now(),
@@ -632,8 +447,8 @@ class OrderfirstController extends Controller
                 ]]);
                 CompensationableController::edit($order->id);
             }
-            
             $order = Order::with(['customer', 'productVariationAttributes', 'comments', 'orderStatuses', 'addresses', 'phones'])->find($order->id);
+            return $order;
         });
         return response()->json([
             'statut' => 1,
@@ -828,8 +643,6 @@ class OrderfirstController extends Controller
             });
             $filters = HelperFunctions::filterColumns($request['comments']['active'], ['title']);
             $data['comments']['active'] =  HelperFunctions::getPagination(collect($comments), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
-
-           
         }
         return response()->json([
             'statut' => 1,
@@ -858,25 +671,6 @@ class OrderfirstController extends Controller
             'created_at' => now(),
             'updated_at' => now()
         ]);
-
-        // Calculate and update score after adding a new order_comment
-        // --- begin score calculation ---
-        // Load all comments for this order, sorted by created_at
-        $orderComments = $order->comments()->orderBy('order_comment.created_at')->get();
-        $callTimestamps = $orderComments->pluck('created_at')->map(function($dt) {
-            return \Carbon\Carbon::parse($dt);
-        })->toArray();
-        // Use order creation time as start
-        $orderCreatedAt = $order->created_at;
-        // Import the helper function
-        if (!function_exists('calculateScore')) {
-            require_once app_path('Helpers/OrderScoreHelper.php');
-        }
-        $score = calculateScore($callTimestamps, $orderCreatedAt);
-        $order->score = $score;
-        $order->save();
-        // --- end score calculation ---
-
         return ['statut' => $comment->parentComment->current_statut, 'is_change' => $comment->is_change];
     }
 
@@ -916,8 +710,7 @@ class OrderfirstController extends Controller
             '*.productsToActive.*.quantity' => 'required|numeric',
             '*.productsToActive.*.price' => 'numeric',
             '*.productsToActive.*.id' => [
-                'required',
-                'int',
+                'required', 'int',
                 function ($attribute, $value, $fail) use ($requests, &$productsToActive) {
                     $account = getAccountUser()->account_id;
                     // Extract index from attribute name
@@ -988,12 +781,11 @@ class OrderfirstController extends Controller
                 'data' => $validator->errors(),
             ]);
         }
-
         $orders = collect($requests->except('_method'))->map(function ($request) use ($productsToActive, $local) {
             $comment = null;
             //récupérer la commande a modifier
             $order = Order::find($request['id']);
-            /*if (isset($request['pickup_id'])) {
+            if (isset($request['pickup_id'])) {
                 $pickUp = Pickup::find($request['pickup_id']);
                 if ($pickUp->carrier_id) {
                     $accountPrice = $pickUp->carrier->defaultCarriers()->where('city_id', $order->city_id)->first();
@@ -1002,7 +794,7 @@ class OrderfirstController extends Controller
                 }
             } else {
                 $request['real_carrier_price'] = 0;
-            }*/
+            }
             //vérifier si y a un changement des informations du client
             if (isset($request['customer'])) {
                 $request['customer']['id'] = $order->customer_id;
@@ -1025,10 +817,6 @@ class OrderfirstController extends Controller
             }
             if (isset($request['comment'])) {
                 $comment = OrderController::changeStatus(new Request(collect($request['comment'])->toArray()), $order);
-                if ($comment['statut'] == 2) {
-                    $request['shipping_code'] = null;
-                    $request['pickup_id'] = null;
-                }
             }
             //vérifier si le dépôt est changé
             if (isset($request['warehouse_id']) && $request['warehouse_id'] !== $order->warehouse_id) {
@@ -1049,12 +837,12 @@ class OrderfirstController extends Controller
             }
             $request['comment'] = isset($request['customer']['comment']) ? $request['customer']['comment'] : null;
             $request['order_status_id'] = $comment['statut'];
-            $order_only = collect($request)->only('warehouse_id', 'order_status_id',  'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id','shipping_code','meta');
+            $order_only = collect($request)->only('warehouse_id', 'order_status_id', 'comment', 'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id');
             $order->update($order_only->all());
             $order->activePvas()->update(['order_status_id' => $comment['statut']]);
             //hna kanvérifier wach la commande 3endha parent ila kane 3endha déja parent o parent 3endo child 
             //hna bach ncrée commande d retour pour les commandes CH 
-            if (count($order->parentOrder)>0) {
+            if ($order->parentOrder && count($order->parentOrder->childOrders) <= 1) {
                 $dataReturn["account_id"] = getAccountUser()->account_id;
                 $dataReturn['order_status_id'] = 8;
                 $dataReturn['customer_id'] = $order->parentOrder->customer_id;
@@ -1099,10 +887,9 @@ class OrderfirstController extends Controller
                 $dataNew['brand_source_id'] = $order->brand_source_id;
                 $dataNew['warehouse_id'] = $order->warehouse_id;
                 $dataNew['order_id'] = $order->id;
-                $dataNew['code'] = $order->code . "-CH";
+                $dataNew['code'] = $order->code . "CH";
                 $dataNew['is_change'] = $comment['is_change'];
                 $dataNew['shipping_price'] = isset($request['comment']['shipping_price']) ? $request['comment']['shipping_price'] : 0;
-                $dataNew['discount'] = isset($request['comment']['discount']) ? $request['comment']['discount'] : 0;
                 $order_new = collect($dataNew)->only('code', 'warehouse_id', 'adresse', 'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'customer_id', 'order_status_id', 'account_id', 'shipping_price', 'order_id');
                 //Générer une nouvelle commande pour échanger la commande principale
                 $newOrder = Order::create($order_new->all());
@@ -1179,13 +966,6 @@ class OrderfirstController extends Controller
                 }
                 return $returnOrder;
             } else {
-
-                if (isset($request['productsToInactive'])) {
-                    foreach ($request['productsToInactive'] as $pvaData) {
-                        $orderPva = OrderPva::find($pvaData);
-                        $orderPva->update(['order_status_id' => 2]);
-                    }
-                }
                 if (isset($request['productsToActive'])) {
                     foreach ($productsToActive as $pvaData) {
                         $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
@@ -1249,6 +1029,12 @@ class OrderfirstController extends Controller
                         if (isset($pvaData['offerables']) && count($pvaData['offerables']) > 0) {
                             VariationOfferableController::store(new Request(['order_pva' => $orderPva, 'variations' => $pvaData['offerables']]));
                         }
+                    }
+                }
+                if (isset($request['productsToInactive'])) {
+                    foreach ($request['productsToInactive'] as $pvaData) {
+                        $orderPva = OrderPva::find($pvaData);
+                        $orderPva->update(['order_status_id' => 2]);
                     }
                 }
                 CompensationableController::edit($order->id);
