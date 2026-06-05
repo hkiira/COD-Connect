@@ -383,6 +383,23 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     }
     public function syncOrders()
     {
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if ($user) {
+            \App\Jobs\SyncAsapOrdersJob::dispatch($user);
+            return response()->json([
+                'success' => true,
+                'message' => 'La synchronisation a été lancée en arrière-plan. Les commandes seront mises à jour sous peu.',
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Utilisateur non authentifié.',
+        ], 401);
+    }
+
+    public function runSync()
+    {
         $sessionId = $this->login();
         $updatedCount = 0;
         $chunkSize = 50;
