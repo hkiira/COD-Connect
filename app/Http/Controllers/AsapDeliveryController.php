@@ -395,7 +395,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         Order::where('account_id', getAccountUser()->account_id)
             ->whereNull('shipping_code')
             ->where('order_status_id', 4)
-            ->chunkById(100, function ($orders) use ($sessionId, &$updatedCode, &$totalProcessed, $limit) {
+            ->orderBy('created_at', 'desc')
+            ->chunk(100, function ($orders) use ($sessionId, &$updatedCode, &$totalProcessed, $limit) {
                 $orderData = [];
                 foreach ($orders as $order) {
                     if ($totalProcessed >= $limit) {
@@ -1189,7 +1190,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             ->whereNull('shipment_id')
             ->whereNotNull('shipping_code')
             ->whereIn('order_status_id', [6])
-            ->chunkById(100, function ($orders) use ($service, &$deliveredCount, &$canceledCount, &$totalProcessed, $limit) {
+            ->orderBy('created_at', 'desc')
+            ->chunk(100, function ($orders) use ($service, &$deliveredCount, &$canceledCount, &$totalProcessed, $limit) {
                 foreach ($orders as $order) {
                     if ($totalProcessed >= $limit) {
                         return false;
