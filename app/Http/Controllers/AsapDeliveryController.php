@@ -208,17 +208,15 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_HEADER, false);
         $data = [
             "url" => "https://app.asapdelivery.ma/exportfactures.php?id=" . $invoiceId,
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'GET');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $htmlContent = curl_exec($curl);
+        $htmlContent = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         $data = [];
         // Create a new DOMDocument and load the HTML.
@@ -266,17 +264,15 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_HEADER, false);
         $data = [
             "url" => "https://app.asapdelivery.ma/exportbls.php?id=" . $returnId,
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'GET');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $htmlContent = curl_exec($curl);
+        $htmlContent = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         $data = [];
         // Create a new DOMDocument and load the HTML.
@@ -467,18 +463,16 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
-            "token" => "a131d37b9ce84e4cb33949c2b721fa8f85a864ad869",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
         libxml_use_internal_errors(true);
@@ -533,10 +527,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $body = http_build_query($data);
         $scrapeData = [
             "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($scrapeData));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -547,7 +539,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $scrapeData);
         curl_close($curl);
         return $uploadResponse;
     }
@@ -567,18 +559,16 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
         return $uploadResponse;
     }
     //hadi makhedamach 7ta nchof blanha
@@ -598,10 +588,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         ]);
         $scrapeData = [
             "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($scrapeData));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -612,7 +600,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $scrapeData);
         curl_close($curl);
         return $uploadResponse;
     }
@@ -622,17 +610,15 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $curl = curl_init();
         $data = [
             "url" => "https://app.asapdelivery.ma/printtickets.php?id=" . $id . "&model=3",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         return $uploadResponse;
     }
@@ -665,18 +651,16 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/bls.php",
-            "token" => "8a355170e5de449db59061cef47bb515405addc24cd",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
@@ -755,18 +739,16 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
@@ -853,18 +835,16 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
-            "token" => "8a355170e5de449db59061cef47bb515405addc24cd",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
         libxml_use_internal_errors(true);
@@ -953,11 +933,9 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
         $data = [
             "url" => "https://app.asapdelivery.ma/login.php",
-            "token" => "a131d37b9ce84e4cb33949c2b721fa8f85a864ad869",
             "disableRedirection" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
@@ -967,7 +945,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLINFO_HEADER_OUT, true);
         curl_setopt($curl, CURLOPT_FOLLOWLOCATION, false);      // Include headers in output
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $response = curl_exec($curl);
+        $response = \App\Services\ScrapeDoService::executeCurl($curl, $data);
         curl_close($curl);
 
         // Use the header size to split headers from body
@@ -1017,18 +995,16 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
@@ -1104,18 +1080,16 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/factures.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Content-Type: application/x-www-form-urlencoded",
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
 
         // Create a new DOMDocument and load the HTML.

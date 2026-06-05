@@ -55,6 +55,8 @@ class SynchronisationController extends Controller
                 return $this->invoiceOrders($id);
             case 'returns':
                 return $this->returns();
+            case 'get_order':
+                return $this->getOrder($id);
             case 'return_orders':
                 return $this->returnOrders($id);
             case 'create_pickup':
@@ -246,16 +248,14 @@ class SynchronisationController extends Controller
         curl_setopt($curl, CURLOPT_HEADER, false);
         $data = [
             "url" => "https://app.asapdelivery.ma/exportbls.php?id=" . $returnId,
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'GET');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $htmlContent = curl_exec($curl);
+        $htmlContent = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         $data = [];
         // Create a new DOMDocument and load the HTML.
@@ -296,103 +296,11 @@ class SynchronisationController extends Controller
         return $asapController->syncOrders();
     }
     //katjib la commande men systeme dial ASAP b search
-    public function getOrder($code, $sessionId)
+    public function getOrder($code, $sessionId = null)
     {
-        $curl = curl_init();
-        $body = [
-            "state" => "1",
-            "keyword" => $code,
-            "client" => "",
-            "worker" => "",
-            "city" => "",
-            "ids" => "",
-            "st" => "",
-            "change" => "",
-            "stock" => "",
-            "datestart" => "",
-            "dateend" => "",
-            "datestartupdate" => "",
-            "dateendupdate" => "",
-            "start" => "0",
-            "nbpage" => "10",
-            "sortby" => "dateadd",
-            "orderby" => "ASC",
-            "action" => "loadramassages"
-        ];
-        $body = http_build_query($body);
+        $asapController = new AsapDeliveryController();
+        return $asapController->getOrder($code, $sessionId);
 
-        $data = [
-            "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
-            "customHeaders" => "true"
-        ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array(
-            "Content-Type: application/x-www-form-urlencoded",
-            "Accept: */*",
-            'cookie: ' . $sessionId,
-        ));
-        $uploadResponse = curl_exec($curl);
-        // Create a new DOMDocument and load the HTML.
-        $dom = new \DOMDocument();
-        libxml_use_internal_errors(true);
-        @$dom->loadHTML($uploadResponse);
-        libxml_clear_errors();
-
-        // Use DOMXPath to query the document.
-        $xpath = new \DOMXPath($dom);
-
-        // Get all rows except the header row.
-        $rows = $xpath->query('//table/tr[not(contains(@class, "lx-first-tr"))]');
-        $data = [];
-
-        foreach ($rows as $row) {
-            $cells = $row->getElementsByTagName('td');
-            // Ensure the row has the expected number of cells.
-            if ($cells->length >= 12) {
-                // Get invoice ID from the checkbox input's value.
-                $input = $cells->item(0)->getElementsByTagName('input')->item(0);
-                $id = $input ? $input->getAttribute('value') : null;
-                // Extract the text content from each cell.
-                $employee = trim($cells->item(1)->textContent);
-                $created = trim($cells->item(2)->textContent);
-                $receiver = trim($cells->item(3)->textContent);
-                $phone = trim($cells->item(4)->textContent);
-                $address = trim($cells->item(5)->textContent);
-                $city = trim($cells->item(6)->textContent);
-                $price = trim($cells->item(7)->textContent);
-                // Get action links from the last cell.
-                $state = trim($cells->item(8)->textContent);
-                $note = trim($cells->item(9)->textContent);
-                $change = trim($cells->item(10)->textContent);
-                $asapCode = trim($cells->item(11)->textContent);
-                $spaceCode = trim($cells->item(12)->textContent);
-                $product = trim($cells->item(13)->textContent);
-                $stock = trim($cells->item(14)->textContent);
-                $data[] = [
-                    'id' => $id,
-                    'employee' => $employee,
-                    'created' => $created,
-                    'receiver' => $receiver,
-                    'phone' => $phone,
-                    'address' => $address,
-                    'city' => $city,
-                    'price' => $price,
-                    'state' => $state,
-                    'note' => $note,
-                    'change' => $change,
-                    'asap_code' => $asapCode,
-                    'space_code' => $spaceCode,
-                    'product' => $product,
-                    'stock' => $stock,
-                ];
-            }
-        }
-        return $data;
     }
     //crée une commande dans le systéme de ASAP
     public function createOrder($dataOrder, $sessionId)
@@ -404,10 +312,8 @@ class SynchronisationController extends Controller
         $body = http_build_query($dataOrder);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -417,7 +323,7 @@ class SynchronisationController extends Controller
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
         if (trim($uploadResponse) === '') {
             return [
                 'success' => true,
@@ -443,10 +349,8 @@ class SynchronisationController extends Controller
         $body = http_build_query($body);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -456,7 +360,7 @@ class SynchronisationController extends Controller
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
         return $uploadResponse;
     }
     //hadi makhedamach 7ta nchof blanha
@@ -516,15 +420,14 @@ class SynchronisationController extends Controller
         $curl = curl_init();
         $data = [
             "url" => "https://app.asapdelivery.ma/printtickets.php?id=" . $id . "&model=3",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         return $uploadResponse;
     }
@@ -553,10 +456,8 @@ class SynchronisationController extends Controller
         $body = http_build_query($body);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/bls.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -566,7 +467,7 @@ class SynchronisationController extends Controller
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
@@ -641,10 +542,8 @@ class SynchronisationController extends Controller
         $body = http_build_query($body);
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/ramassage.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -654,7 +553,7 @@ class SynchronisationController extends Controller
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
@@ -737,10 +636,8 @@ class SynchronisationController extends Controller
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/colis.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -750,7 +647,7 @@ class SynchronisationController extends Controller
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         if (empty($uploadResponse)) {
             return [];
@@ -844,10 +741,8 @@ class SynchronisationController extends Controller
         $body = http_build_query($body);
         $data = [
             "url" => "https://app.asapdelivery.ma/login.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "disableRedirection" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -860,7 +755,7 @@ class SynchronisationController extends Controller
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLINFO_HEADER_OUT, true);
         curl_setopt($curl, CURLOPT_FOLLOWLOCATION, false);      // Include headers in output
-        $response = curl_exec($curl);
+        $response = \App\Services\ScrapeDoService::executeCurl($curl, $data);
         curl_close($curl);
         $header = $this->getHeadersOnly($response);
         return $header['scrape.do-cookies'];
@@ -890,10 +785,8 @@ class SynchronisationController extends Controller
 
         $data = [
             "url" => "https://app.asapdelivery.ma/inc/factures.php",
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLOPT_HEADER, false);
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
@@ -903,7 +796,7 @@ class SynchronisationController extends Controller
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $uploadResponse = curl_exec($curl);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
 
         // Create a new DOMDocument and load the HTML.
@@ -1198,16 +1091,14 @@ class SynchronisationController extends Controller
         curl_setopt($curl, CURLOPT_HEADER, false);
         $data = [
             "url" => "https://app.asapdelivery.ma/exportfactures.php?id=" . $invoiceId,
-            "token" => "328893f698c34a058fd070d119731957b909c885d63",
             "customHeaders" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'GET');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Accept: */*",
             'cookie: ' . $sessionId,
         ));
-        $htmlContent = curl_exec($curl);
+        $htmlContent = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
         $data = [];
         // Create a new DOMDocument and load the HTML.

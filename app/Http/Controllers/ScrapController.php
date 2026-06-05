@@ -615,11 +615,9 @@ class ScrapController extends Controller
         curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
         $data = [
             "url" => "https://app.asapdelivery.ma/login.php",
-            "token" => "a131d37b9ce84e4cb33949c2b721fa8f85a864ad869",
             "disableRedirection" => "true"
         ];
         curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_URL, "https://api.scrape.do/?" . http_build_query($data));
         curl_setopt($curl, CURLOPT_HTTPHEADER, array(
             "Accept: */*",
         ));
@@ -627,7 +625,7 @@ class ScrapController extends Controller
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($curl, CURLINFO_HEADER_OUT, true);
         curl_setopt($curl, CURLOPT_FOLLOWLOCATION, false);      // Include headers in output
-        $response = curl_exec($curl);
+        $response = \App\Services\ScrapeDoService::executeCurl($curl, $data);
         curl_close($curl);
 
         // Use the header size to split headers from body
