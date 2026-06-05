@@ -17,4 +17,6 @@ return [
     'token' => env('ASAP_DELIVERY_TOKEN'),
 
     'secret_key' => env('ASAP_DELIVERY_SECRET_KEY'),
+
+    'verify_ssl' => env('ASAP_DELIVERY_VERIFY_SSL', true),
 ];

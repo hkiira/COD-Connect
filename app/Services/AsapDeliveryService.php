@@ -22,6 +22,10 @@ class AsapDeliveryService
             ->timeout(15)
             ->connectTimeout(5);
 
+        if (config('app.env') === 'local' || !config('asapdelivery.verify_ssl', true)) {
+            $this->client = $this->client->withoutVerifying();
+        }
+
         $this->token = config('asapdelivery.token');
         $this->secretKey = config('asapdelivery.secret_key');
     }
@@ -89,9 +93,18 @@ class AsapDeliveryService
             'tk' => $this->token,
             'sk' => $this->secretKey,
         ], Arr::only($data, [
-            'fullname', 'phone', 'city', 'address', 'price', 'product',
-            'qty', 'note', 'code2', 'change', 'openpackage'
-        ]));
+                        'fullname',
+                        'phone',
+                        'city',
+                        'address',
+                        'price',
+                        'product',
+                        'qty',
+                        'note',
+                        'code2',
+                        'change',
+                        'openpackage'
+                    ]));
 
         $response = $this->client->get('addcolis.php', $payload);
 
@@ -102,9 +115,9 @@ class AsapDeliveryService
         $body = $response->body();
 
         if (str_starts_with($body, 'Package added successfully')) {
-             return trim(str_replace('Package added successfully: ', '', $body));
+            return trim(str_replace('Package added successfully: ', '', $body));
         }
-        
+
         throw new AsapDeliveryException("Failed to add parcel: {$body}");
     }
 
