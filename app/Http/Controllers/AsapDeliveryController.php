@@ -395,9 +395,9 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             ->orderBy('created_at', 'desc');
 
         $totalOrders = $ordersQuery->count();
-        $orderData = [];
 
-        $ordersQuery->chunkById($chunkSize, function ($orders) use (&$updatedCount, $sessionId, &$orderData) {
+        $ordersQuery->chunkById($chunkSize, function ($orders) use (&$updatedCount, $sessionId) {
+            $orderData = [];
             foreach ($orders as $order) {
                 $asapHistory = $this->getOrder($order->code, $sessionId);
                 if ($asapHistory) {
@@ -419,12 +419,12 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                     ];
                 }
             }
-
+            if (!empty($orderData)) {
+                OrderController::update(new Request($orderData), $local = 2);
+            }
         });
 
-        if (!empty($orderData)) {
-            OrderController::update(new Request($orderData), $local = 2);
-        }
+
         return [
             'success' => true,
             'message' => "Synchronisation effectuée avec succès. $updatedCount / $totalOrders commandes mises à jour.",
