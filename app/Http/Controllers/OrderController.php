@@ -1576,11 +1576,17 @@ class OrderController extends Controller
                 $comment = OrderController::changeStatus(new Request($commentData), $order);
             }
             $request['note'] = isset($request['note']) ? $request['note'] : null;
-            $request['order_status_id'] = $comment['statut'];
+            if ($comment !== null) {
+                $request['order_status_id'] = $comment['statut'];
+            } else {
+                $request['order_status_id'] = $order->order_status_id;
+            }
             $order_only = collect($request)->only('warehouse_id', 'discount',  'order_status_id',  'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id','shipping_code','note','meta','carrier_price','sync');
             
             $order->update($order_only->all());
-            $order->activePvas()->update(['order_status_id' => $comment['statut']]);
+            if ($comment !== null) {
+                $order->activePvas()->update(['order_status_id' => $comment['statut']]);
+            }
             
             // Note: The legacy logic that created "PR" or "CH" specific orders has been removed
             // since returns and exchanges are now handled by createExchange()

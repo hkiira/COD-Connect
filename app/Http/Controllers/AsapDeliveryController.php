@@ -384,50 +384,51 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     public function syncOrders()
     {
         $sessionId = $this->login();
-        $updatedCode = 0;
-        $totalProcessed = 0;
-        $limit = 10;
-
-        Order::where('account_id', getAccountUser()->account_id)
+        $updatedCount = 0;
+        $chunkSize = 50;
+        $ordersQuery = Order::where('account_id', getAccountUser()->account_id)
+            ->with("activePhones")
+            ->whereNull('shipment_id')
             ->whereNull('shipping_code')
-            ->where('order_status_id', 4)
-            ->orderBy('created_at', 'desc')
-            ->chunk(100, function ($orders) use ($sessionId, &$updatedCode, &$totalProcessed, $limit) {
-                $orderData = [];
-                foreach ($orders as $order) {
-                    if ($totalProcessed >= $limit) {
-                        return false;
-                    }
+            ->whereIn('order_status_id', [4])
+            ->where('sync', '<', 2)
+            ->orderBy('created_at', 'desc');
 
-                    $asapHistory = $this->getOrder($order->code, $sessionId);
-                    if ($asapHistory) {
-                        $orderData[] = [
-                            "id" => $order->id,
-                            'meta' => $asapHistory[0]['id'] ?: $order->meta,
-                            'shipping_code' => $asapHistory[0]['asap_code'],
-                            "comment" => [
-                                "id" => "29",
-                                "title" => "ajout du code : " . $asapHistory[0]['asap_code']
-                            ]
-                        ];
-                        // Update the order with ASAP order ID and shipping code
-                        $updatedCode++;
-                    }
-                    $totalProcessed++;
-                }
-                if (!empty($orderData)) {
-                    OrderController::update(new Request($orderData), $local = 2);
-                }
+        $totalOrders = $ordersQuery->count();
+        $orderData = [];
 
-                if ($totalProcessed >= $limit) {
-                    return false;
+        $ordersQuery->chunkById($chunkSize, function ($orders) use (&$updatedCount, $sessionId, &$orderData) {
+            foreach ($orders as $order) {
+                $asapHistory = $this->getOrder($order->code, $sessionId);
+                if ($asapHistory) {
+                    $orderData[] = [
+                        "id" => $order->id,
+                        'meta' => $asapHistory[0]['id'] ?: $order->meta,
+                        'shipping_code' => $asapHistory[0]['asap_code'],
+                        "comment" => [
+                            "id" => "29",
+                            "title" => "ajout du code : " . $asapHistory[0]['asap_code']
+                        ]
+                    ];
+                    // Update the order with ASAP order ID and shipping code
+                    $updatedCount++;
+                } else {
+                    $orderData[] = [
+                        "id" => $order->id,
+                        'sync' => $order->sync + 1,
+                    ];
                 }
-            });
+            }
 
-        return response()->json([
+        });
+
+        if (!empty($orderData)) {
+            OrderController::update(new Request($orderData), $local = 2);
+        }
+        return [
             'success' => true,
-            'message' => "Orders synchronized successfully: {$updatedCode} orders updated",
-        ]);
+            'message' => "Synchronisation effectuée avec succès. $updatedCount / $totalOrders commandes mises à jour.",
+        ];
     }
     //katjib la commande men systeme dial ASAP b search
     public function getOrder($code, $sessionId = null)
