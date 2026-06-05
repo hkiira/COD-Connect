@@ -391,12 +391,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             ->whereNull('shipment_id')
             ->whereNull('shipping_code')
             ->whereIn('order_status_id', [4])
-            ->where('sync', '<', 2)
-            ->orderBy('created_at', 'desc');
+            ->where('sync', '<', 3);
 
         $totalOrders = $ordersQuery->count();
 
-        $ordersQuery->chunkById($chunkSize, function ($orders) use (&$updatedCount, $sessionId) {
+        $ordersQuery->chunkByIdDesc($chunkSize, function ($orders) use (&$updatedCount, $sessionId) {
             $orderData = [];
             foreach ($orders as $order) {
                 $asapHistory = $this->getOrder($order->code, $sessionId);
