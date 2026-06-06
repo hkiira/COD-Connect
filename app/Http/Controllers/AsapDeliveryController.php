@@ -402,9 +402,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     {
         $sessionId = $this->login();
         $updatedCount = 0;
-        $chunkSize = 50;
         $ordersQuery = Order::where('account_id', getAccountUser()->account_id)
-            ->with("activePhones")
             ->whereNull('shipment_id')
             ->whereNull('shipping_code')
             ->whereIn('order_status_id', [4])
@@ -412,12 +410,13 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
         $totalOrders = $ordersQuery->count();
 
-        $ordersQuery->chunkByIdDesc($chunkSize, function ($orders) use (&$updatedCount, $sessionId) {
-            $orderData = [];
-            foreach ($orders as $order) {
+        $ordersQuery->chunkById(50, function ($orders) use (&$updatedCount, $sessionId) {
+            $orderData = $orders->map(function ($order) use (&$updatedCount, $sessionId) {
                 $asapHistory = $this->getOrder($order->code, $sessionId);
                 if ($asapHistory) {
-                    $orderData[] = [
+                    // Update the order with ASAP order ID and shipping code
+                    $updatedCount++;
+                    return [
                         "id" => $order->id,
                         'meta' => $asapHistory[0]['id'] ?: $order->meta,
                         'shipping_code' => $asapHistory[0]['asap_code'],
@@ -426,17 +425,15 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                             "title" => "ajout du code : " . $asapHistory[0]['asap_code']
                         ]
                     ];
-                    // Update the order with ASAP order ID and shipping code
-                    $updatedCount++;
                 } else {
-                    $orderData[] = [
+                    return [
                         "id" => $order->id,
                         'sync' => $order->sync + 1,
                     ];
                 }
-            }
+            });
             if (!empty($orderData)) {
-                OrderController::update(new Request($orderData), $local = 2);
+                OrderController::update(new Request($orderData->toArray()), $local = 2);
             }
         });
 
