@@ -18,6 +18,13 @@ class SyncAsapOrdersJob implements ShouldQueue
     protected $user;
 
     /**
+     * The number of seconds the job can run before timing out.
+     *
+     * @var int
+     */
+    public $timeout = 3600; // 1 hour
+
+    /**
      * Create a new job instance.
      *
      * @return void
@@ -35,6 +42,7 @@ class SyncAsapOrdersJob implements ShouldQueue
     public function handle()
     {
         try {
+            set_time_limit(3600);
             if ($this->user) {
                 Auth::login($this->user);
             }
