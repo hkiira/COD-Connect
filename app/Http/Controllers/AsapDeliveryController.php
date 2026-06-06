@@ -412,27 +412,35 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
         $ordersQuery->chunkById(50, function ($orders) use (&$updatedCount, $sessionId) {
             $orderData = $orders->map(function ($order) use (&$updatedCount, $sessionId) {
-                $asapHistory = $this->getOrder($order->code, $sessionId);
-                if ($asapHistory) {
-                    // Update the order with ASAP order ID and shipping code
-                    $updatedCount++;
-                    return [
-                        "id" => $order->id,
-                        'meta' => $asapHistory[0]['id'] ?: $order->meta,
-                        'shipping_code' => $asapHistory[0]['asap_code'],
-                        "comment" => [
-                            "id" => "29",
-                            "title" => "ajout du code : " . $asapHistory[0]['asap_code']
-                        ]
-                    ];
-                } else {
-                    return [
-                        "id" => $order->id,
-                        'sync' => $order->sync + 1,
-                    ];
+                try {
+                    $asapHistory = $this->getOrder($order->code, $sessionId);
+                    if ($asapHistory) {
+                        // Update the order with ASAP order ID and shipping code
+                        $updatedCount++;
+                        return [
+                            "id" => $order->id,
+                            'meta' => $asapHistory[0]['id'] ?: $order->meta,
+                            'shipping_code' => $asapHistory[0]['asap_code'],
+                            "comment" => [
+                                "id" => "29",
+                                "title" => "ajout du code : " . $asapHistory[0]['asap_code']
+                            ]
+                        ];
+                    } else {
+                        return [
+                            "id" => $order->id,
+                            'sync' => $order->sync + 1,
+                        ];
+                    }
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error("Failed to sync order {$order->code}: " . $e->getMessage(), [
+                        'exception' => $e
+                    ]);
+                    return null;
                 }
-            });
-            if (!empty($orderData)) {
+            })->filter()->values();
+
+            if ($orderData->isNotEmpty()) {
                 OrderController::update(new Request($orderData->toArray()), $local = 2);
             }
         });

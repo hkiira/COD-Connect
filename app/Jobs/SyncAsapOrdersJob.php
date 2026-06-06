@@ -34,15 +34,37 @@ class SyncAsapOrdersJob implements ShouldQueue
      */
     public function handle()
     {
-        if ($this->user) {
-            Auth::login($this->user);
-        }
+        try {
+            if ($this->user) {
+                Auth::login($this->user);
+            }
 
-        Log::info("ASAP Sync Job: Starting order synchronization in the background.");
-        
-        $controller = new AsapDeliveryController();
-        $result = $controller->runSync();
-        
-        Log::info("ASAP Sync Job: Finished. Result: " . json_encode($result));
+            Log::info("ASAP Sync Job: Starting order synchronization in the background.");
+            
+            $controller = new AsapDeliveryController();
+            $result = $controller->runSync();
+            
+            Log::info("ASAP Sync Job: Finished. Result: " . json_encode($result));
+        } catch (\Throwable $e) {
+            Log::error("ASAP Sync Job Exception during execution: " . $e->getMessage(), [
+                'exception' => $e,
+                'user_id' => $this->user ? $this->user->id : null,
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Handle a job failure.
+     *
+     * @param  \Throwable  $exception
+     * @return void
+     */
+    public function failed(\Throwable $exception)
+    {
+        Log::error("ASAP Sync Job Failed: " . $exception->getMessage(), [
+            'exception' => $exception,
+            'user_id' => $this->user ? $this->user->id : null,
+        ]);
     }
 }
