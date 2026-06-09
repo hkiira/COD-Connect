@@ -974,17 +974,13 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $headerSize = strpos($response, "\r\n\r\n");
         $headerText = ($headerSize !== false) ? substr($response, 0, $headerSize) : $response;
 
-        // Split into lines and convert to associative array
-        $headers = [];
-        foreach (explode("\n", $headerText) as $line) {
-            $line = trim($line);
-            if (strpos($line, ':') !== false) {
-                list($key, $value) = explode(':', $line, 2);
-                $headers[trim($key)] = trim($value);
-            }
+        // Parse Set-Cookie for PHPSESSID
+        preg_match('/PHPSESSID=([^;]+)/i', $headerText, $matches);
+        if (isset($matches[1])) {
+            return "PHPSESSID=" . trim($matches[1]);
         }
 
-        return $headers['scrape.do-cookies'] ?? null;
+        return null;
     }
     public function orders($statusValue)
     {

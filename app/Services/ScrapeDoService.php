@@ -86,53 +86,29 @@ class ScrapeDoService
         return $tokens[$nextIndex];
     }
 
-    /**
-     * Helper to execute a curl request with token rotation on 401 status.
-     *
-     * @param resource $curl
-     * @param array $scrapeData
-     * @return string|bool
-     */
     public static function executeCurl($curl, array $scrapeData)
     {
-        $tokens = self::getTokens();
-        $attempts = 0;
-        $maxAttempts = count($tokens);
-
-        while ($attempts < $maxAttempts) {
-            $token = self::getActiveToken();
-            if (!$token) {
-                break;
-            }
-
-            $scrapeData['token'] = $token;
-            $scrapeUrl = "https://api.scrape.do/?" . http_build_query($scrapeData);
-            curl_setopt($curl, CURLOPT_URL, $scrapeUrl);
-
-            Log::debug("Executing Scrape.do request. Attempt: " . ($attempts + 1) . ". Using token: " . substr($token, 0, 6) . "...");
-
-            $response = curl_exec($curl);
-
-            // Verify if there was a curl execution error
-            if ($response === false) {
-                $err = curl_error($curl);
-                Log::error("Curl execution failed: " . $err);
-                return false;
-            }
-
-            $httpCode = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
-
-            if ($httpCode === 401) {
-                Log::warning("Scrape.do token " . substr($token, 0, 6) . "... returned 401. Rotating to next token.");
-                self::rotateToken();
-                $attempts++;
-                continue;
-            }
-
-            return $response;
+        // Extract the actual target URL from scrapeData
+        $targetUrl = $scrapeData['url'] ?? '';
+        if (empty($targetUrl)) {
+            Log::error("executeCurl failed: No target URL provided.");
+            return false;
         }
 
-        Log::error("All scrape.do tokens have been exhausted (401 errors received for all configured tokens).");
-        throw new \App\Exceptions\NoCreditsException();
+        // Set the actual target URL
+        curl_setopt($curl, CURLOPT_URL, $targetUrl);
+
+        Log::debug("Executing direct curl request to: " . $targetUrl);
+
+        $response = curl_exec($curl);
+
+        // Verify if there was a curl execution error
+        if ($response === false) {
+            $err = curl_error($curl);
+            Log::error("Curl execution failed: " . $err);
+            return false;
+        }
+
+        return $response;
     }
 }
