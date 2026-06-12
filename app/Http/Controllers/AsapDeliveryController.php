@@ -1168,6 +1168,23 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     }
     public function syncStatuses()
     {
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if ($user) {
+            \App\Jobs\SyncAsapStatusesJob::dispatch($user);
+            return response()->json([
+                'success' => true,
+                'message' => 'La synchronisation des statuts a été lancée en arrière-plan. Les commandes seront mises à jour sous peu.',
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Utilisateur non authentifié.',
+        ], 401);
+    }
+
+    public function runSyncStatuses()
+    {
         $service = app(AsapDeliveryService::class);
         $pickups = Pickup::where('carrier_id', 22)->pluck('id')->toArray();
 
@@ -1346,20 +1363,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                             ]
                         ];
                         OrderController::update(new Request($orderData));
-                    } else {
-                        $orderData = [
-                            [
-                                "id" => $order->id,
-                                'meta' => null,
-                                'shipping_code' => null,
-                                'pickup_id' => null,
-                                "comment" => [
-                                    "id" => 64,
-                                    "title" => 'Non traité'
-                                ]
-                            ]
-                        ];
-                        OrderController::update(new Request($orderData));
                     }
 
                     $totalProcessed++;
@@ -1370,12 +1373,29 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 }
             });
 
-        return response()->json([
+        return [
             'success' => true,
             'message' => "Statuses synchronized successfully: {$deliveredCount} delivered, {$canceledCount} canceled",
-        ]);
+        ];
     }
     public function syncInvoices()
+    {
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if ($user) {
+            \App\Jobs\SyncAsapInvoicesJob::dispatch($user);
+            return response()->json([
+                'success' => true,
+                'message' => 'La synchronisation des factures a été lancée en arrière-plan. Elles seront mises à jour sous peu.',
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Utilisateur non authentifié.',
+        ], 401);
+    }
+
+    public function runSyncInvoices()
     {
         $datas = $this->invoices();
         foreach ($datas as $key => $data) {
@@ -1395,8 +1415,30 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 ShipmentController::store($requestData);
             }
         }
+
+        return [
+            'success' => true,
+            'message' => 'Invoices synchronized successfully.',
+        ];
     }
     public function syncReturns()
+    {
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if ($user) {
+            \App\Jobs\SyncAsapReturnsJob::dispatch($user);
+            return response()->json([
+                'success' => true,
+                'message' => 'La synchronisation des retours a été lancée en arrière-plan. Ils seront mis à jour sous peu.',
+            ]);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Utilisateur non authentifié.',
+        ], 401);
+    }
+
+    public function runSyncReturns()
     {
         $datas = $this->returns();
         foreach ($datas as $key => $data) {
@@ -1415,6 +1457,11 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 ShipmentController::store($requestData);
             }
         }
+
+        return [
+            'success' => true,
+            'message' => 'Returns synchronized successfully.',
+        ];
     }
     public function headings(): array
     {

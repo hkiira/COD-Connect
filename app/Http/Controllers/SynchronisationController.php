@@ -1139,33 +1139,14 @@ class SynchronisationController extends Controller
     }
     public function syncInvoices()
     {
-        $scrapedAsap = new ScrapController();
+        $scrapedAsap = new AsapDeliveryController();
         return $scrapedAsap->syncInvoices();
     }
     public function syncReturns()
     {
-        $datas = $this->returns();
-        foreach ($datas as $key => $data) {
-            $hasInvoice = Shipment::where('title', $data['code'])->first();
-            if (!$hasInvoice) {
-                $getAsapOrders = $this->returnOrders($data['id']);
-                $orders = [];
-                foreach ($getAsapOrders as $key => $asapOrder) {
-                    $order = null;
-                    if ($asapOrder['code'])
-                        $order = Order::where('shipping_code', $asapOrder['code'])->first();
-                    if ($order)
-                        $orders[] = ['id' => $order->id, 'carrier_price' => 0];
-                }
-                $requestData = new Request([['carrier_id' => 22, 'shipment_type_id' => 2, 'warehouse_id' => 30, 'statut' => 1, 'title' => $data['code'], 'orders' => $orders]]);
-                ShipmentController::store($requestData);
-            }
-        }
 
-        return [
-            "statut" => 1,
-            "data" => "Retours synchronisés avec succès."
-        ];
+        $scrapedAsap = new AsapDeliveryController();
+        return $scrapedAsap->syncReturns();
     }
 
 

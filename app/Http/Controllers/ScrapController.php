@@ -332,6 +332,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
+            'verify' => false,
         ]);
 
         $response = $client->post('/inc/ramassage.php', [
@@ -361,6 +362,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
+            'verify' => false,
         ]);
 
         $response = $client->post('/inc/colis.php', [
@@ -384,6 +386,7 @@ class ScrapController extends Controller
 
         $client = new Client([
             'base_uri' => 'https://app.asapdelivery.ma',
+            'verify' => false,
         ]);
 
         $response = $client->post('/inc/ramassage.php', [
@@ -408,6 +411,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
+            'verify' => false,
         ]);
 
         $response = $client->get('/printtickets.php?id=' . $id . '&model=3', [
@@ -425,6 +429,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
+            'verify' => false,
         ]);
 
         $response = $client->post('/inc/bls.php', [
@@ -476,6 +481,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
+            'verify' => false,
         ]);
 
         $response = $client->post('/inc/ramassage.php', [
@@ -519,6 +525,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
+            'verify' => false,
         ]);
 
         $response = $client->post('/inc/colis.php', [
@@ -651,6 +658,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
+            'verify' => false,
         ]);
 
         $response = $client->post('/inc/factures.php', [
@@ -879,6 +887,7 @@ class ScrapController extends Controller
         $client = new Client([
             'base_uri' => self::$scrap_url,
             'cookies' => true,
+            'verify' => false,
         ]);
 
         $response = $client->get('/exportfactures.php?id=' . $invoiceId, [
