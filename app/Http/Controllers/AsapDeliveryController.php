@@ -405,8 +405,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $ordersQuery = Order::where('account_id', getAccountUser()->account_id)
             ->whereNull('shipment_id')
             ->whereNull('shipping_code')
-            ->whereIn('order_status_id', [4])
-            ->where('sync', '<', 3);
+            ->whereIn('order_status_id', [4]);
 
         $totalOrders = $ordersQuery->count();
 
