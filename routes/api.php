@@ -262,6 +262,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('commissions', CommissionController::class);
     Route::resource('salaries', SalaryController::class);
     Route::resource('bonuses', BonusController::class);
+    Route::get('orders/counts', [OrderController::class, 'counts']);
     Route::resource('orders', OrderController::class);
     Route::post('orders/count-by-phones', [OrderController::class, 'countByPhones']);
     Route::post('orders/exchange', [OrderController::class, 'createExchange']);

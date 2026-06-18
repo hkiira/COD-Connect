@@ -177,54 +177,74 @@ class DashboardController extends Controller
         }
 
         // 4. Inventory Alerts
-        $pvas = ProductVariationAttribute::where('account_id', $accountId)
-            ->with([
-                'product',
-                'activeWarehouses',
-                'orderPvas.order.orderStatus',
-                'supplierOrderPvas.supplierOrder'
-            ])
-            ->get();
+        // 4. Inventory Alerts
+        // Optimized to prevent memory exhaustion by computing aggregates in database instead of hydrating all models.
+        $productsWithPvas = Product::whereHas('productVariationAttributes', function ($query) use ($accountId) {
+                $query->where('account_id', $accountId);
+            })
+            ->get(['id', 'title']);
 
         $groupedProducts = [];
+        foreach ($productsWithPvas as $product) {
+            $groupedProducts[$product->id] = [
+                'product_name' => $product->title,
+                'ordered' => 0,
+                'in_transit' => 0,
+                'available' => 0,
+            ];
+        }
 
-        foreach ($pvas as $pva) {
-            $productId = $pva->product_id;
-            if (!$productId || !$pva->product) continue;
+        // Fetch available sums per product
+        $availableData = DB::table('warehouse_pva')
+            ->join('product_variation_attribute', 'warehouse_pva.product_variation_attribute_id', '=', 'product_variation_attribute.id')
+            ->where('warehouse_pva.statut', 1)
+            ->where('product_variation_attribute.account_id', $accountId)
+            ->whereNull('product_variation_attribute.deleted_at')
+            ->groupBy('product_variation_attribute.product_id')
+            ->select('product_variation_attribute.product_id', DB::raw('SUM(warehouse_pva.quantity) as total_available'))
+            ->get();
 
-            if (!isset($groupedProducts[$productId])) {
-                $groupedProducts[$productId] = [
-                    'product_name' => $pva->product->title,
-                    'ordered' => 0,
-                    'in_transit' => 0,
-                    'available' => 0,
-                ];
+        foreach ($availableData as $row) {
+            if (isset($groupedProducts[$row->product_id])) {
+                $groupedProducts[$row->product_id]['available'] = (int) $row->total_available;
             }
+        }
 
-            // Available
-            if ($pva->activeWarehouses) {
-                $groupedProducts[$productId]['available'] += $pva->activeWarehouses->sum('pivot.quantity');
+        // Fetch ordered sums per product
+        $orderedData = DB::table('supplier_order_pva')
+            ->join('product_variation_attribute', 'supplier_order_pva.product_variation_attribute_id', '=', 'product_variation_attribute.id')
+            ->join('supplier_orders', 'supplier_order_pva.supplier_order_id', '=', 'supplier_orders.id')
+            ->where('supplier_orders.statut', 1)
+            ->where('product_variation_attribute.account_id', $accountId)
+            ->whereNull('product_variation_attribute.deleted_at')
+            ->whereNull('supplier_orders.deleted_at')
+            ->whereNull('supplier_order_pva.deleted_at')
+            ->groupBy('product_variation_attribute.product_id')
+            ->select('product_variation_attribute.product_id', DB::raw('SUM(supplier_order_pva.quantity) as total_ordered'))
+            ->get();
+
+        foreach ($orderedData as $row) {
+            if (isset($groupedProducts[$row->product_id])) {
+                $groupedProducts[$row->product_id]['ordered'] = (int) $row->total_ordered;
             }
+        }
 
-            // Ordered (from supplier orders)
-            if ($pva->supplierOrderPvas) {
-                foreach ($pva->supplierOrderPvas as $supplierOrderPva) {
-                    if ($supplierOrderPva->supplierOrder && $supplierOrderPva->supplierOrder->statut == 1) {
-                        $groupedProducts[$productId]['ordered'] += $supplierOrderPva->quantity;
-                    }
-                }
-            }
+        // Fetch in_transit sums per product
+        $inTransitData = DB::table('order_pva')
+            ->join('product_variation_attribute', 'order_pva.product_variation_attribute_id', '=', 'product_variation_attribute.id')
+            ->join('orders', 'order_pva.order_id', '=', 'orders.id')
+            ->whereIn('orders.order_status_id', [5, 6, 8, 9])
+            ->where('product_variation_attribute.account_id', $accountId)
+            ->whereNull('product_variation_attribute.deleted_at')
+            ->whereNull('orders.deleted_at')
+            ->whereNull('order_pva.deleted_at')
+            ->groupBy('product_variation_attribute.product_id')
+            ->select('product_variation_attribute.product_id', DB::raw('SUM(order_pva.quantity) as total_in_transit'))
+            ->get();
 
-            // In Transit (from customer orders)
-            if ($pva->orderPvas) {
-                foreach ($pva->orderPvas as $orderPva) {
-                    if ($orderPva->order && $orderPva->order->orderStatus) {
-                        $statusId = $orderPva->order->orderStatus->id;
-                        if (in_array($statusId, [5, 6, 8, 9])) {
-                            $groupedProducts[$productId]['in_transit'] += $orderPva->quantity;
-                        }
-                    }
-                }
+        foreach ($inTransitData as $row) {
+            if (isset($groupedProducts[$row->product_id])) {
+                $groupedProducts[$row->product_id]['in_transit'] = (int) $row->total_in_transit;
             }
         }
 

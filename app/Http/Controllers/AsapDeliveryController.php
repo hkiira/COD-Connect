@@ -1194,8 +1194,6 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $limit = 10;
 
         Order::where('account_id', getAccountUser()->account_id)
-            ->whereIn('pickup_id', $pickups)
-            ->whereNull('shipment_id')
             ->whereNotNull('shipping_code')
             ->whereIn('order_status_id', [6])
             ->orderBy('created_at', 'desc')

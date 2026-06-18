@@ -54,7 +54,7 @@ class GoogleSheetsService
         }
 
         $customer = $order->customer;
-        $customerName = $customer ? $customer->name."-".$order->code : null;
+        $customerName = $customer ? $customer->name . "-" . $order->code : null;
 
         $phone = null;
         if ($customer && $customer->phones) {
@@ -78,7 +78,7 @@ class GoogleSheetsService
             $address = $order->adresse;
         }
 
-        $price = method_exists($order, 'calculateActivePvasTotalValue') ? $order->calculateActivePvasTotalValue()-$order->discount+$order->shipping_price : null;
+        $price = method_exists($order, 'calculateActivePvasTotalValue') ? $order->calculateActivePvasTotalValue() - $order->discount + $order->shipping_price : null;
         $quantity = method_exists($order, 'calculateActivePvasQte') ? $order->calculateActivePvasQte() : null;
         $productRef = null;
         $firstPva = $order->activeOrderPvas->first();

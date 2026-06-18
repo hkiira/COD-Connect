@@ -394,6 +394,39 @@ class OrderController extends Controller
 
         return $result;
     }
+
+    public function counts(Request $request)
+    {
+        $accountId = getAccountUser()->account_id;
+
+        $counts = Order::where('account_id', $accountId)
+            ->select('order_status_id', DB::raw('count(*) as count'))
+            ->groupBy('order_status_id')
+            ->pluck('count', 'order_status_id')
+            ->all();
+
+        $allCount = Order::where('account_id', $accountId)->count();
+
+        $pendingConfirmation = $counts[1] ?? 0;
+        $confirmed = ($counts[4] ?? 0) + ($counts[5] ?? 0);
+        $inTransit = $counts[6] ?? 0;
+        $pendingPayments = $counts[7] ?? 0;
+        $pendingReturns = ($counts[8] ?? 0) + ($counts[9] ?? 0);
+
+        return response()->json([
+            'statut' => 1,
+            'data' => [
+                'all' => $allCount,
+                'pending_confirmation' => $pendingConfirmation,
+                'confirmed' => $confirmed,
+                'in_transit' => $inTransit,
+                'In transit' => $inTransit,
+                'pending_payments' => $pendingPayments,
+                'pending_returns' => $pendingReturns,
+            ]
+        ]);
+    }
+
     // public function index(Request $request)
     // {
     //     $request = collect($request->query())->toArray();
