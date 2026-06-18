@@ -187,6 +187,17 @@ class NextController extends Controller
      */
     public function get_products(Request $request)
     {
+        $validator = Validator::make($request->all(), [
+            'brand_source_id' => 'required|exists:brand_source,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'statut' => 0,
+                'data' => $validator->errors(),
+            ], 422);
+        }
+
         $brandSourceId = $request->input('brand_source_id');
         $search = $request->input('search');
 
