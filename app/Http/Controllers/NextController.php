@@ -456,7 +456,7 @@ class NextController extends Controller
             'pickup.carrier',
             'shipment.carrier',
             'productVariationAttributes.product',
-            'comments.orderStatus'
+            'orderComments.orderStatus'
         ])->get();
 
         $formattedOrders = $orders->map(function ($order) {
@@ -474,11 +474,11 @@ class NextController extends Controller
 
             $delivery_men = $order->pickup?->carrier?->title ?? $order->shipment?->carrier?->title ?? null;
 
-            $history = $order->comments->map(function ($comment) {
+            $history = $order->orderComments->map(function ($orderComment) {
                 return [
-                    'status' => $comment->orderStatus?->title ?? $comment->title,
-                    'created_at' => $comment->created_at?->toDateTimeString() ?? $comment->pivot?->created_at,
-                    'note' => $comment->title,
+                    'status' => $orderComment->orderStatus?->title ?? $orderComment->title,
+                    'created_at' => $orderComment->created_at?->toDateTimeString(),
+                    'note' => $orderComment->title,
                 ];
             })->toArray();
 
