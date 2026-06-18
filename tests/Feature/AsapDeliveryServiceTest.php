@@ -63,6 +63,22 @@ class AsapDeliveryServiceTest extends TestCase
     }
 
     /** @test */
+    public function it_throws_exception_for_non_existent_parcel_with_404_status()
+    {
+        $this->expectException(ParcelNotFoundException::class);
+
+        Http::fake([
+            'api.asapdelivery.ma/track.php*' => Http::response([
+                'message' => "Code doesn't exist or incorrect credentials",
+                'status' => '404'
+            ], 404),
+        ]);
+
+        $service = new AsapDeliveryService();
+        $service->trackParcel('nonexistent');
+    }
+
+    /** @test */
     public function it_can_add_a_parcel_successfully()
     {
         Http::fake([

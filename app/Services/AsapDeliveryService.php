@@ -63,6 +63,12 @@ class AsapDeliveryService
         ]);
 
         if ($response->failed()) {
+            if ($response->status() === 404) {
+                $data = $response->json();
+                if (isset($data['message']) && (str_contains($data['message'], "Code doesn't exist") || str_contains($data['message'], "incorrect credentials"))) {
+                    throw new ParcelNotFoundException($data['message']);
+                }
+            }
             throw new AsapDeliveryException("ASAP Delivery API request failed: {$response->reason()}");
         }
 

@@ -101,7 +101,8 @@ use App\Http\Controllers\{
     ScrapController,
     MouvementController,
     AnalyticsController,
-    AsapDeliveryWebhookController
+    AsapDeliveryWebhookController,
+    NextController
 };
 use App\Http\Controllers\API\RegisterController;
 use App\Models\ExpenseType;
@@ -367,6 +368,13 @@ Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
     // Overview Endpoints
 
     Route::get('/speedafw/debug/api-connection', [SpeedafwController::class, 'testApiConnection']);
+
+    // NextController API routes
+    Route::post('create_order', [NextController::class, 'create_order']);
+    Route::get('get_products', [NextController::class, 'get_products']);
+    Route::get('get_product', [NextController::class, 'get_product']);
+    Route::get('getProduct', [NextController::class, 'getProduct']);
+    Route::get('get_customer', [NextController::class, 'get_customer']);
 });
 
 // Route::post('deliveryMen', [DeliveryMenController::class, 'index']);
