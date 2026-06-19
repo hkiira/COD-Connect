@@ -247,7 +247,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('tranferts', TransfertController::class);
     Route::resource('returns', ReturnController::class);
     Route::resource('customer_types', CustomerTypeController::class);
-    
+
     // CRM Customer Extensions
     Route::post('customers/merge', [CustomerController::class, 'merge']);
     Route::post('customers/{id}/log-call', [CustomerController::class, 'logCall']);
@@ -313,8 +313,8 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('orders/test-total/{orderId}', [OrderController::class, 'testCalculateTotal']);
     Route::post('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
     Route::get('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
-Route::get('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
-Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
+    Route::get('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
+    Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
     Route::get('overviews/sales', [OverviewController::class, 'sales']);
     Route::get('overviews/logistics', [OverviewController::class, 'logistics']);
     Route::get('overviews/procurement', [OverviewController::class, 'procurement']);
@@ -348,6 +348,13 @@ Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
     Route::get('/analytics/acquisition-sources', [AnalyticsController::class, 'acquisitionSources']);
     Route::get('/analytics/product-performance', [AnalyticsController::class, 'productPerformance']);
 
+    // NextController API routes
+    Route::post('next/create_order', [NextController::class, 'create_order']);
+    Route::get('next/get_products', [NextController::class, 'get_products']);
+    Route::get('next/get_product', [NextController::class, 'get_product']);
+    Route::get('next/getProduct', [NextController::class, 'getProduct']);
+    Route::get('next/get_customer', [NextController::class, 'get_customer']);
+
     // Order Management
     // Route::post('/speedafw/orders/create', [SpeedafwController::class, 'createOrder']);
     // Route::post('/speedafw/orders/batch-create', [SpeedafwController::class, 'batchCreateOrders']);
@@ -364,17 +371,11 @@ Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
 
     // // Label Printing
     // Route::post('/speedafw/print-label', [SpeedafwController::class, 'printLabel']);
-    
+
     // Overview Endpoints
 
     Route::get('/speedafw/debug/api-connection', [SpeedafwController::class, 'testApiConnection']);
 
-    // NextController API routes
-    Route::post('create_order', [NextController::class, 'create_order']);
-    Route::get('get_products', [NextController::class, 'get_products']);
-    Route::get('get_product', [NextController::class, 'get_product']);
-    Route::get('getProduct', [NextController::class, 'getProduct']);
-    Route::get('get_customer', [NextController::class, 'get_customer']);
 });
 
 // Route::post('deliveryMen', [DeliveryMenController::class, 'index']);

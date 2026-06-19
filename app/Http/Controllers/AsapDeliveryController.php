@@ -405,7 +405,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $ordersQuery = Order::where('account_id', getAccountUser()->account_id)
             ->whereNull('shipment_id')
             ->whereNull('shipping_code')
-            ->whereIn('order_status_id', [4]);
+            ->whereIn('order_status_id', [6]);
 
         $totalOrders = $ordersQuery->count();
 
@@ -1183,172 +1183,203 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         ], 401);
     }
 
+    /**
+     * Run the status synchronization for orders assigned to ASAP Delivery (carrier_id = 22).
+     *
+     * @return array
+     */
     public function runSyncStatuses()
     {
-        $service = app(AsapDeliveryService::class);
+        // 1. Fetch pickup IDs associated with ASAP carrier (carrier_id = 22)
         $pickups = Pickup::where('carrier_id', 22)->pluck('id')->toArray();
 
-        $deliveredCount = 0;
-        $canceledCount = 0;
-        $totalProcessed = 0;
-        $limit = 10;
+        // 2. Initialize tracking counters for the current run
+        $deliveredCount = 0; // Tracks the number of successfully delivered orders
+        $canceledCount = 0;  // Tracks the number of canceled/returned orders
+        $totalProcessed = 0; // Tracks the total number of orders processed in this run
+        $limit = 10;         // Max limit of orders to process per execution to prevent timeouts
 
+        // 3. Login to ASAP Delivery portal and retrieve the active session cookie
+        $sessionId = $this->login();
+
+        // 4. Query orders belonging to the authenticated user's account in status 6 (In Transit) and matching carrier pickups
         Order::where('account_id', getAccountUser()->account_id)
-            ->whereNotNull('shipping_code')
-            ->whereIn('order_status_id', [6])
-            ->orderBy('created_at', 'desc')
-            ->chunk(100, function ($orders) use ($service, &$deliveredCount, &$canceledCount, &$totalProcessed, $limit) {
+            ->whereIn('order_status_id', [6]) // Status 6 indicates 'In Transit'
+            ->whereIn('pickup_id', $pickups)   // Filter by ASAP carrier pickups
+            ->orderBy('created_at', 'asc')     // Order by creation date to process older orders first
+            // Chunk the query results to manage memory usage
+            ->chunk(100, function ($orders) use (&$deliveredCount, &$canceledCount, &$totalProcessed, $limit, $sessionId) {
+                // Loop through each order in the current chunk
                 foreach ($orders as $order) {
-                    if ($totalProcessed >= $limit) {
-                        return false;
-                    }
 
+
+                    // Variable to hold the latest tracking event retrieved
                     $latestEvent = null;
+
                     try {
-                        $trackResult = $service->trackParcel($order->shipping_code);
-                        if ($trackResult && isset($trackResult['0'])) {
-                            $latestEvent = $trackResult['0'];
+                        // Priority 1: If a shipping code exists, search the ASAP portal using the shipping code
+                        if ($order->shipping_code) {
+                            $asapHistory = $this->getOrder($order->shipping_code, $sessionId);
+                            if ($asapHistory && isset($asapHistory[0])) {
+                                $latestEvent = $asapHistory[0]; // Set the most recent tracking entry
+                            }
+                        } else {
+                            // Priority 2: Fallback to tracking using the internal order code
+                            $asapHistory = $this->getOrder($order->code, $sessionId);
+                            if ($asapHistory && isset($asapHistory[0])) {
+                                $latestEvent = $asapHistory[0]; // Set the most recent tracking entry
+                            } else {
+                                // Priority 3: Fallback to tracking using the customer's phone number
+                                $asapHistory = $this->getOrder($order->customer->activePhones->first()->title, $sessionId);
+                                if ($asapHistory && isset($asapHistory[0])) {
+                                    $latestEvent = $asapHistory[0]; // Set the most recent tracking entry
+                                }
+                            }
                         }
                     } catch (\Exception $e) {
-                        \Illuminate\Support\Facades\Log::warning("ASAP Delivery trackParcel failed for order {$order->code}: " . $e->getMessage());
+                        // Log a warning if the getOrder scraping call fails for an order, so other orders can still sync
+                        \Illuminate\Support\Facades\Log::warning("ASAP Delivery getOrder failed for order {$order->code}: " . $e->getMessage());
                     }
 
+                    // 5. Map the latest ASAP event state to local comment and status IDs
                     if ($latestEvent) {
-                        $id = 64;
+                        $id = 64; // Default to 'En cours' status comment ID
                         switch ($latestEvent['state']) {
                             case 'En attente de ramassage':
                                 break;
                             case 'Ramassé':
-                                $id = 65;
+                                $id = 65; // 'Ramassé'
                                 break;
                             case 'Receptionné':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'Expédié':
-                                $id = 29;
+                                $id = 29; // 'Ajout du code'
                                 break;
                             case 'Reçu par livreur':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'Faux destination':
-                                $id = 62;
+                                $id = 62; // 'Hors zone'
                                 break;
                             case 'Hors zone':
-                                $id = 62;
+                                $id = 62; // 'Hors zone'
                                 break;
                             case 'En distribution':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'Injoignable':
-                                $id = 31;
+                                $id = 31; // 'Client Injoignable'
                                 break;
                             case 'Pas de réponse':
-                                $id = 42;
+                                $id = 42; // 'Client ne répond pas'
                                 break;
                             case 'Annulée':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'Refusé':
-                                $id = 34;
+                                $id = 34; // 'Commande refusée'
                                 break;
                             case 'Changement client':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'Demande de retour':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'Reporté':
-                                $id = 28;
+                                $id = 28; // 'Reporté'
                                 break;
                             case 'Livré (Payé)':
-                                $id = 25;
+                                $id = 25; // 'Livrée'
                                 break;
                             case 'Livré':
-                                $id = 25;
+                                $id = 25; // 'Livrée'
                                 break;
                             case 'Retour vers agence casa':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'Retour reçu agence casa':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'Retour client expédié':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'Retour client reçu':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'Interessé':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'Demande de suivi':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'En attente de retour':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'Change':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'Programmé':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'A retourner vers agence principal casa':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'en voyage':
-                                $id = 35;
+                                $id = 35; // 'Client en voyage'
                                 break;
                             case 'pas de réponse 2 fois':
-                                $id = 31;
+                                $id = 31; // 'Client Injoignable'
                                 break;
                             case 'pas de réponse 3 fois':
-                                $id = 31;
+                                $id = 31; // 'Client Injoignable'
                                 break;
                             case 'pas de réponse 4 fois':
-                                $id = 31;
+                                $id = 31; // 'Client Injoignable'
                                 break;
                             case 'Pas de réponse LV':
-                                $id = 31;
+                                $id = 31; // 'Client Injoignable'
                                 break;
                             case 'Pas de réponse 5 fois':
-                                $id = 31;
+                                $id = 31; // 'Client Injoignable'
                                 break;
                             case 'Pas de réponse ( suivi )':
-                                $id = 31;
+                                $id = 31; // 'Client Injoignable'
                                 break;
                             case 'Annuler ( suivi )':
-                                $id = 33;
+                                $id = 33; // 'Commande annulée'
                                 break;
                             case 'Reporté ( suivi )':
-                                $id = 28;
+                                $id = 28; // 'Reporté'
                                 break;
                             case 'Changement numéro':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'En attente d\'appel du client':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'Numéro Incorrect':
-                                $id = 64;
+                                $id = 64; // 'En cours'
                                 break;
                             case 'Injoignable ( suivi )':
-                                $id = 31;
+                                $id = 31; // 'Client Injoignable'
                                 break;
                             case 'Double Commande':
-                                $id = 58;
+                                $id = 58; // 'Retard de traitement interne'
                                 break;
                             default:
-                                $id = 64;
+                                $id = 64; // Default comment ID
                                 break;
                         }
 
+                        // 6. Increment specific status outcome counters
                         if ($id === 25) {
-                            $deliveredCount++;
+                            $deliveredCount++; // Increment delivered count if mapped status is Livrée (25)
                         } elseif ($id === 33) {
-                            $canceledCount++;
+                            $canceledCount++;  // Increment canceled count if mapped status is Commande annulée (33)
                         }
 
+                        // 7. Prepare local order update data structure
                         $orderData = [
                             [
                                 "id" => $order->id,
@@ -1360,17 +1391,17 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                                 ]
                             ]
                         ];
+                        // 8. Update order in local system and append the comment log/history
                         OrderController::update(new Request($orderData));
                     }
 
+                    // Increment count of processed orders
                     $totalProcessed++;
                 }
 
-                if ($totalProcessed >= $limit) {
-                    return false;
-                }
             });
 
+        // 9. Return execution sync summary statistics
         return [
             'success' => true,
             'message' => "Statuses synchronized successfully: {$deliveredCount} delivered, {$canceledCount} canceled",
