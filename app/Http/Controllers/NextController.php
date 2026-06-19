@@ -228,7 +228,7 @@ class NextController extends Controller
             'principalImage',
             'images',
             'offers',
-            'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+            'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute'
         ])->get();
 
         $formattedProducts = $products->map(function ($product) {
@@ -292,7 +292,7 @@ class NextController extends Controller
                 'principalImage',
                 'images',
                 'offers',
-                'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+                'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute'
             ])
             ->first();
 
@@ -382,7 +382,7 @@ class NextController extends Controller
             'principalImage',
             'images',
             'offers',
-            'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+            'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute'
         ])->get();
 
         $formattedProducts = $products->map(function ($product) {
@@ -549,7 +549,7 @@ class NextController extends Controller
     {
         $attributesGrouped = [];
 
-        foreach ($product->productVariationAttributes as $pva) {
+        foreach ($product->activePvas as $pva) {
             if ($pva->variationAttribute) {
                 foreach ($pva->variationAttribute->childVariationAttributes as $childVa) {
                     $attribute = $childVa->attribute;
