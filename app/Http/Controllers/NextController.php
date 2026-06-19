@@ -223,7 +223,13 @@ class NextController extends Controller
             $query->where('title', 'like', "%{$searchName}%");
         }
 
-        $products = $query->with(['price', 'principalImage', 'images', 'offers'])->get();
+        $products = $query->with([
+            'price',
+            'principalImage',
+            'images',
+            'offers',
+            'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+        ])->get();
 
         $formattedProducts = $products->map(function ($product) {
             $principalImg = $product->principalImage->first() ?? $product->images->first();
@@ -246,7 +252,9 @@ class NextController extends Controller
                 }
             }
 
-            return [
+            $groupedAttrs = $this->getGroupedAttributes($product);
+
+            $productData = [
                 'id' => $product->id,
                 'name' => $product->title,
                 'code' => $product->code,
@@ -254,7 +262,10 @@ class NextController extends Controller
                 'images' => $images_urls,
                 'price' => $price,
                 'discount_price' => $discount_price,
+                'attributes_grouped' => $groupedAttrs,
             ];
+
+            return array_merge($productData, $groupedAttrs);
         });
 
         return response()->json($formattedProducts);
@@ -276,7 +287,13 @@ class NextController extends Controller
 
         $product = Product::where('title', 'like', "%{$name}%")
             ->where('statut', 1)
-            ->with(['price', 'principalImage', 'images', 'offers'])
+            ->with([
+                'price',
+                'principalImage',
+                'images',
+                'offers',
+                'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+            ])
             ->first();
 
         if (!$product) {
@@ -316,7 +333,9 @@ class NextController extends Controller
             ];
         })->toArray();
 
-        return response()->json([
+        $groupedAttrs = $this->getGroupedAttributes($product);
+
+        $productData = [
             'id' => $product->id,
             'name' => $product->title,
             'code' => $product->code,
@@ -325,7 +344,10 @@ class NextController extends Controller
             'price' => $price,
             'discount_price' => $discount_price,
             'offers' => $offers,
-        ]);
+            'attributes_grouped' => $groupedAttrs,
+        ];
+
+        return response()->json(array_merge($productData, $groupedAttrs));
     }
 
     /**
@@ -355,7 +377,13 @@ class NextController extends Controller
             });
         }
 
-        $products = $query->with(['price', 'principalImage', 'images', 'offers'])->get();
+        $products = $query->with([
+            'price',
+            'principalImage',
+            'images',
+            'offers',
+            'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+        ])->get();
 
         $formattedProducts = $products->map(function ($product) {
             $principalImg = $product->principalImage->first() ?? $product->images->first();
@@ -391,7 +419,9 @@ class NextController extends Controller
                 ];
             })->toArray();
 
-            return [
+            $groupedAttrs = $this->getGroupedAttributes($product);
+
+            $productData = [
                 'id' => $product->id,
                 'name' => $product->title,
                 'code' => $product->code,
@@ -400,7 +430,10 @@ class NextController extends Controller
                 'price' => $price,
                 'discount_price' => $discount_price,
                 'offers' => $offers,
+                'attributes_grouped' => $groupedAttrs,
             ];
+
+            return array_merge($productData, $groupedAttrs);
         });
 
         return response()->json($formattedProducts);
@@ -507,5 +540,35 @@ class NextController extends Controller
             ],
             'orders' => $formattedOrders,
         ]);
+    }
+
+    /**
+     * Group product variation attributes by attribute type.
+     */
+    private function getGroupedAttributes($product)
+    {
+        $attributesGrouped = [];
+
+        foreach ($product->productVariationAttributes as $pva) {
+            if ($pva->variationAttribute) {
+                foreach ($pva->variationAttribute->childVariationAttributes as $childVa) {
+                    $attribute = $childVa->attribute;
+                    if ($attribute) {
+                        $typeTitle = $attribute->typeAttribute ? $attribute->typeAttribute->title : 'other';
+                        $key = strtolower(trim($typeTitle));
+                        if (!str_ends_with($key, 's')) {
+                            $key .= 's';
+                        }
+                        $attributesGrouped[$key][] = $attribute->title;
+                    }
+                }
+            }
+        }
+
+        foreach ($attributesGrouped as $key => $values) {
+            $attributesGrouped[$key] = array_values(array_unique($values));
+        }
+
+        return $attributesGrouped;
     }
 }

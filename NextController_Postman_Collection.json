@@ -1,0 +1,258 @@
+{
+	"info": {
+		"_postman_id": "c1a2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e",
+		"name": "COD Connect - Next API",
+		"description": "Postman Collection for the newly added NextController API endpoints in COD Connect.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Create Order",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{bearer_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"name\": \"John Doe\",\n  \"phoneNumber\": \"0612345678\",\n  \"city_id\": 4,\n  \"address\": \"123 Rue de la Liberté\",\n  \"products\": [\n    {\n      \"id\": 45,\n      \"quantity\": 2\n    },\n    {\n      \"id\": 78,\n      \"quantity\": 1\n    }\n  ],\n  \"final_price\": 350.00,\n  \"brand_source_id\": 108\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/next/create_order",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"next",
+						"create_order"
+					]
+				},
+				"description": "Creates a new system order using a flat customer structure and scales product pricing to match the total final_price."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Products",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{bearer_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/next/get_products?brand_source_id=108&search=Sneaker",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"next",
+						"get_products"
+					],
+					"query": [
+						{
+							"key": "brand_source_id",
+							"value": "108",
+							"description": "Required brand source ID"
+						},
+						{
+							"key": "search",
+							"value": "Sneaker",
+							"description": "Optional search term matching name (also supports search[name] or name)"
+						}
+					]
+				},
+				"description": "Gets products filtered by brand_source_id and name search."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Product Details",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{bearer_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/next/get_product?name=Veloce Running Sneaker",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"next",
+						"get_product"
+					],
+					"query": [
+						{
+							"key": "name",
+							"value": "Veloce Running Sneaker",
+							"description": "Required product title search name"
+						}
+					]
+				},
+				"description": "Gets single product details, image URLs, prices, and active offers."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Product (General Search)",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{bearer_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/next/getProduct?search=PRD-2026&brand_source_id=108",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"next",
+						"getProduct"
+					],
+					"query": [
+						{
+							"key": "search",
+							"value": "PRD-2026",
+							"description": "Searches by containing title, exact ID, or containing code"
+						},
+						{
+							"key": "brand_source_id",
+							"value": "108",
+							"description": "Optional brand source filter"
+						}
+					]
+				},
+				"description": "General product lookup endpoint matching name/id/code."
+			},
+			"response": []
+		},
+		{
+			"name": "Get Customer & Orders",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{bearer_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/next/get_customer?phoneNumber=0612345678",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"next",
+						"get_customer"
+					],
+					"query": [
+						{
+							"key": "phoneNumber",
+							"value": "0612345678",
+							"description": "Required customer phone number"
+						}
+					]
+				},
+				"description": "Returns customer details, address, list of all customer orders, line items, assigned delivery carriers, and comments-based status history."
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+				}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000/api",
+			"type": "string"
+		},
+		{
+			"key": "bearer_token",
+			"value": "your_api_token_here",
+			"type": "string"
+		}
+	]
+}
