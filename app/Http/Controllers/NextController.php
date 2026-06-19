@@ -553,9 +553,6 @@ class NextController extends Controller
                     if ($attribute) {
                         $typeTitle = $attribute->typeAttribute ? $attribute->typeAttribute->title : 'other';
                         $key = strtolower(trim($typeTitle));
-                        if (!str_ends_with($key, 's')) {
-                            $key .= 's';
-                        }
                         $attributesGrouped[$key][] = $attribute->title;
                     }
                 }
