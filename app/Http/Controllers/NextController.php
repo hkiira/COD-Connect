@@ -262,7 +262,6 @@ class NextController extends Controller
                 'images' => $images_urls,
                 'price' => $price,
                 'discount_price' => $discount_price,
-                'attributes_grouped' => $groupedAttrs,
             ];
 
             return array_merge($productData, $groupedAttrs);
@@ -344,7 +343,6 @@ class NextController extends Controller
             'price' => $price,
             'discount_price' => $discount_price,
             'offers' => $offers,
-            'attributes_grouped' => $groupedAttrs,
         ];
 
         return response()->json(array_merge($productData, $groupedAttrs));
@@ -372,8 +370,8 @@ class NextController extends Controller
         if ($search !== null && trim(strval($search)) !== '') {
             $query->where(function ($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('id', $search)
-                  ->orWhere('code', 'like', "%{$search}%");
+                    ->orWhere('id', $search)
+                    ->orWhere('code', 'like', "%{$search}%");
             });
         }
 
@@ -430,7 +428,6 @@ class NextController extends Controller
                 'price' => $price,
                 'discount_price' => $discount_price,
                 'offers' => $offers,
-                'attributes_grouped' => $groupedAttrs,
             ];
 
             return array_merge($productData, $groupedAttrs);
