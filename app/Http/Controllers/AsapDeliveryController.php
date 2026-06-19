@@ -405,7 +405,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $ordersQuery = Order::where('account_id', getAccountUser()->account_id)
             ->whereNull('shipment_id')
             ->whereNull('shipping_code')
-            ->whereIn('order_status_id', [6]);
+            ->whereIn('order_status_id', [4]);
 
         $totalOrders = $ordersQuery->count();
 
@@ -1384,7 +1384,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                             [
                                 "id" => $order->id,
                                 'meta' => $order->meta ?? ($order->shipping_code ?? $order->code),
-                                'shipping_code' => $order->shipping_code ?? $order->code,
+                                'shipping_code' => $order->shipping_code ?? $latestEvent['asap_code'],
                                 "comment" => [
                                     "id" => $id,
                                     "title" => $latestEvent['state']

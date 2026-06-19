@@ -31,31 +31,66 @@ class CustomerController extends Controller
                     });
             });
         }
-        
+
+        // Handle is_blacklisted filter (When 1, only blacklisted; When 0, only non-blacklisted)
+        if ($request->has('is_blacklisted') && $request->input('is_blacklisted') !== null && $request->input('is_blacklisted') !== '') {
+            $query->where('customers.is_blacklisted', $request->input('is_blacklisted') == 1);
+        }
+
+        // Handle has_multiple_orders filter (When 1, orders_count > 1)
+        if ($request->input('has_multiple_orders') == 1) {
+            $query->whereHas('orders', function ($q) {
+                $q->where('type', 'sale');
+            }, '>', 1);
+        }
+
+        // Handle is_loyal filter (When 1, orders_count > 5 OR lifetime value > 5000)
+        if ($request->input('is_loyal') == 1) {
+            $query->where(function ($q) {
+                $q->whereHas('orders', function ($sub) {
+                    $sub->where('type', 'sale');
+                }, '>', 5)
+                ->orWhere(function ($sub) {
+                    $sub->whereRaw('(
+                        SELECT COALESCE(SUM(order_pva.price * order_pva.quantity), 0)
+                        FROM orders
+                        JOIN order_pva ON orders.id = order_pva.order_id
+                        WHERE orders.customer_id = customers.id
+                          AND orders.type = "sale"
+                          AND orders.deleted_at IS NULL
+                    ) > 5000');
+                });
+            });
+        }
+
         // Eager load relationships and calculate aggregates efficiently
         $query->with(['phones', 'addresses.city', 'customerType', 'images'])
-              ->withCount(['orders' => function ($query) {
-                  $query->where('type', 'sale');
-              }])
-              ->with(['latestOrder' => function ($query) {
-                  $query->where('type', 'sale');
-              }])
-              ->select('customers.*')
-              ->selectSub(
-                  DB::table('orders')
-                      ->join('order_pva', 'orders.id', '=', 'order_pva.order_id')
-                      ->selectRaw('sum(order_pva.price * order_pva.quantity)')
-                      ->whereColumn('orders.customer_id', 'customers.id')
-                      ->where('orders.type', 'sale')
-                      ->whereNull('orders.deleted_at'),
-                  'lifetime_value'
-              );
+            ->withCount([
+                'orders' => function ($query) {
+                    $query->where('type', 'sale');
+                }
+            ])
+            ->with([
+                'latestOrder' => function ($query) {
+                    $query->where('type', 'sale');
+                }
+            ])
+            ->select('customers.*')
+            ->selectSub(
+                DB::table('orders')
+                    ->join('order_pva', 'orders.id', '=', 'order_pva.order_id')
+                    ->selectRaw('sum(order_pva.price * order_pva.quantity)')
+                    ->whereColumn('orders.customer_id', 'customers.id')
+                    ->where('orders.type', 'sale')
+                    ->whereNull('orders.deleted_at'),
+                'lifetime_value'
+            );
 
         $paginator = $query->paginate($perPage, ['*'], 'page', $currentPage);
 
         $formattedData = $paginator->getCollection()->map(function ($customer) {
             $primaryAddress = $customer->addresses->first();
-            
+
             return [
                 'id' => $customer->id,
                 'name' => $customer->name,
@@ -66,7 +101,7 @@ class CustomerController extends Controller
                 'primary_address' => $primaryAddress ? ($primaryAddress->title . ', ' . $primaryAddress->city->title) : null,
                 'city' => $primaryAddress ? $primaryAddress->city->title : null,
                 'images' => $customer->images,
-                'orders_count' => $customer->orders_count,
+                'orders_count' => $customer->orders->count(),
                 'lifetime_value' => (float) $customer->lifetime_value ?? 0,
                 'last_order_date' => $customer->latestOrder ? $customer->latestOrder->created_at->toIso8601String() : null,
                 'created_at' => $customer->created_at->toIso8601String(),
@@ -138,13 +173,14 @@ class CustomerController extends Controller
                 if (isset($item['addresses'])) {
                     $customer->addresses()->createMany($item['addresses']);
                 }
-                
+
                 $createdCustomers[] = $customer->load('phones', 'addresses');
             }
             return collect($createdCustomers);
         });
-        
-        if ($local == 1) return $customers;
+
+        if ($local == 1)
+            return $customers;
 
         return response()->json([
             'statut' => 1,
@@ -195,6 +231,10 @@ class CustomerController extends Controller
         $ordersPaginator = $customer->orders()
             ->with([
                 'orderStatus',
+                'brandSource.brand',
+                'brandSource.source',
+                'orderComments.comment',
+                'orderComments.accountUser',
                 'orderPvas.productVariationAttribute.product.images',
                 'orderPvas.productVariationAttribute.variationAttribute.childVariationAttributes.attribute.typeAttribute'
             ])
@@ -207,8 +247,9 @@ class CustomerController extends Controller
             $products = $order->orderPvas->map(function ($orderPva) use (&$orderTotal) {
                 $orderTotal += $orderPva->price * $orderPva->quantity;
                 $pva = $orderPva->productVariationAttribute;
-                
-                if(!$pva) return null;
+
+                if (!$pva)
+                    return null;
 
                 $attributesText = $pva->variationAttribute->childVariationAttributes->map(function ($child) {
                     return $child->attribute->code;
@@ -239,6 +280,17 @@ class CustomerController extends Controller
                 'total' => $orderTotal,
                 'date' => $order->created_at->toIso8601String(),
                 'products' => $products,
+                'brand' => $order->brandSource && $order->brandSource->brand ? $order->brandSource->brand->title : null,
+                'source' => $order->brandSource && $order->brandSource->source ? $order->brandSource->source->title : null,
+                'order_comments' => $order->orderComments->map(function ($oc) {
+                    return [
+                        'id' => $oc->id,
+                        'title' => $oc->title,
+                        'comment' => $oc->comment ? $oc->comment->title : null,
+                        'user' => $oc->accountUser ? ($oc->accountUser->first_name . ' ' . $oc->accountUser->last_name) : null,
+                        'date' => $oc->created_at->toIso8601String(),
+                    ];
+                })->values()->toArray(),
             ];
         });
 
@@ -294,7 +346,7 @@ class CustomerController extends Controller
             '*.phones' => 'sometimes|nullable|array',
             '*.phones.*.id' => 'nullable|exists:phones,id',
             '*.phones.*.title' => 'required|string',
-            
+
             '*.addresses' => 'sometimes|nullable|array',
             '*.addresses.*.id' => 'nullable|exists:addresses,id',
             '*.addresses.*.title' => 'required|string',
@@ -302,7 +354,8 @@ class CustomerController extends Controller
         ]);
 
         if ($validator->fails()) {
-             if ($isOrder) return response()->json([ 'Validation Error', $validator->errors() ]);
+            if ($isOrder)
+                return response()->json(['Validation Error', $validator->errors()]);
             return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
         }
 
@@ -351,10 +404,11 @@ class CustomerController extends Controller
                 $customer->addresses()->whereNotIn('addresses.id', $addressIds)->delete();
             }
         });
-        
+
         $updatedCustomer = $customer->fresh(['phones', 'addresses.city']);
-        
-        if ($isOrder == 1) return collect([['phones' => $updatedCustomer->phones, 'addresses' => $updatedCustomer->addresses, 'customer' => $updatedCustomer]]);
+
+        if ($isOrder == 1)
+            return collect([['phones' => $updatedCustomer->phones, 'addresses' => $updatedCustomer->addresses, 'customer' => $updatedCustomer]]);
 
         return response()->json([
             'statut' => 1,
@@ -494,7 +548,7 @@ class CustomerController extends Controller
         }
 
         // Order Calls
-        $orderCalls = \App\Models\OrderCall::whereHas('order', function($query) use ($customer) {
+        $orderCalls = \App\Models\OrderCall::whereHas('order', function ($query) use ($customer) {
             $query->where('customer_id', $customer->id);
         })->get();
 
@@ -515,7 +569,7 @@ class CustomerController extends Controller
         }
 
         // Sort by date descending
-        $sortedTimeline = $timeline->filter(function($item) {
+        $sortedTimeline = $timeline->filter(function ($item) {
             return !is_null($item['date']);
         })->sortByDesc('date')->values()->map(function ($item) {
             $item['date'] = $item['date']->toIso8601String();
@@ -577,5 +631,50 @@ class CustomerController extends Controller
             DB::rollBack();
             return response()->json(['statut' => 0, 'message' => 'Merge failed: ' . $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Get global count of customers in each segment.
+     */
+    public function counts(Request $request)
+    {
+        $accountId = getAccountUser()->account_id;
+
+        $all = Customer::where('account_id', $accountId)->count();
+
+        $multiple_orders = Customer::where('account_id', $accountId)
+            ->whereHas('orders', function ($q) {
+                $q->where('type', 'sale');
+            }, '>', 1)
+            ->count();
+
+        $loyal = Customer::where('account_id', $accountId)
+            ->where(function ($q) {
+                $q->whereHas('orders', function ($sub) {
+                    $sub->where('type', 'sale');
+                }, '>', 5)
+                ->orWhere(function ($sub) {
+                    $sub->whereRaw('(
+                        SELECT COALESCE(SUM(order_pva.price * order_pva.quantity), 0)
+                        FROM orders
+                        JOIN order_pva ON orders.id = order_pva.order_id
+                        WHERE orders.customer_id = customers.id
+                          AND orders.type = "sale"
+                          AND orders.deleted_at IS NULL
+                    ) > 5000');
+                });
+            })
+            ->count();
+
+        $blacklisted = Customer::where('account_id', $accountId)
+            ->where('is_blacklisted', true)
+            ->count();
+
+        return response()->json([
+            'all' => $all,
+            'multiple_orders' => $multiple_orders,
+            'loyal' => $loyal,
+            'blacklisted' => $blacklisted
+        ]);
     }
 }

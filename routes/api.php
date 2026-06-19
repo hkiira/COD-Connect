@@ -253,6 +253,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::post('customers/{id}/log-call', [CustomerController::class, 'logCall']);
     Route::post('customers/{id}/toggle-blacklist', [CustomerController::class, 'toggleBlacklist']);
     Route::get('customers/{id}/timeline', [CustomerController::class, 'timeline']);
+    Route::get('customers/counts', [CustomerController::class, 'counts']);
 
     Route::apiResource('customers', CustomerController::class);
     Route::resource('payment_types', PaymentTypeController::class);
