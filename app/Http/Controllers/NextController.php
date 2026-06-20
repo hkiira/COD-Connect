@@ -13,6 +13,7 @@ use App\Models\ProductVariationAttribute;
 use App\Models\BrandSource;
 use App\Models\Offer;
 use App\Models\Warehouse;
+use App\Models\Account;
 use App\Http\Controllers\OrderController;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -94,7 +95,7 @@ class NextController extends Controller
                         return is_numeric($val);
                     })
                     ->map(function ($val) {
-                        return (int)$val;
+                        return (int) $val;
                     })
                     ->values()
                     ->toArray();
