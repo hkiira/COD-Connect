@@ -36,6 +36,7 @@ class NextController extends Controller
             'products' => 'required|array|min:1',
             'products.*.id' => 'required|exists:products,id',
             'products.*.quantity' => 'required|numeric|min:1',
+            'products.*.attributes' => 'nullable|array',
             'final_price' => 'nullable|numeric',
             'brand_source_id' => 'required|exists:brand_source,id',
         ]);
@@ -86,17 +87,31 @@ class NextController extends Controller
             $totalQuantity += $qty;
 
             // Resolve variation attribute
-            $pva = ProductVariationAttribute::where('product_id', $product->id)->first();
-            if (!$pva) {
-                return response()->json([
-                    'statut' => 0,
-                    'data' => ["products" => ["Product ID {$item['id']} does not have any variation attributes defined."]]
-                ], 422);
+            $attributes = [];
+            if (isset($item['attributes']) && is_array($item['attributes']) && !empty($item['attributes'])) {
+                $attributes = collect($item['attributes'])
+                    ->filter(function ($val) {
+                        return is_numeric($val);
+                    })
+                    ->map(function ($val) {
+                        return (int)$val;
+                    })
+                    ->values()
+                    ->toArray();
             }
 
-            $attributes = [];
-            if ($pva->variationAttribute) {
-                $attributes = $pva->variationAttribute->childVariationAttributes->pluck('attribute_id')->toArray();
+            if (empty($attributes)) {
+                $pva = ProductVariationAttribute::where('product_id', $product->id)->first();
+                if (!$pva) {
+                    return response()->json([
+                        'statut' => 0,
+                        'data' => ["products" => ["Product ID {$item['id']} does not have any variation attributes defined."]]
+                    ], 422);
+                }
+
+                if ($pva->variationAttribute) {
+                    $attributes = $pva->variationAttribute->childVariationAttributes->pluck('attribute_id')->toArray();
+                }
             }
 
             $productsPayload[] = [
