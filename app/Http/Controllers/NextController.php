@@ -553,14 +553,17 @@ class NextController extends Controller
                     if ($attribute) {
                         $typeTitle = $attribute->typeAttribute ? $attribute->typeAttribute->title : 'other';
                         $key = strtolower(trim($typeTitle));
-                        $attributesGrouped[$key][] = $attribute->title;
+                        $attributesGrouped[$key][$attribute->id] = [
+                            'id' => $attribute->id,
+                            'title' => $attribute->title,
+                        ];
                     }
                 }
             }
         }
 
         foreach ($attributesGrouped as $key => $values) {
-            $attributesGrouped[$key] = array_values(array_unique($values));
+            $attributesGrouped[$key] = array_values($values);
         }
 
         return $attributesGrouped;
