@@ -47,11 +47,13 @@ class OrderController extends Controller
         $sortBy = $request['sort'][0]['column'] ?? 'created_at';
         $sortOrder = $request['sort'][0]['order'] ?? 'desc';
 
-        $ordersQuery = Order::where('account_id', getAccountUser()->account_id)->withAvg(['reviewAnswers as review_score' => function ($query) {
+        $ordersQuery = Order::where('account_id', getAccountUser()->account_id)->withAvg([
+            'reviewAnswers as review_score' => function ($query) {
                 $query->whereHas('question', function ($q) {
                     $q->where('type', 'stars');
                 });
-            }], 'answer_value');
+            }
+        ], 'answer_value');
 
         // Check if reviews filtering is requested
         $hasReviews = false;
@@ -116,10 +118,10 @@ class OrderController extends Controller
                     ->orWhereHas('customer', function ($q) use ($search) {
                         $q->where('name', 'like', "%$search%")
                             ->orWhereHas('phones', function ($q2) use ($search) {
-                                $q2->where('title', 'like', "%$search%") ;
+                                $q2->where('title', 'like', "%$search%");
                             })
                             ->orWhereHas('addresses', function ($q3) use ($search) {
-                                $q3->where('title', 'like', "%$search%") ;
+                                $q3->where('title', 'like', "%$search%");
                             });
                     });
             });
@@ -148,9 +150,14 @@ class OrderController extends Controller
         $total = $ordersQuery->count();
         $orders = $ordersQuery
             ->with([
-                'parentOrder.orderStatus', 'parentOrder.pickup', 'parentOrder.shipment.shipmentType',
-                'childOrders.orderStatus', 'childOrders.pickup', 'childOrders.shipment.shipmentType',
-                'pickup', 'shipment.shipmentType',
+                'parentOrder.orderStatus',
+                'parentOrder.pickup',
+                'parentOrder.shipment.shipmentType',
+                'childOrders.orderStatus',
+                'childOrders.pickup',
+                'childOrders.shipment.shipmentType',
+                'pickup',
+                'shipment.shipmentType',
                 'review.answers.question'
             ])
             ->skip($filter['page'] * $filter['limit'])
@@ -189,13 +196,13 @@ class OrderController extends Controller
                 }
                 return $childData;
             });
-            
+
             // Calculate score dynamically from account_user_order_status and order_comment tables
             if (!function_exists('calculateTotalOrderScore')) {
                 require_once app_path('Helpers/OrderScoreHelper.php');
             }
             $orderData['score'] = calculateTotalOrderScore($data->id);
-            
+
             if (!$orderData['shipping_code'])
                 $orderData['shipping_code'] = "";
             $orderData['can_change'] = in_array($data->order_status_id, [1, 2, 3, 4, 5]) ? true : false;
@@ -235,7 +242,7 @@ class OrderController extends Controller
                 $orderData['customer'] = ['id' => null, 'name' => null, 'first_name' => '', 'last_name' => '', 'images' => [], 'phones' => [], 'address' => []];
             }
             $totalOrder = 0;
-            $orderData['products'] = ($data->order_status_id==2 ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
+            $orderData['products'] = ($data->order_status_id == 2 ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
                 $totalOrder += $actfOrderPva->price * $actfOrderPva->quantity;
                 $attributes = $actfOrderPva->ProductVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
                     return $child->attribute->code;
@@ -283,8 +290,8 @@ class OrderController extends Controller
                 $sourceArr['images'] = $source->images->sortByDesc('created_at')->values();
             }
             $orderData['source'] = $sourceArr;
-            $orderData['review_score'] = isset($data->review_score) ? (float)round($data->review_score, 2) : null;
-            
+            $orderData['review_score'] = isset($data->review_score) ? (float) round($data->review_score, 2) : null;
+
             // Format reviews
             $orderData['reviews'] = [];
             if ($data->review && $data->review->answers) {
@@ -303,8 +310,8 @@ class OrderController extends Controller
         return [
             'statut' => 1,
             'data' => $datas,
-            'per_page' => (int)($filter['limit'] ?? 10),
-            'current_page' => (int)($filter['page'] ?? 0) + 1,
+            'per_page' => (int) ($filter['limit'] ?? 10),
+            'current_page' => (int) ($filter['page'] ?? 0) + 1,
             'total' => $total,
             'score' => 30
         ];
@@ -372,23 +379,23 @@ class OrderController extends Controller
                 $query->orWhere('title', 'like', $pattern);
             }
         })
-        ->withCount([
-            'orders as orders_count' => function ($query) {
-                $query->where('account_id', getAccountUser()->account_id);
-            }
-        ])
-        ->get(['id', 'title']);
+            ->withCount([
+                'orders as orders_count' => function ($query) {
+                    $query->where('account_id', getAccountUser()->account_id);
+                }
+            ])
+            ->get(['id', 'title']);
 
         // Map results back to original phone numbers by comparing last 8 digits
         foreach ($phoneCounts as $phoneModel) {
             // Extract digits from database phone and get last 8
             $dbPhoneDigits = preg_replace('/\D/', '', $phoneModel->title);
             $dbLast8 = substr($dbPhoneDigits, -8);
-            
+
             // If this matches one of our searched phones, add the count
             if (isset($phoneLast8Map[$dbLast8])) {
                 $originalPhone = $phoneLast8Map[$dbLast8];
-                $result[$originalPhone] += (int)$phoneModel->orders_count;
+                $result[$originalPhone] += (int) $phoneModel->orders_count;
             }
         }
 
@@ -647,7 +654,7 @@ class OrderController extends Controller
                 });
                 return $productData;
             });
-            $data['products']['inactive'] =  HelperFunctions::getPagination($products, $request['products']['inactive']['pagination']['per_page'], $request['products']['inactive']['pagination']['current_page']);
+            $data['products']['inactive'] = HelperFunctions::getPagination($products, $request['products']['inactive']['pagination']['per_page'], $request['products']['inactive']['pagination']['current_page']);
         }
 
         return response()->json([
@@ -825,7 +832,7 @@ class OrderController extends Controller
 
                 foreach (($orderData['products'] ?? []) as $productData) {
                     $selectedAttributes = collect($productData['attributes'] ?? [])->map(function ($id) {
-                        return (int)$id;
+                        return (int) $id;
                     })->sort()->values()->all();
 
                     $product = Product::with('productVariationAttributes.variationAttribute.childVariationAttributes')
@@ -845,7 +852,7 @@ class OrderController extends Controller
                         $pvaAttributes = $pva->variationAttribute->childVariationAttributes
                             ->pluck('attribute_id')
                             ->map(function ($id) {
-                                return (int)$id;
+                                return (int) $id;
                             })
                             ->sort()
                             ->values()
@@ -890,7 +897,7 @@ class OrderController extends Controller
                                 $message = isset($payload[1]) ? json_encode($payload[1]) : 'Customer update failed.';
                                 throw new \Exception($message);
                             }
-                        } 
+                        }
                     } elseif (isset($request['customer']['phones'])) {
                         $request['customer']['customer_type_id'] = $request['customer']['customer_type_id'] ?? 1;
                         $request['customer']['name'] = (isset($request['customer']['name']) && trim($request['customer']['name']) !== '') ? $request['customer']['name'] : 'client';
@@ -1075,14 +1082,16 @@ class OrderController extends Controller
                                 'Nouvelle commande créée'
                             );
 
-                            $order->comments()->syncWithoutDetaching([44 => [
-                                'title' => 'Sync with Google Sheets',
-                                'order_status_id' => 4,
-                                'account_user_id' => $accountUser->id,
-                                'score' => 0,
-                                'created_at' => now(),
-                                'updated_at' => now(),
-                            ]]);
+                            $order->comments()->syncWithoutDetaching([
+                                44 => [
+                                    'title' => 'Sync with Google Sheets',
+                                    'order_status_id' => 4,
+                                    'account_user_id' => $accountUser->id,
+                                    'score' => 0,
+                                    'created_at' => now(),
+                                    'updated_at' => now(),
+                                ]
+                            ]);
 
                             $order->sync = true;
                             $order->save();
@@ -1240,9 +1249,9 @@ class OrderController extends Controller
                 : [];
             $data['orderInfo']['warehouse'] = $order->warehouse;
             $data['orderInfo']['payment_type'] = $order->paymentType ? $order->paymentType->only('id', 'title') : null;
-            
+
             $data['orderInfo']['pickup'] = $order->pickup ? $order->pickup->only('id', 'code', 'title') : null;
-            
+
             if ($order->shipment) {
                 $data['orderInfo']['shipment'] = $order->shipment->only('id', 'code', 'title');
                 $data['orderInfo']['shipment']['type'] = $order->shipment->shipmentType ? $order->shipment->shipmentType->only('id', 'code', 'title') : null;
@@ -1252,7 +1261,7 @@ class OrderController extends Controller
             } else {
                 $data['orderInfo']['shipment'] = null;
             }
-            
+
             $data['orderInfo']['payment_method'] = $order->paymentMethod ? $order->paymentMethod->only('id', 'title') : null;
             $data['orderInfo']['source'] = ["id" => $order->brandSource['id'], "title" => $order->brandSource->source['title']];
             $data['orderInfo']['brand'] = $order->brandSource->brand->only('id', 'title');
@@ -1291,13 +1300,13 @@ class OrderController extends Controller
                             ],
                         ];
                         if ($question->type === 'stars') {
-                            $starAnswers[] = (float)$answer->answer_value;
+                            $starAnswers[] = (float) $answer->answer_value;
                         }
                     }
                 }
             }
             $data['orderInfo']['reviews'] = $reviewsList;
-            $data['orderInfo']['review_score'] = count($starAnswers) > 0 ? (float)round(array_sum($starAnswers) / count($starAnswers), 2) : null;
+            $data['orderInfo']['review_score'] = count($starAnswers) > 0 ? (float) round(array_sum($starAnswers) / count($starAnswers), 2) : null;
         }
         if (isset($request['products']['active'])) {
             // Récupérer les produits du fournisseur avec leurs attributs de variation et types d'attributs
@@ -1339,7 +1348,7 @@ class OrderController extends Controller
                             "attribute_type" => $childVariationAttribute->attribute->typeAttribute->title,
                             "title" => $childVariationAttribute->attribute->title
                         ];
-                    }  
+                    }
                 })->filter();
                 // Récupérer les variations d'attributs pour chaque produit
                 $orderDataProducts[$orderPva->id]['attributes'] = $orderPva->productVariationAttribute->product->productVariationAttributes->flatMap(function ($productVariationAttribute) {
@@ -1360,7 +1369,7 @@ class OrderController extends Controller
                 $orderDataProduct["productVariations"] = collect($orderDataProduct["productVariations"])->values();
                 return $orderDataProduct;
             })->values();
-            $data['products']['active'] =  HelperFunctions::getPagination(collect($productDatas), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+            $data['products']['active'] = HelperFunctions::getPagination(collect($productDatas), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
 
         if (isset($request['comments']['active'])) {
@@ -1382,7 +1391,7 @@ class OrderController extends Controller
                 ];
             });
             $filters = HelperFunctions::filterColumns($request['comments']['active'], ['title']);
-            $data['comments']['active'] =  HelperFunctions::getPagination(collect($comments), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+            $data['comments']['active'] = HelperFunctions::getPagination(collect($comments), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
         return response()->json([
             'statut' => 1,
@@ -1404,14 +1413,14 @@ class OrderController extends Controller
             ]);
         }
         $comment = Comment::find($request['id']);
-        
+
         // Calculate comment score based on timing, considering postponed periods
         if (!function_exists('calculateDayBasedScore')) {
             require_once app_path('Helpers/OrderScoreHelper.php');
         }
-        
+
         $commentScore = calculateDayBasedScore($order->created_at, now(), $order->id);
-        $orderStatut=$comment->statut==2?$order->order_status_id:($comment->new_statut?$comment->new_statut:$comment->parentComment->current_statut);
+        $orderStatut = $comment->statut == 2 ? $order->order_status_id : ($comment->new_statut ? $comment->new_statut : $comment->parentComment->current_statut);
         $comment->orders()->attach($order->id, [
             'title' => ($request['title']) ? $request['title'] : $comment->title,
             'order_status_id' => $orderStatut,
@@ -1420,7 +1429,7 @@ class OrderController extends Controller
             'created_at' => now(),
             'updated_at' => now()
         ]);
-        
+
         // Update order status with score if status is changing
         /*if ($comment->is_change) {
             $statusScore = calculateDayBasedScore($order->created_at, now(), $order->id);
@@ -1432,11 +1441,11 @@ class OrderController extends Controller
                 'updated_at' => now()
             ]);
         }*/
-        
+
         // Recalculate total order score
         // Note: No longer updating orders table score since we removed the column
         // Score is now calculated on-demand from account_user_order_status and order_comment tables
-        
+
         return ['statut' => $orderStatut, 'is_change' => 0];
     }
 
@@ -1491,9 +1500,11 @@ class OrderController extends Controller
                         'discount' => $requests->input("{$index}.discount"),
                     ]; // Get ID from request
                     $accountUsers = Account::find($account)->accountUsers->pluck('id')->toArray();
-                    $productAttributes = Product::with(['productVariationAttributes.variationAttribute.childVariationAttributes' => function ($vattributes) use ($dataProduct) {
-                        $vattributes->whereIn('attribute_id', $dataProduct['attributes']);
-                    }])->where(['id' => $value])->whereIn("account_user_id", $accountUsers)->first();
+                    $productAttributes = Product::with([
+                        'productVariationAttributes.variationAttribute.childVariationAttributes' => function ($vattributes) use ($dataProduct) {
+                            $vattributes->whereIn('attribute_id', $dataProduct['attributes']);
+                        }
+                    ])->where(['id' => $value])->whereIn("account_user_id", $accountUsers)->first();
                     $productAttributes->productVariationAttributes->map(function ($pva) use (&$productsToActive, $dataProduct, $index) {
                         $childs = $pva->variationAttribute->childVariationAttributes->map(function ($child) use (&$productsToActive) {
                             return $child->attribute_id;
@@ -1587,7 +1598,7 @@ class OrderController extends Controller
                 if ($comment['statut'] == 2) {
                     $request['shipping_code'] = null;
                     $request['pickup_id'] = null;
-                }elseif($comment['statut'] == 3){
+                } elseif ($comment['statut'] == 3) {
                     $request['pickup_id'] = null;
                 }
             }
@@ -1614,99 +1625,99 @@ class OrderController extends Controller
             } else {
                 $request['order_status_id'] = $order->order_status_id;
             }
-            $order_only = collect($request)->only('warehouse_id', 'discount',  'order_status_id',  'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id','shipping_code','note','meta','carrier_price','sync');
-            
+            $order_only = collect($request)->only('warehouse_id', 'discount', 'order_status_id', 'city_id', 'brand_source_id', 'payment_type_id', 'payment_method_id', 'pickup_id', 'real_carrier_price', 'shipment_id', 'shipping_code', 'note', 'meta', 'carrier_price', 'sync');
+
             $order->update($order_only->all());
             if ($comment !== null) {
                 $order->activePvas()->update(['order_status_id' => $comment['statut']]);
             }
-            
+
             // Note: The legacy logic that created "PR" or "CH" specific orders has been removed
             // since returns and exchanges are now handled by createExchange()
-            
+
             // Note: The legacy logic that created "PR" or "CH" specific orders has been removed
             // since returns and exchanges are now handled by createExchange()
-            
+
             if (isset($request['productsToInactive'])) {
-                    foreach ($request['productsToInactive'] as $pvaData) {
-                        $orderPva = OrderPva::find($pvaData);
-                        $orderPva->update(['order_status_id' => 2]);
+                foreach ($request['productsToInactive'] as $pvaData) {
+                    $orderPva = OrderPva::find($pvaData);
+                    $orderPva->update(['order_status_id' => 2]);
+                }
+            }
+            if (isset($request['productsToActive'])) {
+                foreach ($productsToActive as $pvaData) {
+                    $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
+                    $initial_price = Product::find($productVariationAttribute->product_id)->price->first()->price;
+                    $productPrice = isset($pvaData['price']) ? $pvaData['price'] : $initial_price;
+                    $discount = isset($pvaData['discount']) ? $pvaData['discount'] : 0;
+                    $realPrice = (Product::find($productVariationAttribute->product_id)->orderPvas) ? Product::find($productVariationAttribute->product_id)->orderPvas->first()->price : 0;
+                    $productVariationAttribute->orders()->attach(
+                        $order->id,
+                        [
+                            'quantity' => $pvaData['quantity'],
+                            'price' => $productPrice,
+                            'realprice' => $realPrice,
+                            'initial_price' => $initial_price,
+                            'discount' => $discount,
+                            'order_status_id' => $order->order_status_id,
+                            'account_user_id' => getAccountUser()->id,
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ]
+                    );
+                    if (isset($pvaData['offerables']) && count($pvaData['offerables']) > 0) {
+                        VariationOfferableController::store(new Request(['order_id' => $order->id, 'pva' => $productVariationAttribute, 'variations' => $pvaData['offerables']]));
                     }
                 }
-                if (isset($request['productsToActive'])) {
-                    foreach ($productsToActive as $pvaData) {
-                        $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
-                        $initial_price = Product::find($productVariationAttribute->product_id)->price->first()->price;
-                        $productPrice = isset($pvaData['price']) ? $pvaData['price'] : $initial_price;
-                        $discount = isset($pvaData['discount']) ? $pvaData['discount'] : 0;
-                        $realPrice = (Product::find($productVariationAttribute->product_id)->orderPvas) ? Product::find($productVariationAttribute->product_id)->orderPvas->first()->price : 0;
+            }
+            if (isset($request['productsToUpdate'])) {
+                foreach ($request['productsToUpdate'] as $pvaData) {
+                    $orderPva = OrderPva::find($pvaData['id']);
+                    if ($pvaData['quantity'] >= $orderPva->quantity) {
+                        $orderPva->update([
+                            'quantity' => $pvaData['quantity'],
+                            'price' => isset($pvaData['price']) ? $pvaData['price'] : $orderPva->price,
+                            'discount' => isset($pvaData['discount']) ? $pvaData['discount'] : $orderPva->discount,
+                            'account_user_id' => getAccountUser()->id,
+                        ]);
+                    } else {
+                        $CanceledQty = $orderPva->quantity - $pvaData['quantity'];
+                        $orderPva->update([
+                            'quantity' => $pvaData['quantity'],
+                            'price' => isset($pvaData['price']) ? $pvaData['price'] : $orderPva->price,
+                            'realprice' => isset($pvaData['realprice']) ? $pvaData['realprice'] : $orderPva->realprice,
+                            'discount' => isset($pvaData['discount']) ? $pvaData['discount'] : $orderPva->discount,
+                            'account_user_id' => getAccountUser()->id,
+                        ]);
                         $productVariationAttribute->orders()->attach(
                             $order->id,
                             [
-                                'quantity' => $pvaData['quantity'],
-                                'price' => $productPrice,
-                                'realprice' => $realPrice,
-                                'initial_price' => $initial_price,
-                                'discount' => $discount,
-                                'order_status_id' => $order->order_status_id,
+                                'quantity' => $CanceledQty,
+                                'price' => $orderPva->price,
+                                'realprice' => $orderPva->realprice,
+                                'initial_price' => $orderPva->initial_price,
+                                'discount' => $orderPva->discount,
+                                'order_status_id' => 2,
                                 'account_user_id' => getAccountUser()->id,
                                 'created_at' => now(),
                                 'updated_at' => now()
                             ]
                         );
-                        if (isset($pvaData['offerables']) && count($pvaData['offerables']) > 0) {
-                            VariationOfferableController::store(new Request(['order_id' => $order->id, 'pva' => $productVariationAttribute, 'variations' => $pvaData['offerables']]));
-                        }
+                    }
+                    if (isset($pvaData['offerables']) && count($pvaData['offerables']) > 0) {
+                        VariationOfferableController::store(new Request(['order_pva' => $orderPva, 'variations' => $pvaData['offerables']]));
                     }
                 }
-                if (isset($request['productsToUpdate'])) {
-                    foreach ($request['productsToUpdate'] as $pvaData) {
-                        $orderPva = OrderPva::find($pvaData['id']);
-                        if ($pvaData['quantity'] >= $orderPva->quantity) {
-                            $orderPva->update([
-                                'quantity' => $pvaData['quantity'],
-                                'price' => isset($pvaData['price']) ? $pvaData['price'] : $orderPva->price,
-                                'discount' => isset($pvaData['discount']) ? $pvaData['discount'] : $orderPva->discount,
-                                'account_user_id' => getAccountUser()->id,
-                            ]);
-                        } else {
-                            $CanceledQty = $orderPva->quantity - $pvaData['quantity'];
-                            $orderPva->update([
-                                'quantity' => $pvaData['quantity'],
-                                'price' => isset($pvaData['price']) ? $pvaData['price'] : $orderPva->price,
-                                'realprice' => isset($pvaData['realprice']) ? $pvaData['realprice'] : $orderPva->realprice,
-                                'discount' => isset($pvaData['discount']) ? $pvaData['discount'] : $orderPva->discount,
-                                'account_user_id' => getAccountUser()->id,
-                            ]);
-                            $productVariationAttribute->orders()->attach(
-                                $order->id,
-                                [
-                                    'quantity' => $CanceledQty,
-                                    'price' => $orderPva->price,
-                                    'realprice' => $orderPva->realprice,
-                                    'initial_price' => $orderPva->initial_price,
-                                    'discount' => $orderPva->discount,
-                                    'order_status_id' => 2,
-                                    'account_user_id' => getAccountUser()->id,
-                                    'created_at' => now(),
-                                    'updated_at' => now()
-                                ]
-                            );
-                        }
-                        if (isset($pvaData['offerables']) && count($pvaData['offerables']) > 0) {
-                            VariationOfferableController::store(new Request(['order_pva' => $orderPva, 'variations' => $pvaData['offerables']]));
-                        }
-                    }
-                }
-                // Note: No longer updating order score in orders table since we removed the column
-                // Score is now calculated on-demand from account_user_order_status and order_comment tables
-                
-                CompensationableController::edit($order->id);
-                if ($local == 1)
-                    return $order->activeOrderPvas;
-                if($local == 2)
-                    return $order;
+            }
+            // Note: No longer updating order score in orders table since we removed the column
+            // Score is now calculated on-demand from account_user_order_status and order_comment tables
+
+            CompensationableController::edit($order->id);
+            if ($local == 1)
+                return $order->activeOrderPvas;
+            if ($local == 2)
                 return $order;
+            return $order;
         });
         if ($local == 1 || $local == 2)
             return $orders;
@@ -1784,7 +1795,7 @@ class OrderController extends Controller
                 // 1. Create the main "return" order. This acts as the master record for the transaction.
                 // We set order_status_id to 6 (In Transit) because the returned items are moving back to the warehouse.
                 $baseCode = $originalOrder ? $originalOrder->code : DefaultCodeController::getAccountCode('return', $accountId);
-                
+
                 $returnOrder = Order::create([
                     'account_id' => $accountId,
                     'customer_id' => $request->customer_id,
@@ -1803,7 +1814,8 @@ class OrderController extends Controller
                 // 2. Add the items being returned to this new order.
                 foreach ($request->items_to_return as $item) {
                     $originalPva = OrderPva::find($item['source_order_pva_id']);
-                    if (!$originalPva) continue;
+                    if (!$originalPva)
+                        continue;
 
                     OrderPva::create([
                         'order_id' => $returnOrder->id,
@@ -1851,7 +1863,7 @@ class OrderController extends Controller
                             'account_user_id' => $accountUser->id,
                         ]);
                     }
-                    
+
                     // 4. Update the original order status to "Delivered" (7) because an exchange implies the courier 
                     // successfully reached the customer to make the swap.
                     if ($originalOrder && $originalOrder->order_status_id != 7) {
@@ -1955,7 +1967,7 @@ class OrderController extends Controller
 
                 // 3. Link the new order to the original one for tracking.
                 $newOrder->update(['order_id' => $inTransitOrder->id]);
-                
+
                 // 4. Add notes for historical tracking.
                 $inTransitOrder->update(['note' => "Delivery swapped to order {$newOrder->code}."]);
                 $newOrder->update(['note' => "Took over delivery from canceled order {$inTransitOrder->code}."]);

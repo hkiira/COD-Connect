@@ -351,6 +351,8 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
 
     // NextController API routes
     Route::post('next/create_order', [NextController::class, 'create_order']);
+    Route::post('next/update_order', [NextController::class, 'update_order']);
+    Route::post('next/cancel_order', [NextController::class, 'cancel_order']);
     Route::get('next/get_products', [NextController::class, 'get_products']);
     Route::get('next/get_product', [NextController::class, 'get_product']);
     Route::get('next/getProduct', [NextController::class, 'getProduct']);
