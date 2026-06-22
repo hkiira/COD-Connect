@@ -1207,7 +1207,7 @@ class ProductController extends Controller
                 });
                 return $pvaData;
             });
-            $data['pva']['active'] = HelperFunctions::getPagination($pvasData, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+            $data['pva']['active'] = HelperFunctions::getPagination($pvasData, 100, 0);
         }
         if (isset($request['pva']['inactive'])) {
         }
