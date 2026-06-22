@@ -37,7 +37,7 @@ class ProductController extends Controller
         $searchIds = [];
         $account = getAccountUser()->account_id;
         $request = collect($request->query())->toArray();
-        
+
         if (
             isset($request['brands']) && array_filter($request['brands'], function ($value) {
                 return $value !== null;
@@ -255,34 +255,34 @@ class ProductController extends Controller
 
         $products = [
             'statut' => 1,
-            'data'   => $productsCollection->forPage($currentPage, $perPage)->values(),
-            'meta'   => [
-                'total'        => $totalRows,
-                'per_page'     => $perPage,
+            'data' => $productsCollection->forPage($currentPage, $perPage)->values(),
+            'meta' => [
+                'total' => $totalRows,
+                'per_page' => $perPage,
                 'current_page' => $currentPage,
             ],
         ];
-        
+
         // Get all PVA IDs from products to batch load related data
         $pvaIds = collect($products['data'])->flatMap(function ($product) {
             return $product->activePvas->pluck('id');
         })->unique()->toArray();
-        
+
         // Batch load all required data for PVAs
         $orderPvas = !empty($pvaIds) ? OrderPva::whereIn('product_variation_attribute_id', $pvaIds)
             ->whereIn('order_status_id', [1, 4, 5, 8, 9])
             ->get()
             ->groupBy('product_variation_attribute_id') : collect();
-        
+
         $supplierOrderPvas = !empty($pvaIds) ? SupplierOrderPva::whereIn('product_variation_attribute_id', $pvaIds)
             ->where('statut', 1)
             ->get()
             ->groupBy('product_variation_attribute_id') : collect();
-        
+
         $warehousePvas = !empty($pvaIds) ? WarehousePva::whereIn('product_variation_attribute_id', $pvaIds)
             ->get()
             ->groupBy('product_variation_attribute_id') : collect();
-        
+
         $products['data'] = collect($products['data'])->map(function ($product) use ($account, $orderPvas, $supplierOrderPvas, $warehousePvas) {
             $productData = [
                 'id' => $product->id,
@@ -296,15 +296,15 @@ class ProductController extends Controller
                     $pvaOrderPvas = $orderPvas->get($pva->id, collect());
                     $pvaSupplierOrderPvas = $supplierOrderPvas->get($pva->id, collect());
                     $pvaWarehousePvas = $warehousePvas->get($pva->id, collect());
-                    
+
                     $deliveryOrders = $pvaOrderPvas->whereIn('order_status_id', [5, 8, 9]);
                     $pendingOrders = $pvaOrderPvas->whereIn('order_status_id', [1, 4, 5]);
-                    
+
                     $delivery = $deliveryOrders->sum('quantity');
                     $pending = $pendingOrders->sum('quantity');
                     $ordered = $pvaSupplierOrderPvas->sum('quantity');
                     $realStock = $pvaWarehousePvas->sum('quantity');
-                    
+
                     return [
                         'id' => $pva->id,
                         'variation_attributes_id' => $pva->variationAttribute->id ?? null,
@@ -595,7 +595,7 @@ class ProductController extends Controller
                 'string',
                 $validateAvailableImage("App\Models\ProductVariationAttribute"),
             ],
-            
+
             '*.imageVariations.*.attribute.*' => [
                 'string',
                 $existsInUsers(Attribute::class),
@@ -699,7 +699,7 @@ class ProductController extends Controller
                             $productVariation->warehouses()->syncWithoutDetaching([$warehouse->id => ['quantity' => 0, 'created_at' => now(), 'updated_at' => now()]]);
                         }
                     }
-                    
+
                     if (isset($request['suppliers'])) {
                         foreach ($request['suppliers'] as $supplierData) {
                             $supplier = Supplier::find($supplierData['id']);
@@ -818,32 +818,32 @@ class ProductController extends Controller
             : collect();
 
         $productData = [
-            'id'         => $product->id,
-            'title'      => $product->title,
-            'statut'     => $product->statut,
-            'price'      => $product->price->first()->price,
-            'image'      => collect($product->principalImage->only('id', 'photo', 'photo_dir')),
-            'reference'  => $product->reference,
+            'id' => $product->id,
+            'title' => $product->title,
+            'statut' => $product->statut,
+            'price' => $product->price->first()->price,
+            'image' => collect($product->principalImage->only('id', 'photo', 'photo_dir')),
+            'reference' => $product->reference,
             'created_at' => $product->created_at,
             'depot_attributes' => $product->activePvas->map(function ($pva) use ($orderPvas, $supplierOrderPvas, $warehousePvas) {
-                $pvaOrderPvas        = $orderPvas->get($pva->id, collect());
+                $pvaOrderPvas = $orderPvas->get($pva->id, collect());
                 $pvaSupplierOrderPvas = $supplierOrderPvas->get($pva->id, collect());
-                $pvaWarehousePvas    = $warehousePvas->get($pva->id, collect());
+                $pvaWarehousePvas = $warehousePvas->get($pva->id, collect());
 
                 $deliveryOrders = $pvaOrderPvas->whereIn('order_status_id', [5, 8, 9]);
-                $pendingOrders  = $pvaOrderPvas->whereIn('order_status_id', [1, 4, 5]);
+                $pendingOrders = $pvaOrderPvas->whereIn('order_status_id', [1, 4, 5]);
 
                 $realStock = $pvaWarehousePvas->sum('quantity');
 
                 return [
-                    'id'                    => $pva->id,
+                    'id' => $pva->id,
                     'variation_attributes_id' => $pva->variationAttribute->id ?? null,
-                    'delivery'              => $deliveryOrders->sum('quantity'),
-                    'real'                  => $realStock,
-                    'available'             => $realStock - $pendingOrders->sum('quantity'),
-                    'images'                => $pva->images,
-                    'ordered'               => $pvaSupplierOrderPvas->sum('quantity'),
-                    'attribute'             => isset($pva->variationAttribute->childVariationAttributes)
+                    'delivery' => $deliveryOrders->sum('quantity'),
+                    'real' => $realStock,
+                    'available' => $realStock - $pendingOrders->sum('quantity'),
+                    'images' => $pva->images,
+                    'ordered' => $pvaSupplierOrderPvas->sum('quantity'),
+                    'attribute' => isset($pva->variationAttribute->childVariationAttributes)
                         ? implode(',', $pva->variationAttribute->childVariationAttributes->map(function ($childV) {
                             return $childV->attribute->title;
                         })->toArray())
@@ -860,12 +860,12 @@ class ProductController extends Controller
                     return $activeWarehouse->only('id', 'title');
                 });
             })->unique(),
-            'suppliers'    => $product->activePvas->flatMap(function ($pva) {
+            'suppliers' => $product->activePvas->flatMap(function ($pva) {
                 return $pva->activeSuppliers;
             })->unique(),
-            'images'       => $product->images,
+            'images' => $product->images,
             'product_type' => $product->productType->only('id', 'code', 'title'),
-            'offers'       => $product->offers,
+            'offers' => $product->offers,
         ];
 
         return response()->json(['statut' => 1, 'data' => $productData]);
@@ -1194,22 +1194,23 @@ class ProductController extends Controller
         }
 
         if (isset($request['pva']['active'])) {
-                $filters = $normalize($request['pva']['active'], ['id', 'title']);
-                $query = ProductVariationAttribute::with('variationAttribute.childVariationAttributes.attribute')
-                    ->whereIn('id', $pvas);
-                $pvasData = $applySearchAndSort($query, $filters, ['id', 'code'])->get()->map(function ($pva) {
-                    $pvaData = $pva->only('id', 'code');
-                    $pvaData['attributes'] = $pva->variationAttribute->childVariationAttributes->map(function ($childVariation) {
-                        $attribute['id'] = $childVariation->id;
-                        $attribute['type'] = $childVariation->attribute->TypeAttribute->title;
-                        $attribute['value'] = $childVariation->attribute->title;
-                        return $attribute;
-                    });
-                    return $pvaData;
+            $filters = $normalize($request['pva']['active'], ['id', 'title']);
+            $query = ProductVariationAttribute::with('variationAttribute.childVariationAttributes.attribute')
+                ->whereIn('id', $pvas);
+            $pvasData = $applySearchAndSort($query, $filters, ['id', 'code'])->get()->map(function ($pva) {
+                $pvaData = $pva->only('id', 'code');
+                $pvaData['attributes'] = $pva->variationAttribute->childVariationAttributes->map(function ($childVariation) {
+                    $attribute['id'] = $childVariation->id;
+                    $attribute['type'] = $childVariation->attribute->TypeAttribute->title;
+                    $attribute['value'] = $childVariation->attribute->title;
+                    return $attribute;
                 });
-                $data['pva']['active'] = HelperFunctions::getPagination($pvasData, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+                return $pvaData;
+            });
+            $data['pva']['active'] = HelperFunctions::getPagination($pvasData, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
-        if (isset($request['pva']['inactive'])) {}
+        if (isset($request['pva']['inactive'])) {
+        }
         if (isset($request['variations']['active'])) {
             $filters = $normalize($request['variations']['active'], ['id', 'title']);
             $selectedAttributes = $product->activePvas->flatMap(function ($pva) {
@@ -1307,7 +1308,7 @@ class ProductController extends Controller
                     $id = $requests->input("{$index}.id"); // Get ID from request
                     $titleModel = Product::where('title', $value)->whereIn('account_user_id', $users)->first();
                     $idModel = Product::where('id', $id)->whereIn('account_user_id', $users)->first(); // Find model by ID
-
+        
                     // Check if a country with the same title exists but with a different ID
                     if ($titleModel && $idModel && $titleModel->id !== $idModel->id) {
                         $fail("exist"); // Validation fails with custom message
@@ -1326,7 +1327,7 @@ class ProductController extends Controller
                     $id = $requests->input("{$index}.id"); // Get ID from request
                     $titleModel = Product::where('title', $value)->whereIn('account_user_id', $users)->first();
                     $idModel = Product::where('id', $id)->whereIn('account_user_id', $users)->first(); // Find model by ID
-
+        
                     // Check if a country with the same title exists but with a different ID
                     if ($titleModel && $idModel && $titleModel->id !== $idModel->id) {
                         $fail("exist"); // Validation fails with custom message
@@ -1523,8 +1524,8 @@ class ProductController extends Controller
                     }
                 }
             }
-            foreach($product->productVariationAttributes as $key => $pvaToInactive) {
-                    $pvaToInactive->update(['statut' => 0]);
+            foreach ($product->productVariationAttributes as $key => $pvaToInactive) {
+                $pvaToInactive->update(['statut' => 0]);
             }
             $variationAttributes = VariationAttributesController::store(new Request(array_values($attributeByTypes)), 1, 0);
             foreach ($variationAttributes as $key => $variationAttributetId) {
@@ -1570,18 +1571,18 @@ class ProductController extends Controller
 
             if (isset($request['imageVariations'])) {
                 foreach ($request['imageVariations'] as $key => $imageVariation) {
-                    if(isset($imageVariation['image'])){
-                        $pvaId= $product->productVariationAttributes->map( function($pva) use ($imageVariation){
+                    if (isset($imageVariation['image'])) {
+                        $pvaId = $product->productVariationAttributes->map(function ($pva) use ($imageVariation) {
                             if (!$pva->variationAttribute) {
                                 return null;
                             }
-                            $variationAttributes= $pva->variationAttribute->childVariationAttributes->pluck(['attribute_id'])->toArray();
-                            if($variationAttributes==$imageVariation['attributes']){
+                            $variationAttributes = $pva->variationAttribute->childVariationAttributes->pluck(['attribute_id'])->toArray();
+                            if ($variationAttributes == $imageVariation['attributes']) {
                                 return $pva->id;
                             }
-                            })->filter()->values()->first();
-                        if($pvaId){
-                            $productVariationAttribute=productVariationAttribute::find($pvaId);
+                        })->filter()->values()->first();
+                        if ($pvaId) {
+                            $productVariationAttribute = productVariationAttribute::find($pvaId);
                             if (!$productVariationAttribute) {
                                 continue;
                             }
@@ -1601,14 +1602,14 @@ class ProductController extends Controller
             }
             if (isset($request['suppliersToActive'])) {
                 foreach ($request['suppliersToActive'] as $supplierData) {
-                    if (!isset($supplierData['id'],$supplierData['price'])) {
+                    if (!isset($supplierData['id'], $supplierData['price'])) {
                         continue;
                     }
                     $supplier = Supplier::find($supplierData['id']);
                     if (!$supplier) {
                         continue;
                     }
-                    $productVariations = ProductVariationAttribute::where(['product_id' => $product->id])->get()->map(function ($productVariation) use ($supplierData,$supplier) {
+                    $productVariations = ProductVariationAttribute::where(['product_id' => $product->id])->get()->map(function ($productVariation) use ($supplierData, $supplier) {
                         if ($productVariation) {
                             $productVariation->suppliers()->syncWithoutDetaching([$supplier->id => ["account_id" => getAccountUser()->account_id, 'price' => $supplierData['price'], 'created_at' => now(), 'updated_at' => now(), 'statut' => 1]]);
                             if ($supplier->productVariationAttributes->where('id', $productVariation->id)->first()) {
@@ -1631,7 +1632,7 @@ class ProductController extends Controller
                             }
                         }
                     })->filter();
-                    
+
                 }
             }
             $images = [];
@@ -1671,7 +1672,7 @@ class ProductController extends Controller
                     }
                 }
             }
-            $product=Product::find($product->id);
+            $product = Product::find($product->id);
             return $product;
         })->filter()->values();
 
@@ -1736,8 +1737,8 @@ class ProductController extends Controller
                 },
             ],
             'variations.*.newImages' => 'nullable|array',
-            'variations.*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
-            'variations.*.newPrincipalImage' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'variations.*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
+            'variations.*.newPrincipalImage' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ]);
 
         if ($validator->fails()) {
