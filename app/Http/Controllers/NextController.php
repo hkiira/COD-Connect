@@ -236,7 +236,8 @@ class NextController extends Controller
             $accountId = $brandSource ? $brandSource->account_id : null;
         }
         if ($accountId) {
-            $query->where('account_id', $accountId);
+            $accountUsers = \App\Models\AccountUser::where('account_id', $accountId)->pluck('id')->toArray();
+            $query->whereIn('account_user_id', $accountUsers);
         }
 
         if ($brandSourceId) {
@@ -316,7 +317,8 @@ class NextController extends Controller
 
         $query = Product::where('title', 'like', "%{$name}%")->where('statut', 1);
         if ($accountId) {
-            $query->where('account_id', $accountId);
+            $accountUsers = \App\Models\AccountUser::where('account_id', $accountId)->pluck('id')->toArray();
+            $query->whereIn('account_user_id', $accountUsers);
         }
 
         $product = $query->with([
@@ -402,7 +404,8 @@ class NextController extends Controller
             $accountId = $brandSource ? $brandSource->account_id : null;
         }
         if ($accountId) {
-            $query->where('account_id', $accountId);
+            $accountUsers = \App\Models\AccountUser::where('account_id', $accountId)->pluck('id')->toArray();
+            $query->whereIn('account_user_id', $accountUsers);
         }
 
         if ($brandSourceId) {
