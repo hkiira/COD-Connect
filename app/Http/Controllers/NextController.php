@@ -247,7 +247,14 @@ class NextController extends Controller
         }
 
         if ($searchName !== null && trim(strval($searchName)) !== '') {
-            $query->where('title', 'like', "%{$searchName}%");
+            $keywords = array_filter(explode(' ', trim(strval($searchName))));
+            foreach ($keywords as $keyword) {
+                $query->where(function ($q) use ($keyword) {
+                    $q->where('title', 'like', "%{$keyword}%")
+                      ->orWhere('code', 'like', "%{$keyword}%")
+                      ->orWhere('id', $keyword);
+                });
+            }
         }
 
         $products = $query->with([
@@ -315,7 +322,17 @@ class NextController extends Controller
         $accountUser = getAccountUser();
         $accountId = $accountUser ? $accountUser->account_id : null;
 
-        $query = Product::where('title', 'like', "%{$name}%")->where('statut', 1);
+        $query = Product::where('statut', 1);
+        if ($name !== null && trim(strval($name)) !== '') {
+            $keywords = array_filter(explode(' ', trim(strval($name))));
+            foreach ($keywords as $keyword) {
+                $query->where(function ($q) use ($keyword) {
+                    $q->where('title', 'like', "%{$keyword}%")
+                      ->orWhere('code', 'like', "%{$keyword}%")
+                      ->orWhere('id', $keyword);
+                });
+            }
+        }
         if ($accountId) {
             $accountUsers = \App\Models\AccountUser::where('account_id', $accountId)->pluck('id')->toArray();
             $query->whereIn('account_user_id', $accountUsers);
@@ -415,11 +432,14 @@ class NextController extends Controller
         }
 
         if ($search !== null && trim(strval($search)) !== '') {
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                    ->orWhere('id', $search)
-                    ->orWhere('code', 'like', "%{$search}%");
-            });
+            $keywords = array_filter(explode(' ', trim(strval($search))));
+            foreach ($keywords as $keyword) {
+                $query->where(function ($q) use ($keyword) {
+                    $q->where('title', 'like', "%{$keyword}%")
+                      ->orWhere('code', 'like', "%{$keyword}%")
+                      ->orWhere('id', $keyword);
+                });
+            }
         }
 
         $products = $query->with([
