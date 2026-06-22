@@ -270,10 +270,6 @@ class NextController extends Controller
             $principalImg = $product->principalImage->first() ?? $product->images->first();
             $principal_image_url = $principalImg ? asset($principalImg->photo_dir . $principalImg->photo) : null;
 
-            $images_urls = $product->images->map(function ($img) {
-                return asset($img->photo_dir . $img->photo);
-            })->toArray();
-
             $price = floatval($product->price->first()?->price ?? $product->sellingprice ?? 0);
 
             // Compute discount price from active offers
@@ -294,7 +290,6 @@ class NextController extends Controller
                 'name' => $product->title,
                 'code' => $product->code,
                 'principal_image' => $principal_image_url,
-                'images' => $images_urls,
                 'price' => $price,
                 'discount_price' => $discount_price,
             ];
@@ -355,10 +350,6 @@ class NextController extends Controller
         $principalImg = $product->principalImage->first() ?? $product->images->first();
         $principal_image_url = $principalImg ? asset($principalImg->photo_dir . $principalImg->photo) : null;
 
-        $images_urls = $product->images->map(function ($img) {
-            return asset($img->photo_dir . $img->photo);
-        })->toArray();
-
         $price = floatval($product->price->first()?->price ?? $product->sellingprice ?? 0);
 
         // Compute discount price from active offers
@@ -392,7 +383,6 @@ class NextController extends Controller
             'name' => $product->title,
             'code' => $product->code,
             'principal_image' => $principal_image_url,
-            'images' => $images_urls,
             'price' => $price,
             'discount_price' => $discount_price,
             'offers' => $offers,
@@ -455,10 +445,6 @@ class NextController extends Controller
             $principalImg = $product->principalImage->first() ?? $product->images->first();
             $principal_image_url = $principalImg ? asset($principalImg->photo_dir . $principalImg->photo) : null;
 
-            $images_urls = $product->images->map(function ($img) {
-                return asset($img->photo_dir . $img->photo);
-            })->toArray();
-
             $price = floatval($product->price->first()?->price ?? $product->sellingprice ?? 0);
 
             // Compute discount price from active offers
@@ -492,7 +478,6 @@ class NextController extends Controller
                 'name' => $product->title,
                 'code' => $product->code,
                 'principal_image' => $principal_image_url,
-                'images' => $images_urls,
                 'price' => $price,
                 'discount_price' => $discount_price,
                 'offers' => $offers,
