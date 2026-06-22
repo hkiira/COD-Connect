@@ -248,11 +248,13 @@ class NextController extends Controller
 
         if ($searchName !== null && trim(strval($searchName)) !== '') {
             $keywords = array_filter(explode(' ', trim(strval($searchName))));
-            foreach ($keywords as $keyword) {
-                $query->where(function ($q) use ($keyword) {
-                    $q->where('title', 'like', "%{$keyword}%")
-                      ->orWhere('code', 'like', "%{$keyword}%")
-                      ->orWhere('id', $keyword);
+            if (!empty($keywords)) {
+                $query->where(function ($q) use ($keywords) {
+                    foreach ($keywords as $keyword) {
+                        $q->orWhere('title', 'like', "%{$keyword}%")
+                          ->orWhere('code', 'like', "%{$keyword}%")
+                          ->orWhere('id', $keyword);
+                    }
                 });
             }
         }
@@ -320,11 +322,13 @@ class NextController extends Controller
         $query = Product::where('statut', 1);
         if ($name !== null && trim(strval($name)) !== '') {
             $keywords = array_filter(explode(' ', trim(strval($name))));
-            foreach ($keywords as $keyword) {
-                $query->where(function ($q) use ($keyword) {
-                    $q->where('title', 'like', "%{$keyword}%")
-                      ->orWhere('code', 'like', "%{$keyword}%")
-                      ->orWhere('id', $keyword);
+            if (!empty($keywords)) {
+                $query->where(function ($q) use ($keywords) {
+                    foreach ($keywords as $keyword) {
+                        $q->orWhere('title', 'like', "%{$keyword}%")
+                          ->orWhere('code', 'like', "%{$keyword}%")
+                          ->orWhere('id', $keyword);
+                    }
                 });
             }
         }
@@ -423,11 +427,13 @@ class NextController extends Controller
 
         if ($search !== null && trim(strval($search)) !== '') {
             $keywords = array_filter(explode(' ', trim(strval($search))));
-            foreach ($keywords as $keyword) {
-                $query->where(function ($q) use ($keyword) {
-                    $q->where('title', 'like', "%{$keyword}%")
-                      ->orWhere('code', 'like', "%{$keyword}%")
-                      ->orWhere('id', $keyword);
+            if (!empty($keywords)) {
+                $query->where(function ($q) use ($keywords) {
+                    foreach ($keywords as $keyword) {
+                        $q->orWhere('title', 'like', "%{$keyword}%")
+                          ->orWhere('code', 'like', "%{$keyword}%")
+                          ->orWhere('id', $keyword);
+                    }
                 });
             }
         }
