@@ -244,7 +244,8 @@ class NextController extends Controller
             'principalImage',
             'images',
             'offers',
-            'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+            'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
+            'activePvas.images'
         ])->get();
 
         $formattedProducts = $products->map(function ($product) {
@@ -307,7 +308,8 @@ class NextController extends Controller
                 'principalImage',
                 'images',
                 'offers',
-                'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+                'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
+                'activePvas.images'
             ])
             ->first();
 
@@ -396,7 +398,8 @@ class NextController extends Controller
             'principalImage',
             'images',
             'offers',
-            'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute'
+            'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
+            'activePvas.images'
         ])->get();
 
         $formattedProducts = $products->map(function ($product) {
@@ -884,16 +887,29 @@ class NextController extends Controller
         $attributesGrouped = [];
 
         foreach ($product->activePvas as $pva) {
+            $pvaImageUrl = null;
+            if ($pva->images && $pva->images->isNotEmpty()) {
+                $lastImage = $pva->images->last();
+                $pvaImageUrl = asset($lastImage->photo_dir . $lastImage->photo);
+            }
+
             if ($pva->variationAttribute) {
                 foreach ($pva->variationAttribute->childVariationAttributes as $childVa) {
                     $attribute = $childVa->attribute;
                     if ($attribute) {
                         $typeTitle = $attribute->typeAttribute ? $attribute->typeAttribute->title : 'other';
                         $key = strtolower(trim($typeTitle));
-                        $attributesGrouped[$key][$attribute->id] = [
-                            'id' => $attribute->id,
-                            'title' => $attribute->title,
-                        ];
+
+                        if (!isset($attributesGrouped[$key][$attribute->id])) {
+                            $attributesGrouped[$key][$attribute->id] = [
+                                'id' => $attribute->id,
+                                'title' => $attribute->title,
+                            ];
+                        }
+
+                        if ($key === 'colors' && $pvaImageUrl) {
+                            $attributesGrouped[$key][$attribute->id]['image'] = $pvaImageUrl;
+                        }
                     }
                 }
             }
