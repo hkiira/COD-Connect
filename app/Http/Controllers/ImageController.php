@@ -62,7 +62,7 @@ class ImageController extends Controller
     {
         $validator = Validator::make($requests->except('_method'), [
             '*.images' => 'required|array|min:1',
-            '*.images.*.image' => 'required|image|mimes:jpeg,png,jpg,gif,svg|max:204800',
+            '*.images.*.image' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:204800',
             '*.images.*.as_principal' => 'nullable|boolean',
             '*.image_type_id' => 'required|exists:image_types,id',
             '*.title' => 'required',

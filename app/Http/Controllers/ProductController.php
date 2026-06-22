@@ -609,8 +609,8 @@ class ProductController extends Controller
                 $validateAvailableImage("App\Models\Product"),
             ],
             '*.statut' => 'required',
-            '*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
-            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            '*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
+            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ]);
         if ($validator->fails()) {
             return response()->json([
@@ -1356,8 +1356,8 @@ class ProductController extends Controller
                 'string',
                 $existsInAccount(Image::class),
             ],
-            '*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
-            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            '*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
+            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ]);
         if ($validator->fails()) {
             return response()->json([
