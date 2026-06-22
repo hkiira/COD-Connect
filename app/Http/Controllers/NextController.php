@@ -229,6 +229,16 @@ class NextController extends Controller
 
         $query = Product::query()->where('statut', 1);
 
+        $accountUser = getAccountUser();
+        $accountId = $accountUser ? $accountUser->account_id : null;
+        if (!$accountId && $brandSourceId) {
+            $brandSource = \App\Models\BrandSource::find($brandSourceId);
+            $accountId = $brandSource ? $brandSource->account_id : null;
+        }
+        if ($accountId) {
+            $query->where('account_id', $accountId);
+        }
+
         if ($brandSourceId) {
             $query->whereHas('brandSources', function ($q) use ($brandSourceId) {
                 $q->where('brand_source.id', $brandSourceId);
@@ -301,9 +311,15 @@ class NextController extends Controller
             return response()->json(['statut' => 0, 'message' => 'Product name parameter is required.'], 400);
         }
 
-        $product = Product::where('title', 'like', "%{$name}%")
-            ->where('statut', 1)
-            ->with([
+        $accountUser = getAccountUser();
+        $accountId = $accountUser ? $accountUser->account_id : null;
+
+        $query = Product::where('title', 'like', "%{$name}%")->where('statut', 1);
+        if ($accountId) {
+            $query->where('account_id', $accountId);
+        }
+
+        $product = $query->with([
                 'price',
                 'principalImage',
                 'images',
@@ -378,6 +394,16 @@ class NextController extends Controller
         $brandSourceId = $request->input('brand_source_id');
 
         $query = Product::query()->where('statut', 1);
+
+        $accountUser = getAccountUser();
+        $accountId = $accountUser ? $accountUser->account_id : null;
+        if (!$accountId && $brandSourceId) {
+            $brandSource = \App\Models\BrandSource::find($brandSourceId);
+            $accountId = $brandSource ? $brandSource->account_id : null;
+        }
+        if ($accountId) {
+            $query->where('account_id', $accountId);
+        }
 
         if ($brandSourceId) {
             $query->whereHas('brandSources', function ($q) use ($brandSourceId) {
