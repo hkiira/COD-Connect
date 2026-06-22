@@ -886,6 +886,9 @@ class NextController extends Controller
     {
         $attributesGrouped = [];
 
+        $principalImg = $product->principalImage->first() ?? $product->images->first();
+        $productImageUrl = $principalImg ? asset($principalImg->photo_dir . $principalImg->photo) : null;
+
         foreach ($product->activePvas as $pva) {
             $pvaImageUrl = null;
             if ($pva->images && $pva->images->isNotEmpty()) {
@@ -907,8 +910,12 @@ class NextController extends Controller
                             ];
                         }
 
-                        if ($key === 'colors' && $pvaImageUrl) {
-                            $attributesGrouped[$key][$attribute->id]['image'] = $pvaImageUrl;
+                        if ($key === 'colors') {
+                            if ($pvaImageUrl) {
+                                $attributesGrouped[$key][$attribute->id]['image'] = $pvaImageUrl;
+                            } elseif (!isset($attributesGrouped[$key][$attribute->id]['image'])) {
+                                $attributesGrouped[$key][$attribute->id]['image'] = $productImageUrl;
+                            }
                         }
                     }
                 }
