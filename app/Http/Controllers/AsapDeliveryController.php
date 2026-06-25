@@ -22,6 +22,7 @@ use CloudflareBypass\Model\UAMOptions;
 class AsapDeliveryController extends Controller implements FromCollection, WithHeadings
 {
     use \Maatwebsite\Excel\Concerns\Exportable;
+    use \App\Traits\ScrapesAsapHistory;
     public static $url = 'https://api.asapdelivery.ma';
 
     public function rest(Request $request, $entity, $id = null, $type = null)
@@ -40,6 +41,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 return $this->login();
             case 'pickup':
                 return $this->pickup($id);
+            case 'asap-history':
+                return $this->asapHistory($id, $type);
             case 'sync_invoices':
                 return $this->syncInvoices();
             case 'get_order':
@@ -58,6 +61,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 return $this->returns();
             case 'return_orders':
                 return $this->returnOrders($id);
+            case 'bls':
+                return $this->bls($request->input('id'), $request->input('colis'));
             case 'create_pickup':
                 return $this->createPickup();
             case 'print_pickup':
@@ -568,29 +573,106 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
     public function historyOrder($orderId)
     {
         $sessionId = $this->login();
-        $curl = curl_init();
-        $body = [
-            'nonce' => '86396d6332ae8331c3cebecb40c538db',
-            "id" => $orderId, //hna les ids dial les colis en attente
-            'action' => 'showcolihistory',
-        ];
-        $body = http_build_query($body);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        $data = [
-            "url" => "https://app.asapdelivery.ma/inc/colis.php",
-            "customHeaders" => "true"
-        ];
-        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array(
-            "Content-Type: application/x-www-form-urlencoded",
-            "Accept: */*",
-            'cookie: ' . $sessionId,
-        ));
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
-        return $uploadResponse;
+        return $this->scrapeColisHistoryData($orderId, $sessionId);
+    }
+
+    public function asapHistory($startId, $endId)
+    {
+        $log = \Illuminate\Support\Facades\Log::build([
+            'driver' => 'single',
+            'path' => storage_path('logs/asap_scrape.log'),
+        ]);
+        $sessionId = $this->login();
+        if (!$sessionId) {
+            $log->error("API Test: Failed to login");
+            return response()->json(['error' => 'Failed to login']);
+        }
+
+        $results = [];
+        for ($id = $startId; $id <= $endId; $id++) {
+            try {
+                $data = $this->scrapeColisHistoryData($id, $sessionId);
+
+                if (isset($data['error'])) {
+                    $log->error("API Test (Colis ID {$id}): " . $data['error']);
+                    $results[$id] = 'Error: ' . $data['error'];
+                    continue;
+                }
+
+                if (empty($data['meta'])) {
+                    $log->warning("API Test (Colis ID {$id}): Empty meta data, ignoring.");
+                    $results[$id] = 'Empty or missing';
+                    continue;
+                }
+
+                if (empty($data['meta']['Code']) && empty($data['meta']['Destinataire'])) {
+                    \App\Models\AsapColisEmptyRecord::updateOrCreate(['colis_id' => $id]);
+                    $log->info("API Test (Colis ID {$id}): Logged empty Code and Destinataire in asap_colis_empty_records.");
+                    continue;
+                }
+
+                // Save Meta
+                $meta = \App\Models\AsapColisMeta::updateOrCreate(
+                    ['colis_id' => $id],
+                    [
+                        'code' => $data['meta']['Code'] ?? null,
+                        'destinataire' => $data['meta']['Destinataire'] ?? null,
+                        'telephone' => $data['meta']['Téléphone'] ?? null,
+                        'ville' => $data['meta']['Ville'] ?? null,
+                        'adresse' => $data['meta']['Adresse'] ?? null,
+                    ]
+                );
+
+                // Save State History
+                if (isset($data['state_history']) && is_array($data['state_history'])) {
+                    foreach ($data['state_history'] as $sh) {
+                        $meta->histories()->firstOrCreate([
+                            'date' => $sh['date'] ?? null,
+                            'etat' => $sh['etat'] ?? null,
+                            'date_reporte' => $sh['date_reporte'] ?? null,
+                            'description' => $sh['description'] ?? null,
+                            'utilisateur' => $sh['utilisateur'] ?? null,
+                        ]);
+                    }
+                }
+
+                // Save Address History
+                if (isset($data['address_history']) && is_array($data['address_history'])) {
+                    foreach ($data['address_history'] as $ah) {
+                        $meta->addressHistories()->firstOrCreate([
+                            'date' => $ah['date'] ?? null,
+                            'client' => $ah['client'] ?? null,
+                            'adresse' => $ah['adresse'] ?? null,
+                            'telephone' => $ah['telephone'] ?? null,
+                        ]);
+                    }
+                }
+
+                // Save Call History
+                if (isset($data['call_history']) && is_array($data['call_history'])) {
+                    foreach ($data['call_history'] as $ch) {
+                        $meta->callHistories()->firstOrCreate([
+                            'date' => $ch['date'] ?? null,
+                            'action' => $ch['action'] ?? null,
+                            'utilisateur' => $ch['utilisateur'] ?? null,
+                        ]);
+                    }
+                }
+
+                $results[$id] = [
+                    'status' => 'Success',
+                    'meta' => $meta->toArray()
+                ];
+            } catch (\Exception $e) {
+                $log->error("API Test (Colis ID {$id}): Exception Caught! " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
+                $results[$id] = 'Exception: ' . $e->getMessage();
+            }
+        }
+
+        return response()->json([
+            'status' => 'Completed',
+            'results' => $results
+        ]);
     }
     //hadi makhedamach 7ta nchof blanha
     public function createPickup()
@@ -942,45 +1024,7 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
 
         return $headers;
     }
-    public function login()
-    {
-        $curl = curl_init();
-        $body = [
-            'username' => 'styemen.ma@gmail.com',
-            'password' => 'azerty',
-        ];
-        $body = http_build_query($body);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        $data = [
-            "url" => "https://app.asapdelivery.ma/login.php",
-            "disableRedirection" => "true"
-        ];
-        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array(
-            "Content-Type: application/x-www-form-urlencoded",
-            "Accept: */*",
-        ));
-        curl_setopt($curl, CURLOPT_HEADER, true); // Get headers
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLINFO_HEADER_OUT, true);
-        curl_setopt($curl, CURLOPT_FOLLOWLOCATION, false);      // Include headers in output
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $response = \App\Services\ScrapeDoService::executeCurl($curl, $data);
-        curl_close($curl);
 
-        // Use the header size to split headers from body
-        $headerSize = strpos($response, "\r\n\r\n");
-        $headerText = ($headerSize !== false) ? substr($response, 0, $headerSize) : $response;
-
-        // Parse Set-Cookie for PHPSESSID
-        preg_match('/PHPSESSID=([^;]+)/i', $headerText, $matches);
-        if (isset($matches[1])) {
-            return "PHPSESSID=" . trim($matches[1]);
-        }
-
-        return null;
-    }
     public function orders($statusValue)
     {
 
@@ -1492,6 +1536,92 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             'message' => 'Returns synchronized successfully.',
         ];
     }
+    public function bls($id, $colis)
+    {
+        $sessionId = $this->login();
+        $curl = curl_init();
+        $body = [
+            "type" => "BR",
+            "id" => $id,
+            "colis" => $colis,
+            "keyword" => "",
+            "client" => "",
+            "worker" => "",
+            "dlm" => "",
+            "city" => "",
+            "fstock" => "",
+            "datestart" => "",
+            "dateend" => "",
+            "action" => "loadblscolisadded"
+        ];
+        $body = http_build_query($body);
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_HEADER, false);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
+
+        $data = [
+            "url" => "https://app.asapdelivery.ma/inc/bls.php",
+            "customHeaders" => "true"
+        ];
+        curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array(
+            "Content-Type: application/x-www-form-urlencoded",
+            "Accept: */*",
+            'cookie: ' . $sessionId,
+        ));
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+        $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
+
+        // Create a new DOMDocument and load the HTML.
+        $dom = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        @$dom->loadHTML($uploadResponse);
+        libxml_clear_errors();
+
+        // Use DOMXPath to query the document.
+        $xpath = new \DOMXPath($dom);
+
+        // Get all rows except the header row.
+        $rows = $xpath->query('//table/tr[not(contains(@class, "lx-first-tr"))]');
+
+        $data = [];
+
+        foreach ($rows as $row) {
+            $cells = $row->getElementsByTagName('td');
+            // Ensure the row has the expected number of cells.
+            if ($cells->length >= 6) {
+                $code = $row->getAttribute('data-code');
+                $phone = $row->getAttribute('data-phone');
+                $fullname = $row->getAttribute('data-fullname');
+                $address = $row->getAttribute('data-address');
+                $cityAttr = $row->getAttribute('data-city');
+
+                // Extract data from cells
+                $deleteLink = $cells->item(0)->getElementsByTagName('a')->item(0);
+                $colisId = $deleteLink ? $deleteLink->getAttribute('data-id') : null;
+
+                $city = trim($cells->item(2)->textContent);
+                $price = trim($cells->item(3)->textContent);
+                $state = trim($cells->item(4)->textContent);
+                $dateUpdate = trim($cells->item(5)->textContent);
+
+                $data[] = [
+                    'id' => $colisId,
+                    'code' => $code,
+                    'phone' => $phone,
+                    'fullname' => $fullname,
+                    'address' => $address,
+                    'city_attr' => $cityAttr,
+                    'city' => $city,
+                    'price' => $price,
+                    'state' => $state,
+                    'date_update' => $dateUpdate,
+                ];
+            }
+        }
+        return $data;
+    }
+
     public function headings(): array
     {
         return [

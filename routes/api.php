@@ -357,6 +357,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('next/get_product', [NextController::class, 'get_product']);
     Route::get('next/getProduct', [NextController::class, 'getProduct']);
     Route::get('next/get_customer', [NextController::class, 'get_customer']);
+    Route::get('asap/asap-history/{start}/{end}', [AsapDeliveryController::class, 'asapHistory']);
 
     // Order Management
     // Route::post('/speedafw/orders/create', [SpeedafwController::class, 'createOrder']);
