@@ -616,6 +616,8 @@ class NextController extends Controller
             'products.*.id' => 'required_with:products|exists:products,id',
             'products.*.quantity' => 'required_with:products|numeric|min:1',
             'products.*.attributes' => 'nullable|array',
+            'products.*.attributes.size_id' => 'nullable|exists:attributes,id',
+            'products.*.attributes.color_id' => 'nullable|exists:attributes,id',
             'final_price' => 'nullable|numeric',
             'brand_source_id' => 'nullable|exists:brand_source,id',
             'discount' => 'nullable|numeric',
