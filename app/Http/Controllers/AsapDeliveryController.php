@@ -69,6 +69,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 return $this->printPickup($id);
             case 'orders':
                 return $this->orders($id);
+            case 'raw_html':
+                return $this->rawHtml($id);
             case 'order_history':
                 return $this->historyOrder($id);
             case 'create_order':
@@ -591,78 +593,15 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         $results = [];
         for ($id = $startId; $id <= $endId; $id++) {
             try {
-                $data = $this->scrapeColisHistoryData($id, $sessionId);
-
-                if (isset($data['error'])) {
-                    $log->error("API Test (Colis ID {$id}): " . $data['error']);
-                    $results[$id] = 'Error: ' . $data['error'];
-                    continue;
+                $res = $this->processColisHistory($id, $sessionId, $log);
+                if ($res['status'] === 'success') {
+                    $results[$id] = [
+                        'status' => 'Success',
+                        'meta' => $res['meta']->toArray()
+                    ];
+                } else {
+                    $results[$id] = $res['message'] ?? $res['status'];
                 }
-
-                if (empty($data['meta'])) {
-                    $log->warning("API Test (Colis ID {$id}): Empty meta data, ignoring.");
-                    $results[$id] = 'Empty or missing';
-                    continue;
-                }
-
-                if (empty($data['meta']['Code']) && empty($data['meta']['Destinataire'])) {
-                    \App\Models\AsapColisEmptyRecord::updateOrCreate(['colis_id' => $id]);
-                    $log->info("API Test (Colis ID {$id}): Logged empty Code and Destinataire in asap_colis_empty_records.");
-                    continue;
-                }
-
-                // Save Meta
-                $meta = \App\Models\AsapColisMeta::updateOrCreate(
-                    ['colis_id' => $id],
-                    [
-                        'code' => $data['meta']['Code'] ?? null,
-                        'destinataire' => $data['meta']['Destinataire'] ?? null,
-                        'telephone' => $data['meta']['Téléphone'] ?? null,
-                        'ville' => $data['meta']['Ville'] ?? null,
-                        'adresse' => $data['meta']['Adresse'] ?? null,
-                    ]
-                );
-
-                // Save State History
-                if (isset($data['state_history']) && is_array($data['state_history'])) {
-                    foreach ($data['state_history'] as $sh) {
-                        $meta->histories()->firstOrCreate([
-                            'date' => $sh['date'] ?? null,
-                            'etat' => $sh['etat'] ?? null,
-                            'date_reporte' => $sh['date_reporte'] ?? null,
-                            'description' => $sh['description'] ?? null,
-                            'utilisateur' => $sh['utilisateur'] ?? null,
-                        ]);
-                    }
-                }
-
-                // Save Address History
-                if (isset($data['address_history']) && is_array($data['address_history'])) {
-                    foreach ($data['address_history'] as $ah) {
-                        $meta->addressHistories()->firstOrCreate([
-                            'date' => $ah['date'] ?? null,
-                            'client' => $ah['client'] ?? null,
-                            'adresse' => $ah['adresse'] ?? null,
-                            'telephone' => $ah['telephone'] ?? null,
-                        ]);
-                    }
-                }
-
-                // Save Call History
-                if (isset($data['call_history']) && is_array($data['call_history'])) {
-                    foreach ($data['call_history'] as $ch) {
-                        $meta->callHistories()->firstOrCreate([
-                            'date' => $ch['date'] ?? null,
-                            'action' => $ch['action'] ?? null,
-                            'utilisateur' => $ch['utilisateur'] ?? null,
-                        ]);
-                    }
-                }
-
-                $results[$id] = [
-                    'status' => 'Success',
-                    'meta' => $meta->toArray()
-                ];
             } catch (\Exception $e) {
                 $log->error("API Test (Colis ID {$id}): Exception Caught! " . $e->getMessage() . " in " . $e->getFile() . " on line " . $e->getLine());
                 $results[$id] = 'Exception: ' . $e->getMessage();
@@ -674,6 +613,19 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             'results' => $results
         ]);
     }
+
+    public function rawHtml($id)
+    {
+        $sessionId = $this->login();
+        if (!$sessionId) {
+            return response()->json(['error' => 'Failed to login'], 500);
+        }
+
+        $html = $this->fetchRawColisHistoryHtml($id, $sessionId);
+
+        return response($html)->header('Content-Type', 'text/html');
+    }
+
     //hadi makhedamach 7ta nchof blanha
     public function createPickup()
     {

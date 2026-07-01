@@ -1587,11 +1587,13 @@ class OrderController extends Controller
                     $phones = collect($customerUpdate->first()['phones'])->pluck('id');
                     $order->phones()->attach($phones);
                 }
-                $commentData = [
-                    'id' => $order->comments->first()->id,
-                    'title' => "changement d'information du client",
-                ];
-                $comment = OrderController::changeStatus(new Request($commentData), $order);
+                if ($order->comments->first()) {
+                    $commentData = [
+                        'id' => $order->comments->first()->id,
+                        'title' => "changement d'information du client",
+                    ];
+                    $comment = OrderController::changeStatus(new Request($commentData), $order);
+                }
             }
             if (isset($request['comment'])) {
                 $comment = OrderController::changeStatus(new Request(collect($request['comment'])->toArray()), $order);
@@ -1604,20 +1606,27 @@ class OrderController extends Controller
             }
             //vérifier si le dépôt est changé
             if (isset($request['warehouse_id']) && $request['warehouse_id'] !== $order->warehouse_id) {
-                $commentData = [
-                    'id' => $order->comments->first()->id,
-                    'title' => "changement du dépôt principale",
-                ];
-                $comment = OrderController::changeStatus(new Request($commentData), $order);
+                if ($order->comments->first()) {
+                    $commentData = [
+                        'id' => $order->comments->first()->id,
+                        'title' => "changement du dépôt principale",
+                    ];
+                    $comment = OrderController::changeStatus(new Request($commentData), $order);
+                }
             }
             //verifier si y a un changement au niveau des produits avant l'envoi
             if ((isset($request['productsToUpdate']) && isset($request['productsToActive']) && isset($request['productsToInactive'])) && in_array($order->order_status_id, [1, 4])) {
-                $commentUpdate = Comment::where(['current_statut' => $order->order_status_id])->first()->childComments->where('is_change', 3)->first();
-                $commentData = [
-                    'id' => $commentUpdate->id,
-                    'title' => $commentUpdate->title,
-                ];
-                $comment = OrderController::changeStatus(new Request($commentData), $order);
+                $commentParent = Comment::where(['current_statut' => $order->order_status_id])->first();
+                if ($commentParent) {
+                    $commentUpdate = $commentParent->childComments->where('is_change', 3)->first();
+                    if ($commentUpdate) {
+                        $commentData = [
+                            'id' => $commentUpdate->id,
+                            'title' => $commentUpdate->title,
+                        ];
+                        $comment = OrderController::changeStatus(new Request($commentData), $order);
+                    }
+                }
             }
             $request['note'] = isset($request['note']) ? $request['note'] : null;
             if ($comment !== null) {

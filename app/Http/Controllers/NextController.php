@@ -252,8 +252,8 @@ class NextController extends Controller
                 $query->where(function ($q) use ($keywords) {
                     foreach ($keywords as $keyword) {
                         $q->orWhere('title', 'like', "%{$keyword}%")
-                          ->orWhere('code', 'like', "%{$keyword}%")
-                          ->orWhere('id', $keyword);
+                            ->orWhere('code', 'like', "%{$keyword}%")
+                            ->orWhere('id', $keyword);
                     }
                 });
             }
@@ -326,8 +326,8 @@ class NextController extends Controller
                 $query->where(function ($q) use ($keywords) {
                     foreach ($keywords as $keyword) {
                         $q->orWhere('title', 'like', "%{$keyword}%")
-                          ->orWhere('code', 'like', "%{$keyword}%")
-                          ->orWhere('id', $keyword);
+                            ->orWhere('code', 'like', "%{$keyword}%")
+                            ->orWhere('id', $keyword);
                     }
                 });
             }
@@ -338,13 +338,13 @@ class NextController extends Controller
         }
 
         $product = $query->with([
-                'price',
-                'principalImage',
-                'images',
-                'offers',
-                'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
-                'activePvas.images'
-            ])
+            'price',
+            'principalImage',
+            'images',
+            'offers',
+            'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
+            'activePvas.images'
+        ])
             ->first();
 
         if (!$product) {
@@ -431,8 +431,8 @@ class NextController extends Controller
                 $query->where(function ($q) use ($keywords) {
                     foreach ($keywords as $keyword) {
                         $q->orWhere('title', 'like', "%{$keyword}%")
-                          ->orWhere('code', 'like', "%{$keyword}%")
-                          ->orWhere('id', $keyword);
+                            ->orWhere('code', 'like', "%{$keyword}%")
+                            ->orWhere('id', $keyword);
                     }
                 });
             }
@@ -727,9 +727,11 @@ class NextController extends Controller
                 if (isset($item['attributes']) && is_array($item['attributes']) && !empty($item['attributes'])) {
                     $attributes = collect($item['attributes'])
                         ->filter(function ($val) {
-                            return is_numeric($val); })
+                            return is_numeric($val);
+                        })
                         ->map(function ($val) {
-                            return (int) $val; })
+                            return (int) $val;
+                        })
                         ->values()
                         ->toArray();
                 }
@@ -747,7 +749,8 @@ class NextController extends Controller
                     $pvaAttributes = $pva->variationAttribute->childVariationAttributes
                         ->pluck('attribute_id')
                         ->map(function ($id) {
-                            return (int) $id; })
+                            return (int) $id;
+                        })
                         ->sort()
                         ->values()
                         ->all();
@@ -853,11 +856,7 @@ class NextController extends Controller
         if (isset($responseData['statut']) && $responseData['statut'] == 1) {
             return response()->json(['statut' => 1, 'message' => 'Order updated successfully']);
         } else {
-            return response()->json([
-                'statut' => 0,
-                'message' => 'Failed to update order',
-                'errors' => $responseData['data'] ?? null
-            ], 422);
+            return $updateResponse;
         }
     }
 

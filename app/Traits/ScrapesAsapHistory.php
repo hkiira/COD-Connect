@@ -42,10 +42,15 @@
         });
     }
 
-    public function scrapeColisHistoryData($orderId, $sessionId)
+    /**
+     * Fetch raw HTML of colis history from ASAP Delivery.
+     *
+     * @param int $orderId
+     * @param string $sessionId
+     * @return string|null
+     */
+    public function fetchRawColisHistoryHtml($orderId, $sessionId)
     {
-        ini_set('memory_limit', '512M');
-        
         $curl = curl_init();
         $body = [
             'id' => $orderId,
@@ -71,6 +76,15 @@
         ));
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
+        curl_close($curl);
+        return $uploadResponse;
+    }
+
+    public function scrapeColisHistoryData($orderId, $sessionId)
+    {
+        ini_set('memory_limit', '512M');
+        
+        $uploadResponse = $this->fetchRawColisHistoryHtml($orderId, $sessionId);
 
         // If the response is empty or fails, return an empty structured array
         if (empty($uploadResponse)) {
@@ -80,6 +94,22 @@
                 'address_history' => [],
                 'call_history' => [],
                 'error' => 'Empty response from ASAP Delivery'
+            ];
+        }
+
+        // Fast detection: if the response is too large (15MB bug containing all history)
+        // or contains empty Code and Destinataire tags, treat it as a non-existent colis ID.
+        if (strlen($uploadResponse) > 200000 || 
+            (strpos($uploadResponse, '<strong>Code: </strong></p>') !== false && 
+             strpos($uploadResponse, '<strong>Destinataire: </strong></p>') !== false)) {
+            return [
+                'meta' => [
+                    'Code' => '',
+                    'Destinataire' => '',
+                ],
+                'state_history' => [],
+                'address_history' => [],
+                'call_history' => [],
             ];
         }
 
@@ -175,4 +205,113 @@
             'call_history' => $callHistory,
         ];
     }
+
+    /**
+     * Process, scrape, and save a colis history.
+     *
+     * @param int $id
+     * @param string|null $sessionId
+     * @param \Psr\Log\LoggerInterface|null $log
+     * @return array
+     */
+    public function processColisHistory($id, $sessionId = null, $log = null)
+    {
+        if (!$log) {
+            $log = \Illuminate\Support\Facades\Log::build([
+                'driver' => 'single',
+                'path' => storage_path('logs/asap_scrape.log'),
+            ]);
+        }
+
+        if (!$sessionId) {
+            $sessionId = $this->login();
+        }
+
+        if (!$sessionId) {
+            $log->error("Colis ID {$id}: Failed to obtain a valid PHPSESSID via login.");
+            return ['status' => 'error', 'message' => 'Failed to obtain session ID'];
+        }
+
+        $data = $this->scrapeColisHistoryData($id, $sessionId);
+
+        // Check if session might have expired (e.g. redirected to login, empty meta)
+        // If meta is empty and we have a session ID, try once more with a fresh login
+        if ((isset($data['error']) || empty($data['meta'])) && \Illuminate\Support\Facades\Cache::has('asap_session_id')) {
+            $log->warning("Colis ID {$id}: Scrape failed or returned empty meta. Retrying with a fresh login session...");
+            \Illuminate\Support\Facades\Cache::forget('asap_session_id');
+            $sessionId = $this->login();
+            if ($sessionId) {
+                $data = $this->scrapeColisHistoryData($id, $sessionId);
+            }
+        }
+
+        if (isset($data['error'])) {
+            $log->error("Colis ID {$id}: " . $data['error']);
+            return ['status' => 'error', 'message' => $data['error']];
+        }
+
+        if (empty($data['meta'])) {
+            $log->warning("Colis ID {$id}: Empty meta array entirely, ignoring.");
+            return ['status' => 'empty', 'message' => 'Empty or missing'];
+        }
+
+        if (empty($data['meta']['Code']) && empty($data['meta']['Destinataire'])) {
+            \App\Models\AsapColisEmptyRecord::updateOrCreate(['colis_id' => $id]);
+            $log->info("Colis ID {$id}: Logged empty Code and Destinataire in asap_colis_empty_records.");
+            return ['status' => 'empty_record'];
+        }
+
+        // Save Meta
+        $meta = \App\Models\AsapColisMeta::updateOrCreate(
+            ['colis_id' => $id],
+            [
+                'code' => $data['meta']['Code'] ?? null,
+                'destinataire' => $data['meta']['Destinataire'] ?? null,
+                'telephone' => $data['meta']['Téléphone'] ?? null,
+                'ville' => $data['meta']['Ville'] ?? null,
+                'adresse' => $data['meta']['Adresse'] ?? null,
+            ]
+        );
+
+        // Save State History
+        if (isset($data['state_history']) && is_array($data['state_history'])) {
+            foreach ($data['state_history'] as $sh) {
+                $meta->histories()->firstOrCreate([
+                    'date' => $sh['date'] ?? null,
+                    'etat' => $sh['etat'] ?? null,
+                    'date_reporte' => $sh['date_reporte'] ?? null,
+                    'description' => $sh['description'] ?? null,
+                    'utilisateur' => $sh['utilisateur'] ?? null,
+                ]);
+            }
+        }
+
+        // Save Address History
+        if (isset($data['address_history']) && is_array($data['address_history'])) {
+            foreach ($data['address_history'] as $ah) {
+                $meta->addressHistories()->firstOrCreate([
+                    'date' => $ah['date'] ?? null,
+                    'client' => $ah['client'] ?? null,
+                    'adresse' => $ah['adresse'] ?? null,
+                    'telephone' => $ah['telephone'] ?? null,
+                ]);
+            }
+        }
+
+        // Save Call History
+        if (isset($data['call_history']) && is_array($data['call_history'])) {
+            foreach ($data['call_history'] as $ch) {
+                $meta->callHistories()->firstOrCreate([
+                    'date' => $ch['date'] ?? null,
+                    'action' => $ch['action'] ?? null,
+                    'utilisateur' => $ch['utilisateur'] ?? null,
+                ]);
+            }
+        }
+
+        $log->info("Colis ID {$id}: Successfully processed and saved.");
+
+        return ['status' => 'success', 'meta' => $meta];
+    }
 }
+
