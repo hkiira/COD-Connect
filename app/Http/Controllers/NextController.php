@@ -803,16 +803,17 @@ class NextController extends Controller
 
                     $missingErrors = [];
                     if ($requiresSize && !$hasSize) {
-                        $missingErrors[] = "size_id is missed";
+                        $missingErrors[] = "size_id";
                     }
                     if ($requiresColor && !$hasColor) {
-                        $missingErrors[] = "color_id is missed";
+                        $missingErrors[] = "color_id";
                     }
 
                     if (!empty($missingErrors)) {
+                        $missingDescriptor = implode(' and ', $missingErrors);
                         return response()->json([
                             'statut' => 0,
-                            'data' => ["products" => ["Product ID {$item['id']}: " . implode(' and ', $missingErrors) . "."]]
+                            'data' => ["products" => ["Product ID {$item['id']} with {$missingDescriptor} attributes does not exist."]]
                         ], 422);
                     }
 
