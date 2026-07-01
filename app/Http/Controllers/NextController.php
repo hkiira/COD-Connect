@@ -830,7 +830,7 @@ class NextController extends Controller
 
                     return response()->json([
                         'statut' => 0,
-                        'data' => ["products" => ["Product ID {$item['id']} with specified attributes does not exist."]]
+                        'data' => ["products" => ["Product ID {$item['id']} with specified attributes does not exists."]]
                     ], 422);
                 }
 
