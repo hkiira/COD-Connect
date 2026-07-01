@@ -764,6 +764,58 @@ class NextController extends Controller
                 }
 
                 if (!$matchedPva) {
+                    $product->loadMissing('productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute');
+
+                    $requiresSize = false;
+                    $requiresColor = false;
+
+                    foreach ($product->productVariationAttributes as $pva) {
+                        if ($pva->variationAttribute && $pva->variationAttribute->childVariationAttributes) {
+                            foreach ($pva->variationAttribute->childVariationAttributes as $child) {
+                                if ($child->attribute && $child->attribute->typeAttribute) {
+                                    $typeTitle = strtolower($child->attribute->typeAttribute->title);
+                                    if ($typeTitle === 'size' || $typeTitle === 'taille') {
+                                        $requiresSize = true;
+                                    } elseif ($typeTitle === 'color' || $typeTitle === 'couleur') {
+                                        $requiresColor = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    $hasSize = false;
+                    $hasColor = false;
+
+                    if (!empty($attributes)) {
+                        $selectedAttributes = \App\Models\Attribute::with('typeAttribute')->whereIn('id', $attributes)->get();
+                        foreach ($selectedAttributes as $attr) {
+                            if ($attr->typeAttribute) {
+                                $typeTitle = strtolower($attr->typeAttribute->title);
+                                if ($typeTitle === 'size' || $typeTitle === 'taille') {
+                                    $hasSize = true;
+                                } elseif ($typeTitle === 'color' || $typeTitle === 'couleur') {
+                                    $hasColor = true;
+                                }
+                            }
+                        }
+                    }
+
+                    $missingErrors = [];
+                    if ($requiresSize && !$hasSize) {
+                        $missingErrors[] = "size_id is missed";
+                    }
+                    if ($requiresColor && !$hasColor) {
+                        $missingErrors[] = "color_id is missed";
+                    }
+
+                    if (!empty($missingErrors)) {
+                        return response()->json([
+                            'statut' => 0,
+                            'data' => ["products" => ["Product ID {$item['id']}: " . implode(' and ', $missingErrors) . "."]]
+                        ], 422);
+                    }
+
                     return response()->json([
                         'statut' => 0,
                         'data' => ["products" => ["Product ID {$item['id']} with specified attributes does not exist."]]
@@ -856,7 +908,11 @@ class NextController extends Controller
         if (isset($responseData['statut']) && $responseData['statut'] == 1) {
             return response()->json(['statut' => 1, 'message' => 'Order updated successfully']);
         } else {
-            return $updateResponse;
+            return response()->json([
+                'statut' => 0,
+                'message' => 'Failed to update order',
+                'errors' => $responseData['data'] ?? null
+            ], 422);
         }
     }
 
