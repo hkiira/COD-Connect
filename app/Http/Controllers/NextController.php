@@ -787,15 +787,26 @@ class NextController extends Controller
                     $hasSize = false;
                     $hasColor = false;
 
-                    if (!empty($attributes)) {
-                        $selectedAttributes = \App\Models\Attribute::with('typeAttribute')->whereIn('id', $attributes)->get();
-                        foreach ($selectedAttributes as $attr) {
-                            if ($attr->typeAttribute) {
-                                $typeTitle = strtolower($attr->typeAttribute->title);
-                                if ($typeTitle === 'size' || $typeTitle === 'taille') {
-                                    $hasSize = true;
-                                } elseif ($typeTitle === 'color' || $typeTitle === 'couleur') {
-                                    $hasColor = true;
+                    if (isset($item['attributes']) && is_array($item['attributes'])) {
+                        if (isset($item['attributes']['size_id']) && is_numeric($item['attributes']['size_id'])) {
+                            $hasSize = true;
+                        }
+                        if (isset($item['attributes']['color_id']) && is_numeric($item['attributes']['color_id'])) {
+                            $hasColor = true;
+                        }
+                    }
+
+                    if (!$hasSize || !$hasColor) {
+                        if (!empty($attributes)) {
+                            $selectedAttributes = \App\Models\Attribute::with('typeAttribute')->whereIn('id', $attributes)->get();
+                            foreach ($selectedAttributes as $attr) {
+                                if ($attr->typeAttribute) {
+                                    $typeTitle = strtolower($attr->typeAttribute->title);
+                                    if ($typeTitle === 'size' || $typeTitle === 'taille') {
+                                        $hasSize = true;
+                                    } elseif ($typeTitle === 'color' || $typeTitle === 'couleur') {
+                                        $hasColor = true;
+                                    }
                                 }
                             }
                         }
