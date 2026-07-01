@@ -706,7 +706,8 @@ class NextController extends Controller
             $accountUsers = Account::find($accountId)?->accountUsers->pluck('id')->toArray() ?? [];
 
             foreach ($productsInput as $item) {
-                $product = Product::where('id', $item['id'])
+                $product = Product::with('productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute')
+                    ->where('id', $item['id'])
                     ->whereIn('account_user_id', $accountUsers)
                     ->first();
 
@@ -764,7 +765,6 @@ class NextController extends Controller
                 }
 
                 if (!$matchedPva) {
-                    $product->loadMissing('productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute');
 
                     $requiresSize = false;
                     $requiresColor = false;
