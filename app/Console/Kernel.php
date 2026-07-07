@@ -23,6 +23,9 @@ class Kernel extends ConsoleKernel
         
         // Check for missing order comments every 4 hours
         $schedule->command('orders:check-comments')->everyFourHours();
+
+        // Sync ASAP returns every hour
+        $schedule->command('sync:returns')->hourly()->withoutOverlapping();
     }
 
     /**

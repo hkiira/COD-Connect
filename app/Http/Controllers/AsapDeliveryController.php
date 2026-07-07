@@ -717,6 +717,10 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $uploadResponse = \App\Services\ScrapeDoService::executeCurl($curl, $data);
 
+        if (empty($uploadResponse)) {
+            return [];
+        }
+
         // Create a new DOMDocument and load the HTML.
         $dom = new \DOMDocument();
         libxml_use_internal_errors(true);
