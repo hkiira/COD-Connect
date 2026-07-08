@@ -44,7 +44,7 @@ class SyncAsapReturnsJob implements ShouldQueue
         try {
             set_time_limit(3600);
             if ($this->user) {
-                Auth::login($this->user);
+                Auth::guard('web')->login($this->user);
             }
 
             Log::info("ASAP Sync Returns Job: Starting returns synchronization in the background.");

@@ -34,7 +34,7 @@ class SyncReturnsCommand extends Command
             // Find administrator user to authenticate background context
             $admin = User::where('email', 'achkar.abder@gmail.com')->first();
             if ($admin) {
-                Auth::login($admin);
+                Auth::guard('web')->login($admin);
                 $this->info('Authenticated as admin: ' . $admin->email);
             } else {
                 $this->error('Administrator account (achkar.abder@gmail.com) not found. Cannot proceed.');

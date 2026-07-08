@@ -44,7 +44,7 @@ class SyncAsapOrdersJob implements ShouldQueue
         try {
             set_time_limit(3600);
             if ($this->user) {
-                Auth::login($this->user);
+                Auth::guard('web')->login($this->user);
             }
 
             Log::info("ASAP Sync Job: Starting order synchronization in the background.");
