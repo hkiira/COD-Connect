@@ -155,7 +155,7 @@ class NextController extends Controller
             'brand_source_id' => $request->input('brand_source_id'),
             'payment_type_id' => 1,
             'payment_method_id' => 1,
-            'order_status_id' => 4,
+            'order_status_id' => 1,
             'carrier_price' => 0,
             'note' => null,
             'customer' => [

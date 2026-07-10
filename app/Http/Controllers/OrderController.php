@@ -273,7 +273,7 @@ class OrderController extends Controller
                 ];
                 return $productInfo;
             });
-            $orderData['total'] = $totalOrder + (float)$data->carrier_price - (float)$data->discount;
+            $orderData['total'] = $totalOrder + (float) $data->carrier_price - (float) $data->discount;
             $orderData['discount'] = $data->discount;
             $orderData['carrier_price'] = $data->carrier_price;
             $orderData['status'] = $data->orderStatus ? $data->orderStatus->only('id', 'title') : null;
@@ -440,181 +440,6 @@ class OrderController extends Controller
             ]
         ]);
     }
-
-    // public function index(Request $request)
-    // {
-    //     $request = collect($request->query())->toArray();
-    //     $searchIds = [];
-    //     if (isset($request['products']) && array_filter($request['products'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['products'] as $productId) {
-    //             if (Product::find($productId))
-    //                 $searchIds = array_merge($searchIds, Product::find($productId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['warehouses']) && array_filter($request['warehouses'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['warehouses'] as $warehouseId) {
-    //             if (Warehouse::find($warehouseId))
-    //                 $searchIds = array_merge($searchIds, Warehouse::find($warehouseId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['categories']) && array_filter($request['categories'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['categories'] as $taxonomyId) {
-    //             if (Taxonomy::find($taxonomyId))
-    //                 $searchIds = array_merge($searchIds, Taxonomy::find($taxonomyId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['brands']) && array_filter($request['brands'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['brands'] as $brandId) {
-    //             if (Brand::find($brandId))
-    //                 $searchIds = array_merge($searchIds, Brand::find($brandId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['sources']) && array_filter($request['sources'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['sources'] as $sourceId) {
-    //             if (Source::find($sourceId))
-    //                 $searchIds = array_merge($searchIds, Source::find($sourceId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['customer_types']) && array_filter($request['customer_types'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['customer_types'] as $customerTypeId) {
-    //             if (CustomerType::find($customerTypeId))
-    //                 $searchIds = array_merge($searchIds, CustomerType::find($customerTypeId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['cities']) && array_filter($request['cities'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['cities'] as $cityId) {
-    //             if (City::find($cityId))
-    //                 $searchIds = array_merge($searchIds, City::find($cityId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['regions']) && array_filter($request['regions'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['regions'] as $regionId) {
-    //             if (Region::find($regionId))
-    //                 $searchIds = array_merge($searchIds, Region::find($regionId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['countries']) && array_filter($request['countries'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['countries'] as $countryId) {
-    //             if (Country::find($countryId))
-    //                 $searchIds = array_merge($searchIds, Country::find($countryId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     if (isset($request['status']) && array_filter($request['status'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         $request['whereArray'] = ['column' => 'order_status_id', 'values' => $request['status']];
-    //     }
-    //     if (isset($request['sectors']) && array_filter($request['sectors'], function ($value) {
-    //         return $value !== null;
-    //     })) {
-    //         foreach ($request['sectors'] as $sectorId) {
-    //             if (Sector::find($sectorId))
-    //                 $searchIds = array_merge($searchIds, Sector::find($sectorId)->orders->pluck('id')->toArray());
-    //         }
-    //         $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
-    //     }
-    //     $associated = [];
-    //     $model = 'App\\Models\\Order';
-    //     $request['inAccount'] = ['account_id', getAccountUser()->account_id];
-    //     $datas = FilterController::searchs(new Request($request), $model, ['id', 'code'], true, $associated);
-    //     $datas['data'] = collect($datas['data'])->map(function ($data) {
-    //         $orderData = $data->only('id', 'code', 'shipping_code', 'comment', 'order_id', 'created_at', 'updated_at','score');
-    //         if (!$orderData['shipping_code'])
-    //             $orderData['shipping_code'] = "---";
-    //         $orderData['can_change'] = in_array($data->order_status_id, [1, 2, 3, 4, 5]) ? true : false;
-    //         $orderData['user'] = $data->userCreated->map(function ($user) {
-    //             return [
-    //                 "id" => $user->id,
-    //                 "firstname" => $user->user->firstname,
-    //                 "lastname" => $user->user->lastname,
-    //                 "images" => $user->user->images,
-    //             ];
-    //         });
-    //         $orderData['comments'] = $data->lastOrderComments->map(function ($comment) {
-    //             $data = [
-    //                 "id" => $comment->id,
-    //                 "title" => $comment->title,
-    //                 "created_at" => $comment->created_at,
-    //                 "user" => $comment->accountUser->user,
-    //                 "status" => $comment->orderStatus->only('id', 'title', 'statut'),
-    //             ];
-    //             $data["status"]['created_at'] = $comment->created_at;
-    //             return $data;
-    //         });
-    //         $orderData['customer'] = $data->customer->only('id', 'name', 'images');
-    //         $orderData['customer']['phones'] = $data->customer->phones->map(function ($phone) {
-    //             return $phone->only('id', 'title');
-    //         });
-    //         $orderData['customer']['address'] = $data->customer->addresses->map(function ($address) {
-    //             return $address->only('id', 'title', 'city');
-    //         });
-    //         $total = 0;
-    //         //hna fine bqayt
-    //         $orderData['products'] = $data->activePvas->map(function ($pva) use (&$total) {
-    //             $total += $pva->pivot->price * $pva->pivot->quantity;
-    //             $attributes = $pva->variationAttribute->childVariationAttributes->map(function ($child) {
-    //                 return $child->attribute->code;
-    //             })->toArray();
-    //             $productInfo = [
-    //                 'id' => $pva->product_id,
-    //                 'order_pva' => $pva->pivot->id,
-    //                 'price' => $pva->pivot->price,
-    //                 'quantity' => $pva->pivot->quantity,
-    //                 'images' => $pva->product->images->sortByDesc('created_at')->values(),
-    //                 'productType' => $pva->product->productType,
-    //                 'product' => $pva->product->title . " " . implode('-', $attributes),
-    //                 'reference' => $pva->product->reference,
-    //                 'productsize' => $pva->variationAttribute->id,
-    //                 'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
-    //                     return [
-    //                         "id" => $child->attribute->id,
-    //                         "title" => $child->attribute->title,
-    //                         "typeAttribute" => $child->attribute->typeAttribute->title,
-    //                     ];
-    //                 }),
-
-    //             ];
-    //             return $productInfo;
-    //         });
-    //         $orderData['total'] = $total;
-    //         $orderData['score']=$data->score;
-    //         $orderData['discount'] = $data->discount;
-    //         $orderData['carrier_price'] = $data->carrier_price;
-    //         $orderData['status'] = $data->orderStatus->only('id', 'title');
-    //         $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
-    //         $orderData['carrier'] = ($data->pickup) ? $data->pickup->carrier->only('id', 'title', 'images') : null;
-    //         $orderData['source'] = $data->brandSource->source->only('id', 'title', 'images');
-    //         return $orderData;
-    //     });
-    //     return $datas;
-    // }
 
     public function create(Request $request)
     {
@@ -962,7 +787,7 @@ class OrderController extends Controller
                     // Fill required order ownership fields.
                     $request['account_id'] = $accountId;
                     $request['customer_id'] = $customer->id;
-                    $request['order_status_id'] = 4;
+                    $request['order_status_id'] = 1;
 
                     // Apply duplicate guard only for non-import creation flow.
                     if ($isImport == 0 && isset($request['customer']['phones']) && count($request['customer']['phones']) > 0) {
@@ -1063,7 +888,7 @@ class OrderController extends Controller
                             'realprice' => $realPrice,
                             'initial_price' => $initialPrice,
                             'discount' => $discount,
-                            'order_status_id' => 4,
+                            'order_status_id' => 1,
                             'account_user_id' => $accountUser->id,
                             'created_at' => now(),
                             'updated_at' => now(),
@@ -1092,7 +917,7 @@ class OrderController extends Controller
                             $order->comments()->syncWithoutDetaching([
                                 44 => [
                                     'title' => 'Sync with Google Sheets',
-                                    'order_status_id' => 4,
+                                    'order_status_id' => 1,
                                     'account_user_id' => $accountUser->id,
                                     'score' => 0,
                                     'created_at' => now(),
