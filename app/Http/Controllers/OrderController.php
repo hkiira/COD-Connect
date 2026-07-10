@@ -56,15 +56,19 @@ class OrderController extends Controller
         ], 'answer_value');
 
         // Check if reviews filtering is requested
-        $hasReviews = false;
+        $hasReviews = null;
         if (isset($request['has_reviews'])) {
             $hasReviews = filter_var($request['has_reviews'], FILTER_VALIDATE_BOOLEAN);
         } elseif (isset($request['filter']['has_reviews'])) {
             $hasReviews = filter_var($request['filter']['has_reviews'], FILTER_VALIDATE_BOOLEAN);
         }
 
-        if ($hasReviews) {
-            $ordersQuery->whereHas('review');
+        if ($hasReviews !== null) {
+            if ($hasReviews) {
+                $ordersQuery->whereHas('review');
+            } else {
+                $ordersQuery->whereDoesntHave('review');
+            }
         }
 
         if ($sortBy === 'total') {
