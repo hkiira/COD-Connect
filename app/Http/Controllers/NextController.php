@@ -253,7 +253,13 @@ class NextController extends Controller
                     foreach ($keywords as $keyword) {
                         $q->orWhere('title', 'like', "%{$keyword}%")
                             ->orWhere('code', 'like', "%{$keyword}%")
-                            ->orWhere('id', $keyword);
+                            ->orWhere('id', $keyword)
+                            ->orWhereHas('accountProducts.taxonomies', function ($qTax) use ($keyword) {
+                                $qTax->where('title', 'like', "%{$keyword}%");
+                            })
+                            ->orWhereHas('productVariationAttributes.variationAttribute.childVariationAttributes.attribute', function ($qAttr) use ($keyword) {
+                                $qAttr->where('title', 'like', "%{$keyword}%");
+                            });
                     }
                 });
             }
@@ -327,7 +333,13 @@ class NextController extends Controller
                     foreach ($keywords as $keyword) {
                         $q->orWhere('title', 'like', "%{$keyword}%")
                             ->orWhere('code', 'like', "%{$keyword}%")
-                            ->orWhere('id', $keyword);
+                            ->orWhere('id', $keyword)
+                            ->orWhereHas('accountProducts.taxonomies', function ($qTax) use ($keyword) {
+                                $qTax->where('title', 'like', "%{$keyword}%");
+                            })
+                            ->orWhereHas('productVariationAttributes.variationAttribute.childVariationAttributes.attribute', function ($qAttr) use ($keyword) {
+                                $qAttr->where('title', 'like', "%{$keyword}%");
+                            });
                     }
                 });
             }
@@ -432,7 +444,13 @@ class NextController extends Controller
                     foreach ($keywords as $keyword) {
                         $q->orWhere('title', 'like', "%{$keyword}%")
                             ->orWhere('code', 'like', "%{$keyword}%")
-                            ->orWhere('id', $keyword);
+                            ->orWhere('id', $keyword)
+                            ->orWhereHas('accountProducts.taxonomies', function ($qTax) use ($keyword) {
+                                $qTax->where('title', 'like', "%{$keyword}%");
+                            })
+                            ->orWhereHas('productVariationAttributes.variationAttribute.childVariationAttributes.attribute', function ($qAttr) use ($keyword) {
+                                $qAttr->where('title', 'like', "%{$keyword}%");
+                            });
                     }
                 });
             }

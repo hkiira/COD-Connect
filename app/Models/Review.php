@@ -6,4 +6,6 @@ class Review extends Model {
     use HasFactory;
     protected $fillable = ['order_id', 'user_id'];
     public function answers() { return $this->hasMany(ReviewAnswer::class); }
+    public function accountUser() { return $this->belongsTo(AccountUser::class, 'user_id'); }
+    public function user() { return $this->belongsTo(User::class, 'user_id'); }
 }

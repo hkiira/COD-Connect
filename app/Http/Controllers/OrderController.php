@@ -162,7 +162,8 @@ class OrderController extends Controller
                 'childOrders.shipment.shipmentType',
                 'pickup',
                 'shipment.shipmentType',
-                'review.answers.question'
+                'review.answers.question',
+                'review.user'
             ])
             ->skip($filter['page'] * $filter['limit'])
             ->take($filter['limit'])
@@ -272,7 +273,7 @@ class OrderController extends Controller
                 ];
                 return $productInfo;
             });
-            $orderData['total'] = $totalOrder;
+            $orderData['total'] = $totalOrder + (float)$data->carrier_price - (float)$data->discount;
             $orderData['discount'] = $data->discount;
             $orderData['carrier_price'] = $data->carrier_price;
             $orderData['status'] = $data->orderStatus ? $data->orderStatus->only('id', 'title') : null;
@@ -299,12 +300,14 @@ class OrderController extends Controller
             // Format reviews
             $orderData['reviews'] = [];
             if ($data->review && $data->review->answers) {
-                $orderData['reviews'] = $data->review->answers->map(function ($answer) {
+                $orderData['reviews'] = $data->review->answers->map(function ($answer) use ($data) {
                     return [
                         'id' => $answer->id,
                         'question_id' => $answer->review_question_id,
                         'question' => $answer->question ? $answer->question->only('id', 'text', 'type') : null,
                         'answer' => $answer->answer_value,
+                        'created_at' => $data->review->created_at,
+                        'user' => $data->review->user ? $data->review->user->only('id', 'name', 'firstname', 'lastname') : null,
                     ];
                 });
             }
@@ -1459,7 +1462,7 @@ class OrderController extends Controller
         $validator = Validator::make($requests->except('_method'), [
             '*.id' => 'required|exists:orders,id',
             '*.comment.id' => 'exists:comments,id|max:255',
-            '*.comment.shipping_price' => 'numeric|max:255',
+            '*.comment.carrier_price' => 'numeric|max:255',
             '*.comment.postponed' => 'date',
             '*.customer_id' => [ // Validate title field
                 function ($attribute, $value, $fail) { // Custom validation rule
@@ -1779,7 +1782,7 @@ class OrderController extends Controller
         $validator = Validator::make($request->all(), [
             'customer_id' => 'required|exists:customers,id',
             'resolution_type' => 'required|in:refund,exchange',
-            'shipping_price' => 'nullable|numeric|min:0',
+            'carrier_price' => 'nullable|numeric|min:0',
 
             // Validate the items being returned
             'items_to_return' => 'required|array|min:1',
@@ -1852,7 +1855,7 @@ class OrderController extends Controller
                         'order_status_id' => 1, // Example: "Pending"
                         'type' => 'sale', // It's a new sale to the customer
                         'code' => $baseCode . '-EX',
-                        'carrier_price' => $request->shipping_price ?? 0,
+                        'carrier_price' => $request->carrier_price ?? 0,
                         'warehouse_id' => $returnOrder->warehouse_id,
                         'payment_type_id' => $returnOrder->payment_type_id,
                         'payment_method_id' => $returnOrder->payment_method_id,
@@ -1861,7 +1864,7 @@ class OrderController extends Controller
                         'city_id' => $returnOrder->city_id,
                     ]);
 
-                    $shippingPriceTotal = $request->shipping_price ?? 0;
+                    $shippingPriceTotal = $request->carrier_price ?? 0;
 
                     foreach ($request->items_to_exchange as $index => $item) {
                         // Apply the shipping price to the first item so the total matches shipping_price
