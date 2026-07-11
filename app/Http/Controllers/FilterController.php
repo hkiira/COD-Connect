@@ -941,12 +941,12 @@ class FilterController extends Controller
                             $orderData['total'] = $totalOrder;
                             $orderData['discount'] = $data->discount;
                             $orderData['carrier_price'] = $data->carrier_price;
-                            $orderData['status'] = $data->orderStatus->only('id', 'title');
-                            $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');
+                            $orderData['status'] = $data->orderStatus ? $data->orderStatus->only('id', 'title') : null;
+                            $orderData['brand'] = ($data->brandSource && $data->brandSource->brand) ? $data->brandSource->brand->only('id', 'title', 'images') : null;
                             $orderData['carrier'] = ($data->pickup) ? $data->pickup->carrier->only('id', 'title', 'images') : null;
-                            $source = $data->brandSource->source;
-                            $sourceArr = $source->only('id', 'title', 'images');
-                            if (isset($source->images) && $source->images instanceof \Illuminate\Support\Collection) {
+                            $source = $data->brandSource ? $data->brandSource->source : null;
+                            $sourceArr = $source ? $source->only('id', 'title', 'images') : null;
+                            if ($source && isset($source->images) && $source->images instanceof \Illuminate\Support\Collection) {
                                 $sourceArr['images'] = $source->images->sortByDesc('created_at')->values();
                             }
                             $orderData['source'] = $sourceArr;

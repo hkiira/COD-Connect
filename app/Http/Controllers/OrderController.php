@@ -906,7 +906,8 @@ class OrderController extends Controller
                     }
 
                     // Sync order creation status to Google Sheets (if enabled).
-                    if (config('google-sheets.enabled')) {
+                    $syncRequested = isset($request['sync_google_sheet']) ? filter_var($request['sync_google_sheet'], FILTER_VALIDATE_BOOLEAN) : false;
+                    if (config('google-sheets.enabled') && $syncRequested) {
                         // if (($order->brandSource->id == 112 || $order->brandSource->id == 108) && $isImport == 0 && config('google-sheets.enabled')) {
                         try {
                             app(GoogleSheetsService::class)->appendOrderStatusRow(
