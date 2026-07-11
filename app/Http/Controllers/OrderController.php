@@ -274,6 +274,7 @@ class OrderController extends Controller
                 return $productInfo;
             });
             $orderData['total'] = $totalOrder + (float) $data->carrier_price - (float) $data->discount;
+            $orderData['sync'] = $data->sync != 0 ? true : false;
             $orderData['discount'] = $data->discount;
             $orderData['carrier_price'] = $data->carrier_price;
             $orderData['status'] = $data->orderStatus ? $data->orderStatus->only('id', 'title') : null;
@@ -905,7 +906,8 @@ class OrderController extends Controller
                     }
 
                     // Sync order creation status to Google Sheets (if enabled).
-                    if (($order->brandSource->id == 112 || $order->brandSource->id == 108) && $isImport == 0 && config('google-sheets.enabled')) {
+                    if (config('google-sheets.enabled')) {
+                        // if (($order->brandSource->id == 112 || $order->brandSource->id == 108) && $isImport == 0 && config('google-sheets.enabled')) {
                         try {
                             app(GoogleSheetsService::class)->appendOrderStatusRow(
                                 $order,
@@ -1838,4 +1840,57 @@ class OrderController extends Controller
             ], 422);
         }
     }
+
+    public function syncSheet(Request $request, $id)
+    {
+        $order = Order::where('account_id', getAccountUser()->account_id)->find($id);
+        if (!$order) {
+            return response()->json([
+                'statut' => 0,
+                'message' => 'Order not found'
+            ], 404);
+        }
+
+        try {
+            $accountUser = getAccountUser();
+            app(GoogleSheetsService::class)->appendOrderStatusRow(
+                $order,
+                null,
+                $accountUser,
+                'Nouvelle commande créée'
+            );
+
+            $order->comments()->syncWithoutDetaching([
+                44 => [
+                    'title' => 'Sync with Google Sheets',
+                    'order_status_id' => $order->order_status_id,
+                    'account_user_id' => $accountUser->id,
+                    'score' => 0,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]
+            ]);
+
+            $order->sync = true;
+            $order->save();
+
+            return response()->json([
+                'statut' => 1,
+                'message' => 'Order synced successfully to Google Sheet',
+                'data' => [
+                    'sync' => true
+                ]
+            ]);
+        } catch (\Throwable $e) {
+            $order->sync = false;
+            $order->save();
+            Log::warning('Google Sheets sync failed for order ' . $order->id . ': ' . $e->getMessage());
+
+            return response()->json([
+                'statut' => 0,
+                'message' => 'Google Sheets sync failed: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
+
