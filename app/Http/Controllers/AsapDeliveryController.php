@@ -430,8 +430,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                             'shipping_code' => $asapHistory[0]['asap_code'],
                             'order_status_id' => 4,
                             "comment" => [
-                                "id" => "29",
-                                "title" => "ajout du code : " . $asapHistory[0]['asap_code']
+                                "id" => "82",
+                                "title" => "Ajout du code : " . $asapHistory[0]['asap_code']
                             ]
                         ];
                     } else {
