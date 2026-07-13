@@ -144,12 +144,12 @@ class OrderController extends Controller
         }
 
         // Exclude brand_source_id=108 when status is 1, unless source filter includes 70
-        if (!empty($request['status']) && is_array($request['status']) && in_array(1, $request['status'])) {
+        /*if (!empty($request['status']) && is_array($request['status']) && in_array(1, $request['status'])) {
             $sourceFilterIncludesSeventy = !empty($request['sources']) && is_array($request['sources']) && in_array(36, $request['sources']);
             if (!$sourceFilterIncludesSeventy) {
                 $ordersQuery = $ordersQuery->where('brand_source_id', '!=', 108);
             }
-        }
+        }*/
 
         $total = $ordersQuery->count();
         $orders = $ordersQuery
