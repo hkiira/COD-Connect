@@ -143,7 +143,7 @@ class DashboardController extends Controller
         $current = $startRange->copy();
         while ($current <= $end) {
             $dateKey = $getKey($current);
-            $ordersByPeriod[$dateKey] = ['all' => 0, 'shipped' => 0, 'canceled' => 0];
+            $ordersByPeriod[$dateKey] = ['all' => 0, 'shipped' => 0, 'canceled' => 0, 'in_transit' => 0];
             $current->{$addFunction}();
         }
 
@@ -156,6 +156,8 @@ class DashboardController extends Controller
                     $ordersByPeriod[$day]['shipped']++;
                 } elseif (in_array($order->order_status_id, [8, 11])) {
                     $ordersByPeriod[$day]['canceled']++;
+                } elseif (in_array($order->order_status_id, [4, 5, 6, 9])) {
+                    $ordersByPeriod[$day]['in_transit']++;
                 }
             }
         }
@@ -167,6 +169,7 @@ class DashboardController extends Controller
                 'all_orders' => $data['all'],
                 'shipped_orders' => $data['shipped'],
                 'canceled_orders' => $data['canceled'],
+                'in_transit_orders' => $data['in_transit'],
             ];
         }
 
