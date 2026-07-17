@@ -113,27 +113,43 @@ class DashboardController extends Controller
             $groupFormat = 'Y';
             $addFunction = 'addYear';
             $startRange = $start->copy()->startOfYear();
-        } elseif ($diffInDays > 30) {
+            $getKey = function ($date) {
+                return $date->format('Y');
+            };
+        } elseif ($diffInDays > 90) {
             $groupFormat = 'M y';
             $addFunction = 'addMonth';
             $startRange = $start->copy()->startOfMonth();
+            $getKey = function ($date) {
+                return $date->format('M y');
+            };
+        } elseif ($diffInDays > 30) {
+            $groupFormat = 'W';
+            $addFunction = 'addWeek';
+            $startRange = $start->copy()->startOfWeek();
+            $getKey = function ($date) {
+                return 'W' . $date->format('W') . ' (' . $date->startOfWeek()->format('d M') . ')';
+            };
         } else {
             $groupFormat = 'd M';
             $addFunction = 'addDay';
             $startRange = $start->copy();
+            $getKey = function ($date) {
+                return $date->format('d M');
+            };
         }
 
         $ordersByPeriod = [];
         $current = $startRange->copy();
         while ($current <= $end) {
-            $dateKey = $current->format($groupFormat);
+            $dateKey = $getKey($current);
             $ordersByPeriod[$dateKey] = ['all' => 0, 'shipped' => 0, 'canceled' => 0];
             $current->{$addFunction}();
         }
 
         $allOrders = (clone $baseQuery)->get();
         foreach ($allOrders as $order) {
-            $day = $order->created_at->format($groupFormat);
+            $day = $getKey($order->created_at);
             if (isset($ordersByPeriod[$day])) {
                 $ordersByPeriod[$day]['all']++;
                 if (in_array($order->order_status_id, [7, 10])) {
@@ -158,13 +174,13 @@ class DashboardController extends Controller
         $statusByPeriod = [];
         $current = $startRange->copy();
         while ($current <= $end) {
-            $dateKey = $current->format($groupFormat);
+            $dateKey = $getKey($current);
             $statusByPeriod[$dateKey] = ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0];
             $current->{$addFunction}();
         }
 
         foreach ($allOrders as $order) {
-            $day = $order->created_at->format($groupFormat);
+            $day = $getKey($order->created_at);
             if (isset($statusByPeriod[$day])) {
                 $statusByPeriod[$day]['total']++;
                 
