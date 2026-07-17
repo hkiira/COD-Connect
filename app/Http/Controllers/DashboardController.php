@@ -253,7 +253,7 @@ class DashboardController extends Controller
                         SELECT 1 FROM order_comment oc WHERE oc.order_id = o.id AND oc.comment_id = 34
                     ) THEN 1 ELSE 0 END) as refused_count
                 FROM orders o
-                INNER JOIN brand_sources bs ON o.brand_source_id = bs.id
+                INNER JOIN brand_source bs ON o.brand_source_id = bs.id
                 WHERE o.account_id = ?
                   AND o.created_at BETWEEN ? AND ?
                   AND bs.source_id IN ({$placeholders})
@@ -293,7 +293,7 @@ class DashboardController extends Controller
                     bs.source_id,
                     COUNT(*) as total_count
                 FROM orders o
-                INNER JOIN brand_sources bs ON o.brand_source_id = bs.id
+                INNER JOIN brand_source bs ON o.brand_source_id = bs.id
                 WHERE o.account_id = ?
                   AND o.created_at BETWEEN ? AND ?
                   AND bs.source_id IN ({$placeholders})
