@@ -260,6 +260,28 @@ class DashboardController extends Controller
         $tiktokConfirmedRate = $ordersTiktok > 0 ? ($confirmedTiktok / $ordersTiktok) * 100 : 0;
         $magasinConfirmedRate = $ordersMagasin > 0 ? ($confirmedMagasin / $ordersMagasin) * 100 : 0;
 
+        // Helper to count orders has order_comment with comment_id = 34
+        $countRefusedBySourceIds = function ($query, $sourceIds) {
+            if (empty($sourceIds)) {
+                return 0;
+            }
+            return (clone $query)->whereHas('brandSource', function ($q) use ($sourceIds) {
+                $q->whereIn('source_id', $sourceIds);
+            })->whereHas('orderComments', function ($q) {
+                $q->where('comment_id', 34);
+            })->count();
+        };
+
+        $refusedWebsite = $countRefusedBySourceIds($baseQuery, $websiteSourceIds);
+        $refusedWhatsapp = $countRefusedBySourceIds($baseQuery, $whatsappSourceIds);
+        $refusedTiktok = $countRefusedBySourceIds($baseQuery, $tiktokSourceIds);
+        $refusedMagasin = $countRefusedBySourceIds($baseQuery, $magasinSourceIds);
+
+        $websiteRefusedRate = $ordersWebsite > 0 ? ($refusedWebsite / $ordersWebsite) * 100 : 0;
+        $whatsappRefusedRate = $ordersWhatsapp > 0 ? ($refusedWhatsapp / $ordersWhatsapp) * 100 : 0;
+        $tiktokRefusedRate = $ordersTiktok > 0 ? ($refusedTiktok / $ordersTiktok) * 100 : 0;
+        $magasinRefusedRate = $ordersMagasin > 0 ? ($refusedMagasin / $ordersMagasin) * 100 : 0;
+
         $deliveredOrdersByCity = (clone $baseQuery)
             ->whereIn('order_status_id', [7, 10])
             ->whereNotNull('city_id')
@@ -317,7 +339,9 @@ class DashboardController extends Controller
                         'delivered_count' => $deliveredWebsite,
                         'delivered_percentage' => number_format($websiteDeliveredRate, 1),
                         'confirmed_count' => $confirmedWebsite,
-                        'confirmed_percentage' => number_format($websiteConfirmedRate, 1)
+                        'confirmed_percentage' => number_format($websiteConfirmedRate, 1),
+                        'refused_count' => $refusedWebsite,
+                        'refused_percentage' => number_format($websiteRefusedRate, 1)
                     ],
                     'orders_whatsapp' => [
                         'value' => number_format($ordersWhatsapp),
@@ -325,7 +349,9 @@ class DashboardController extends Controller
                         'delivered_count' => $deliveredWhatsapp,
                         'delivered_percentage' => number_format($whatsappDeliveredRate, 1),
                         'confirmed_count' => $confirmedWhatsapp,
-                        'confirmed_percentage' => number_format($whatsappConfirmedRate, 1)
+                        'confirmed_percentage' => number_format($whatsappConfirmedRate, 1),
+                        'refused_count' => $refusedWhatsapp,
+                        'refused_percentage' => number_format($whatsappRefusedRate, 1)
                     ],
                     'orders_tiktok' => [
                         'value' => number_format($ordersTiktok),
@@ -333,7 +359,9 @@ class DashboardController extends Controller
                         'delivered_count' => $deliveredTiktok,
                         'delivered_percentage' => number_format($tiktokDeliveredRate, 1),
                         'confirmed_count' => $confirmedTiktok,
-                        'confirmed_percentage' => number_format($tiktokConfirmedRate, 1)
+                        'confirmed_percentage' => number_format($tiktokConfirmedRate, 1),
+                        'refused_count' => $refusedTiktok,
+                        'refused_percentage' => number_format($tiktokRefusedRate, 1)
                     ],
                     'orders_magasin' => [
                         'value' => number_format($ordersMagasin),
@@ -341,7 +369,9 @@ class DashboardController extends Controller
                         'delivered_count' => $deliveredMagasin,
                         'delivered_percentage' => number_format($magasinDeliveredRate, 1),
                         'confirmed_count' => $confirmedMagasin,
-                        'confirmed_percentage' => number_format($magasinConfirmedRate, 1)
+                        'confirmed_percentage' => number_format($magasinConfirmedRate, 1),
+                        'refused_count' => $refusedMagasin,
+                        'refused_percentage' => number_format($magasinRefusedRate, 1)
                     ]
                 ],
                 'revenue_overview' => $revenueOverview,
