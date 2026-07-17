@@ -83,12 +83,18 @@ class DashboardController extends Controller
         $totalOrders = (clone $baseQuery)->count();
         $prevTotalOrders = (clone $prevQuery)->count();
 
-        $activeCustomers = (clone $baseQuery)->distinct('customer_id')->count('customer_id');
-        $prevActiveCustomers = (clone $prevQuery)->distinct('customer_id')->count('customer_id');
+        $totalDelivered = $deliveredOrders->count();
+        $prevTotalDelivered = $prevDeliveredOrders->count();
 
-        // Conversion Rate (Delivered Orders / Total Orders)
-        $conversionRate = $totalOrders > 0 ? ($deliveredOrders->count() / $totalOrders) * 100 : 0;
-        $prevConversionRate = $prevTotalOrders > 0 ? ($prevDeliveredOrders->count() / $prevTotalOrders) * 100 : 0;
+        $totalConfirmed = (clone $baseQuery)->whereHas('orderComments', function ($q) {
+            $q->where('order_status_id', 4);
+        })->count();
+        $prevTotalConfirmed = (clone $prevQuery)->whereHas('orderComments', function ($q) {
+            $q->where('order_status_id', 4);
+        })->count();
+
+        $totalInTransit = (clone $baseQuery)->whereIn('order_status_id', [4, 5, 6, 9])->count();
+        $prevTotalInTransit = (clone $prevQuery)->whereIn('order_status_id', [4, 5, 6, 9])->count();
 
         // Helper function for trend
         $formatTrend = function ($old, $new) {
@@ -100,58 +106,49 @@ class DashboardController extends Controller
             return $sign . round($diff, 1) . '%';
         };
 
-        // 2. Revenue Overview Chart
-        $revenueByDay = [
-            'Mon' => ['revenue' => 0, 'profit' => 0],
-            'Tue' => ['revenue' => 0, 'profit' => 0],
-            'Wed' => ['revenue' => 0, 'profit' => 0],
-            'Thu' => ['revenue' => 0, 'profit' => 0],
-            'Fri' => ['revenue' => 0, 'profit' => 0],
-            'Sat' => ['revenue' => 0, 'profit' => 0],
-            'Sun' => ['revenue' => 0, 'profit' => 0],
-        ];
+        // 2. Orders Overview Chart
+        $ordersByDay = [];
+        $current = $start->copy();
+        while ($current <= $end) {
+            $dateKey = $current->format('d M');
+            $ordersByDay[$dateKey] = ['all' => 0, 'shipped' => 0, 'canceled' => 0];
+            $current->addDay();
+        }
 
-        $allOrders = (clone $baseQuery)->with('activeOrderPvas')->get();
+        $allOrders = (clone $baseQuery)->get();
         foreach ($allOrders as $order) {
-            $day = $order->created_at->format('D');
-            $orderRevenue = $order->activeOrderPvas->sum(function ($pva) {
-                return $pva->price * $pva->quantity;
-            });
-            $orderProfit = $order->activeOrderPvas->sum(function ($pva) {
-                return ($pva->price * $pva->quantity) - ($pva->realprice * $pva->quantity);
-            }) - $order->real_carrier_price;
-
-            if (isset($revenueByDay[$day])) {
-                $revenueByDay[$day]['revenue'] += $orderRevenue;
-                $revenueByDay[$day]['profit'] += $orderProfit;
+            $day = $order->created_at->format('d M');
+            if (isset($ordersByDay[$day])) {
+                $ordersByDay[$day]['all']++;
+                if (in_array($order->order_status_id, [7, 10])) {
+                    $ordersByDay[$day]['shipped']++;
+                } elseif (in_array($order->order_status_id, [8, 11])) {
+                    $ordersByDay[$day]['canceled']++;
+                }
             }
         }
 
-        $maxRevenue = max(array_column($revenueByDay, 'revenue')) ?: 1;
-        $maxProfit = max(array_column($revenueByDay, 'profit')) ?: 1;
-
         $revenueOverview = [];
-        foreach ($revenueByDay as $day => $data) {
+        foreach ($ordersByDay as $day => $data) {
             $revenueOverview[] = [
                 'day' => $day,
-                'revenue_factor' => round($data['revenue'] / $maxRevenue, 2),
-                'profit_factor' => round(max(0, $data['profit']) / $maxProfit, 2),
+                'all_orders' => $data['all'],
+                'shipped_orders' => $data['shipped'],
+                'canceled_orders' => $data['canceled'],
             ];
         }
 
         // 3. Delivery Status Chart
-        $statusByDay = [
-            'Mon' => ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0],
-            'Tue' => ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0],
-            'Wed' => ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0],
-            'Thu' => ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0],
-            'Fri' => ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0],
-            'Sat' => ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0],
-            'Sun' => ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0],
-        ];
+        $statusByDay = [];
+        $current = $start->copy();
+        while ($current <= $end) {
+            $dateKey = $current->format('d M');
+            $statusByDay[$dateKey] = ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0];
+            $current->addDay();
+        }
 
         foreach ($allOrders as $order) {
-            $day = $order->created_at->format('D');
+            $day = $order->created_at->format('d M');
             if (isset($statusByDay[$day])) {
                 $statusByDay[$day]['total']++;
                 
@@ -176,144 +173,148 @@ class DashboardController extends Controller
             ];
         }
 
-        // 4. Inventory Alerts
-        // 4. Inventory Alerts
-        // Optimized to prevent memory exhaustion by computing aggregates in database instead of hydrating all models.
-        $productsWithPvas = Product::whereHas('productVariationAttributes', function ($query) use ($accountId) {
-                $query->where('account_id', $accountId);
-            })
-            ->get(['id', 'title']);
 
-        $groupedProducts = [];
-        foreach ($productsWithPvas as $product) {
-            $groupedProducts[$product->id] = [
-                'product_name' => $product->title,
-                'ordered' => 0,
-                'in_transit' => 0,
-                'available' => 0,
-            ];
-        }
 
-        // Fetch available sums per product
-        $availableData = DB::table('warehouse_pva')
-            ->join('product_variation_attribute', 'warehouse_pva.product_variation_attribute_id', '=', 'product_variation_attribute.id')
-            ->where('warehouse_pva.statut', 1)
-            ->where('product_variation_attribute.account_id', $accountId)
-            ->whereNull('product_variation_attribute.deleted_at')
-            ->groupBy('product_variation_attribute.product_id')
-            ->select('product_variation_attribute.product_id', DB::raw('SUM(warehouse_pva.quantity) as total_available'))
-            ->get();
+        // Fetch all sources for the current account to filter dynamically
+        $accountSources = \App\Models\Source::where('account_id', $accountId)->get();
 
-        foreach ($availableData as $row) {
-            if (isset($groupedProducts[$row->product_id])) {
-                $groupedProducts[$row->product_id]['available'] = (int) $row->total_available;
+        $getIdsForType = function ($accountSources, $keywords) {
+            return $accountSources->filter(function ($source) use ($keywords) {
+                $title = strtolower($source->title);
+                foreach ($keywords as $keyword) {
+                    if (str_contains($title, $keyword)) {
+                        return true;
+                    }
+                }
+                return false;
+            })->pluck('id')->toArray();
+        };
+
+        $websiteSourceIds = $getIdsForType($accountSources, ['site', 'web']);
+        $whatsappSourceIds = $getIdsForType($accountSources, ['whatsapp', 'wtsp']);
+        $tiktokSourceIds = $getIdsForType($accountSources, ['tiktok']);
+        $magasinSourceIds = $getIdsForType($accountSources, ['magasin']);
+
+        // Helper to count orders for specific source IDs
+        $countBySourceIds = function ($query, $sourceIds) {
+            if (empty($sourceIds)) {
+                return 0;
             }
-        }
+            return (clone $query)->whereHas('brandSource', function ($q) use ($sourceIds) {
+                $q->whereIn('source_id', $sourceIds);
+            })->count();
+        };
 
-        // Fetch ordered sums per product
-        $orderedData = DB::table('supplier_order_pva')
-            ->join('product_variation_attribute', 'supplier_order_pva.product_variation_attribute_id', '=', 'product_variation_attribute.id')
-            ->join('supplier_orders', 'supplier_order_pva.supplier_order_id', '=', 'supplier_orders.id')
-            ->where('supplier_orders.statut', 1)
-            ->where('product_variation_attribute.account_id', $accountId)
-            ->whereNull('product_variation_attribute.deleted_at')
-            ->whereNull('supplier_orders.deleted_at')
-            ->whereNull('supplier_order_pva.deleted_at')
-            ->groupBy('product_variation_attribute.product_id')
-            ->select('product_variation_attribute.product_id', DB::raw('SUM(supplier_order_pva.quantity) as total_ordered'))
-            ->get();
+        $ordersWebsite = $countBySourceIds($baseQuery, $websiteSourceIds);
+        $prevOrdersWebsite = $countBySourceIds($prevQuery, $websiteSourceIds);
 
-        foreach ($orderedData as $row) {
-            if (isset($groupedProducts[$row->product_id])) {
-                $groupedProducts[$row->product_id]['ordered'] = (int) $row->total_ordered;
+        $ordersWhatsapp = $countBySourceIds($baseQuery, $whatsappSourceIds);
+        $prevOrdersWhatsapp = $countBySourceIds($prevQuery, $whatsappSourceIds);
+
+        $ordersTiktok = $countBySourceIds($baseQuery, $tiktokSourceIds);
+        $prevOrdersTiktok = $countBySourceIds($prevQuery, $tiktokSourceIds);
+
+        $ordersMagasin = $countBySourceIds($baseQuery, $magasinSourceIds);
+        $prevOrdersMagasin = $countBySourceIds($prevQuery, $magasinSourceIds);
+
+        // Helper to count orders in status [7, 10] for specific source IDs
+        $countDeliveredBySourceIds = function ($query, $sourceIds) {
+            if (empty($sourceIds)) {
+                return 0;
             }
-        }
+            return (clone $query)->whereIn('order_status_id', [7, 10])
+                ->whereHas('brandSource', function ($q) use ($sourceIds) {
+                    $q->whereIn('source_id', $sourceIds);
+                })->count();
+        };
 
-        // Fetch in_transit sums per product
-        $inTransitData = DB::table('order_pva')
-            ->join('product_variation_attribute', 'order_pva.product_variation_attribute_id', '=', 'product_variation_attribute.id')
-            ->join('orders', 'order_pva.order_id', '=', 'orders.id')
-            ->whereIn('orders.order_status_id', [5, 6, 8, 9])
-            ->where('product_variation_attribute.account_id', $accountId)
-            ->whereNull('product_variation_attribute.deleted_at')
-            ->whereNull('orders.deleted_at')
-            ->whereNull('order_pva.deleted_at')
-            ->groupBy('product_variation_attribute.product_id')
-            ->select('product_variation_attribute.product_id', DB::raw('SUM(order_pva.quantity) as total_in_transit'))
-            ->get();
+        $deliveredWebsite = $countDeliveredBySourceIds($baseQuery, $websiteSourceIds);
+        $deliveredWhatsapp = $countDeliveredBySourceIds($baseQuery, $whatsappSourceIds);
+        $deliveredTiktok = $countDeliveredBySourceIds($baseQuery, $tiktokSourceIds);
+        $deliveredMagasin = $countDeliveredBySourceIds($baseQuery, $magasinSourceIds);
 
-        foreach ($inTransitData as $row) {
-            if (isset($groupedProducts[$row->product_id])) {
-                $groupedProducts[$row->product_id]['in_transit'] = (int) $row->total_in_transit;
+        $websiteDeliveredRate = $ordersWebsite > 0 ? ($deliveredWebsite / $ordersWebsite) * 100 : 0;
+        $whatsappDeliveredRate = $ordersWhatsapp > 0 ? ($deliveredWhatsapp / $ordersWhatsapp) * 100 : 0;
+        $tiktokDeliveredRate = $ordersTiktok > 0 ? ($deliveredTiktok / $ordersTiktok) * 100 : 0;
+        $magasinDeliveredRate = $ordersMagasin > 0 ? ($deliveredMagasin / $ordersMagasin) * 100 : 0;
+
+        // Helper to count orders in status 4 in account_user_order_status
+        $countConfirmedBySourceIds = function ($query, $sourceIds) {
+            if (empty($sourceIds)) {
+                return 0;
             }
-        }
+            return (clone $query)->whereHas('brandSource', function ($q) use ($sourceIds) {
+                $q->whereIn('source_id', $sourceIds);
+            })->whereHas('orderComments', function ($q) {
+                $q->where('order_status_id', 4);
+            })->count();
+        };
 
-        $inventoryAlerts = collect(array_values($groupedProducts))->map(function ($item) {
-            $colorCode = 'green';
-            if ($item['available'] <= 0) {
-                $colorCode = 'red';
-            } elseif ($item['available'] <= 5) {
-                $colorCode = 'orange';
-            }
-            $item['color_code'] = $colorCode;
-            return $item;
-        })->sortBy('available')->take(10)->values()->toArray();
+        $confirmedWebsite = $countConfirmedBySourceIds($baseQuery, $websiteSourceIds);
+        $confirmedWhatsapp = $countConfirmedBySourceIds($baseQuery, $whatsappSourceIds);
+        $confirmedTiktok = $countConfirmedBySourceIds($baseQuery, $tiktokSourceIds);
+        $confirmedMagasin = $countConfirmedBySourceIds($baseQuery, $magasinSourceIds);
 
-        // 5. Recent Orders Table
-        $recentOrders = (clone $baseQuery)
-            ->with(['customer', 'orderStatus', 'activeOrderPvas'])
-            ->orderBy('created_at', 'desc')
-            ->take(5)
-            ->get();
-
-        $recentOrdersData = $recentOrders->map(function ($order) {
-            $statusTitle = $order->orderStatus ? $order->orderStatus->title : 'Unknown';
-            $statusColor = 'orange';
-            if (in_array($order->order_status_id, [7, 10])) {
-                $statusColor = 'green';
-            } elseif (in_array($order->order_status_id, [11, 8, 3, 2])) {
-                $statusColor = 'red';
-            }
-
-            $amount = $order->activeOrderPvas->sum(function ($pva) {
-                return $pva->price * $pva->quantity;
-            });
-
-            return [
-                'order_id' => '#' . $order->code,
-                'customer' => $order->customer ? $order->customer->name : 'Unknown',
-                'date' => $order->created_at->format('M d, Y'),
-                'amount' => number_format($amount, 2) . ' DH',
-                'status' => $statusTitle,
-                'status_color' => $statusColor
-            ];
-        })->toArray();
+        $websiteConfirmedRate = $ordersWebsite > 0 ? ($confirmedWebsite / $ordersWebsite) * 100 : 0;
+        $whatsappConfirmedRate = $ordersWhatsapp > 0 ? ($confirmedWhatsapp / $ordersWhatsapp) * 100 : 0;
+        $tiktokConfirmedRate = $ordersTiktok > 0 ? ($confirmedTiktok / $ordersTiktok) * 100 : 0;
+        $magasinConfirmedRate = $ordersMagasin > 0 ? ($confirmedMagasin / $ordersMagasin) * 100 : 0;
 
         return response()->json([
             'status' => 'success',
             'data' => [
                 'summary' => [
-                    'total_revenue' => [
-                        'value' => number_format($totalRevenue, 2) . ' DH',
-                        'trend' => $formatTrend($prevTotalRevenue, $totalRevenue)
-                    ],
                     'total_orders' => [
                         'value' => number_format($totalOrders),
                         'trend' => $formatTrend($prevTotalOrders, $totalOrders)
                     ],
-                    'active_customers' => [
-                        'value' => number_format($activeCustomers),
-                        'trend' => $formatTrend($prevActiveCustomers, $activeCustomers)
+                    'total_delivered' => [
+                        'value' => number_format($totalDelivered),
+                        'trend' => $formatTrend($prevTotalDelivered, $totalDelivered)
                     ],
-                    'conversion_rate' => [
-                        'value' => number_format($conversionRate, 2) . '%',
-                        'trend' => $formatTrend($prevConversionRate, $conversionRate)
+                    'total_confirmed' => [
+                        'value' => number_format($totalConfirmed),
+                        'trend' => $formatTrend($prevTotalConfirmed, $totalConfirmed)
+                    ],
+                    'total_in_transit' => [
+                        'value' => number_format($totalInTransit),
+                        'trend' => $formatTrend($prevTotalInTransit, $totalInTransit)
+                    ],
+                    'orders_website' => [
+                        'value' => number_format($ordersWebsite),
+                        'trend' => $formatTrend($prevOrdersWebsite, $ordersWebsite),
+                        'delivered_count' => $deliveredWebsite,
+                        'delivered_percentage' => number_format($websiteDeliveredRate, 1),
+                        'confirmed_count' => $confirmedWebsite,
+                        'confirmed_percentage' => number_format($websiteConfirmedRate, 1)
+                    ],
+                    'orders_whatsapp' => [
+                        'value' => number_format($ordersWhatsapp),
+                        'trend' => $formatTrend($prevOrdersWhatsapp, $ordersWhatsapp),
+                        'delivered_count' => $deliveredWhatsapp,
+                        'delivered_percentage' => number_format($whatsappDeliveredRate, 1),
+                        'confirmed_count' => $confirmedWhatsapp,
+                        'confirmed_percentage' => number_format($whatsappConfirmedRate, 1)
+                    ],
+                    'orders_tiktok' => [
+                        'value' => number_format($ordersTiktok),
+                        'trend' => $formatTrend($prevOrdersTiktok, $ordersTiktok),
+                        'delivered_count' => $deliveredTiktok,
+                        'delivered_percentage' => number_format($tiktokDeliveredRate, 1),
+                        'confirmed_count' => $confirmedTiktok,
+                        'confirmed_percentage' => number_format($tiktokConfirmedRate, 1)
+                    ],
+                    'orders_magasin' => [
+                        'value' => number_format($ordersMagasin),
+                        'trend' => $formatTrend($prevOrdersMagasin, $ordersMagasin),
+                        'delivered_count' => $deliveredMagasin,
+                        'delivered_percentage' => number_format($magasinDeliveredRate, 1),
+                        'confirmed_count' => $confirmedMagasin,
+                        'confirmed_percentage' => number_format($magasinConfirmedRate, 1)
                     ]
                 ],
                 'revenue_overview' => $revenueOverview,
-                'delivery_status' => $deliveryStatus,
-                'inventory_alerts' => $inventoryAlerts,
-                'recent_orders' => $recentOrdersData
+                'delivery_status' => $deliveryStatus
             ]
         ]);
     }
