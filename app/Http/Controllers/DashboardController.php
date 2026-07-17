@@ -107,29 +107,45 @@ class DashboardController extends Controller
         };
 
         // 2. Orders Overview Chart
-        $ordersByDay = [];
-        $current = $start->copy();
+        $diffInDays = $start->diffInDays($end) + 1;
+        
+        if ($diffInDays > 365) {
+            $groupFormat = 'Y';
+            $addFunction = 'addYear';
+            $startRange = $start->copy()->startOfYear();
+        } elseif ($diffInDays > 30) {
+            $groupFormat = 'M y';
+            $addFunction = 'addMonth';
+            $startRange = $start->copy()->startOfMonth();
+        } else {
+            $groupFormat = 'd M';
+            $addFunction = 'addDay';
+            $startRange = $start->copy();
+        }
+
+        $ordersByPeriod = [];
+        $current = $startRange->copy();
         while ($current <= $end) {
-            $dateKey = $current->format('d M');
-            $ordersByDay[$dateKey] = ['all' => 0, 'shipped' => 0, 'canceled' => 0];
-            $current->addDay();
+            $dateKey = $current->format($groupFormat);
+            $ordersByPeriod[$dateKey] = ['all' => 0, 'shipped' => 0, 'canceled' => 0];
+            $current->{$addFunction}();
         }
 
         $allOrders = (clone $baseQuery)->get();
         foreach ($allOrders as $order) {
-            $day = $order->created_at->format('d M');
-            if (isset($ordersByDay[$day])) {
-                $ordersByDay[$day]['all']++;
+            $day = $order->created_at->format($groupFormat);
+            if (isset($ordersByPeriod[$day])) {
+                $ordersByPeriod[$day]['all']++;
                 if (in_array($order->order_status_id, [7, 10])) {
-                    $ordersByDay[$day]['shipped']++;
+                    $ordersByPeriod[$day]['shipped']++;
                 } elseif (in_array($order->order_status_id, [8, 11])) {
-                    $ordersByDay[$day]['canceled']++;
+                    $ordersByPeriod[$day]['canceled']++;
                 }
             }
         }
 
         $revenueOverview = [];
-        foreach ($ordersByDay as $day => $data) {
+        foreach ($ordersByPeriod as $day => $data) {
             $revenueOverview[] = [
                 'day' => $day,
                 'all_orders' => $data['all'],
@@ -139,31 +155,31 @@ class DashboardController extends Controller
         }
 
         // 3. Delivery Status Chart
-        $statusByDay = [];
-        $current = $start->copy();
+        $statusByPeriod = [];
+        $current = $startRange->copy();
         while ($current <= $end) {
-            $dateKey = $current->format('d M');
-            $statusByDay[$dateKey] = ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0];
-            $current->addDay();
+            $dateKey = $current->format($groupFormat);
+            $statusByPeriod[$dateKey] = ['total' => 0, 'delivered' => 0, 'returned' => 0, 'in_transit' => 0];
+            $current->{$addFunction}();
         }
 
         foreach ($allOrders as $order) {
-            $day = $order->created_at->format('d M');
-            if (isset($statusByDay[$day])) {
-                $statusByDay[$day]['total']++;
+            $day = $order->created_at->format($groupFormat);
+            if (isset($statusByPeriod[$day])) {
+                $statusByPeriod[$day]['total']++;
                 
                 if (in_array($order->order_status_id, [7, 10])) {
-                    $statusByDay[$day]['delivered']++;
+                    $statusByPeriod[$day]['delivered']++;
                 } elseif (in_array($order->order_status_id, [11, 8, 3, 2])) {
-                    $statusByDay[$day]['returned']++;
+                    $statusByPeriod[$day]['returned']++;
                 } elseif (in_array($order->order_status_id, [4, 5, 6, 9])) {
-                    $statusByDay[$day]['in_transit']++;
+                    $statusByPeriod[$day]['in_transit']++;
                 }
             }
         }
 
         $deliveryStatus = [];
-        foreach ($statusByDay as $day => $data) {
+        foreach ($statusByPeriod as $day => $data) {
             $total = $data['total'] ?: 1;
             $deliveryStatus[] = [
                 'day' => $day,
