@@ -260,6 +260,25 @@ class DashboardController extends Controller
         $tiktokConfirmedRate = $ordersTiktok > 0 ? ($confirmedTiktok / $ordersTiktok) * 100 : 0;
         $magasinConfirmedRate = $ordersMagasin > 0 ? ($confirmedMagasin / $ordersMagasin) * 100 : 0;
 
+        $deliveredOrdersByCity = (clone $baseQuery)
+            ->whereIn('order_status_id', [7, 10])
+            ->whereNotNull('city_id')
+            ->select('city_id', DB::raw('count(*) as count'))
+            ->groupBy('city_id')
+            ->orderByDesc('count')
+            ->limit(10)
+            ->with('city')
+            ->get();
+
+        $topCitiesDelivered = [];
+        foreach ($deliveredOrdersByCity as $item) {
+            $cityName = $item->city ? $item->city->title : 'Unknown';
+            $topCitiesDelivered[] = [
+                'city' => $cityName,
+                'count' => (int)$item->count,
+            ];
+        }
+
         return response()->json([
             'status' => 'success',
             'data' => [
@@ -314,7 +333,8 @@ class DashboardController extends Controller
                     ]
                 ],
                 'revenue_overview' => $revenueOverview,
-                'delivery_status' => $deliveryStatus
+                'delivery_status' => $deliveryStatus,
+                'top_cities_delivered' => $topCitiesDelivered
             ]
         ]);
     }
