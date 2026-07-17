@@ -266,16 +266,28 @@ class DashboardController extends Controller
             ->select('city_id', DB::raw('count(*) as count'))
             ->groupBy('city_id')
             ->orderByDesc('count')
-            ->limit(10)
             ->with('city')
             ->get();
 
         $topCitiesDelivered = [];
-        foreach ($deliveredOrdersByCity as $item) {
-            $cityName = $item->city ? $item->city->title : 'Unknown';
+        $othersCount = 0;
+
+        foreach ($deliveredOrdersByCity as $index => $item) {
+            if ($index < 9) {
+                $cityName = $item->city ? $item->city->title : 'Unknown';
+                $topCitiesDelivered[] = [
+                    'city' => $cityName,
+                    'count' => (int)$item->count,
+                ];
+            } else {
+                $othersCount += (int)$item->count;
+            }
+        }
+
+        if ($othersCount > 0) {
             $topCitiesDelivered[] = [
-                'city' => $cityName,
-                'count' => (int)$item->count,
+                'city' => 'Others',
+                'count' => $othersCount,
             ];
         }
 
