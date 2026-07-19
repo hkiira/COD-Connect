@@ -49,6 +49,8 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
                 return $this->getOrder($id);
             case 'sync_orders':
                 return $this->syncOrders();
+            case 'sync_confirm':
+                return $this->syncConfirms();
             case 'sync_statuses':
                 return $this->syncStatuses();
             case 'sync_returns':
@@ -404,7 +406,24 @@ class AsapDeliveryController extends Controller implements FromCollection, WithH
             'message' => 'Utilisateur non authentifié.',
         ], 401);
     }
+    public function syncConfirms()
+    {
+        $orders = Order::where(['order_status_id' => 4])->get();
+        $data = [];
+        foreach ($orders as $order) {
+            $data[] = [
+                'id' => $order->id,
+                "comment" => [
+                    "id" => "40",
+                    "title" => " Hors service SI"
+                ]
+            ];
+        }
+        if ($data) {
+            return OrderController::update(new Request($data), $local = 2);
+        }
 
+    }
     public function runSync()
     {
         $sessionId = $this->login();
