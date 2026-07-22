@@ -158,7 +158,7 @@ class WoocommerceController extends Controller
     }
     public function getAllProducts()
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products';
@@ -200,7 +200,7 @@ class WoocommerceController extends Controller
      */
     public function getProduct($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/' . $id;
@@ -220,7 +220,7 @@ class WoocommerceController extends Controller
      */
     public function createProduct(Request $request)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products';
@@ -243,7 +243,7 @@ class WoocommerceController extends Controller
      */
     public function updateProduct(Request $request, $id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/' . $id;
@@ -265,7 +265,7 @@ class WoocommerceController extends Controller
      */
     public function deleteProduct($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/' . $id;
@@ -284,7 +284,7 @@ class WoocommerceController extends Controller
      */
     public function getAllOrders($status)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'orders';
@@ -422,7 +422,7 @@ class WoocommerceController extends Controller
      */
     public function getOrder($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'orders/' . $id;
@@ -442,7 +442,7 @@ class WoocommerceController extends Controller
      */
     public function createOrder(Request $request)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'orders';
@@ -465,7 +465,7 @@ class WoocommerceController extends Controller
      */
     public function updateOrder($id, $status)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'orders/' . $id;
@@ -489,7 +489,7 @@ class WoocommerceController extends Controller
      */
     public function deleteOrder($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'orders/' . $id;
@@ -508,7 +508,7 @@ class WoocommerceController extends Controller
      */
     public function getAllCustomers()
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'customers';
@@ -528,7 +528,7 @@ class WoocommerceController extends Controller
      */
     public function getCustomer($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'customers/' . $id;
@@ -548,7 +548,7 @@ class WoocommerceController extends Controller
      */
     public function createCustomer(Request $request)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'customers';
@@ -571,7 +571,7 @@ class WoocommerceController extends Controller
      */
     public function updateCustomer(Request $request, $id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'customers/' . $id;
@@ -593,7 +593,7 @@ class WoocommerceController extends Controller
      */
     public function deleteCustomer($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'customers/' . $id;
@@ -612,7 +612,7 @@ class WoocommerceController extends Controller
      */
     public function getAllCoupons()
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'coupons';
@@ -632,7 +632,7 @@ class WoocommerceController extends Controller
      */
     public function getCoupon($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'coupons/' . $id;
@@ -652,7 +652,7 @@ class WoocommerceController extends Controller
      */
     public function createCoupon(Request $request)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'coupons';
@@ -675,7 +675,7 @@ class WoocommerceController extends Controller
      */
     public function updateCoupon(Request $request, $id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'coupons/' . $id;
@@ -697,7 +697,7 @@ class WoocommerceController extends Controller
      */
     public function deleteCoupon($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'coupons/' . $id;
@@ -717,7 +717,7 @@ class WoocommerceController extends Controller
      */
     public function getProductCategory($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'product_categories/' . $id;
@@ -737,7 +737,7 @@ class WoocommerceController extends Controller
      */
     public function createProductCategory(Request $request)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'product_categories';
@@ -760,7 +760,7 @@ class WoocommerceController extends Controller
      */
     public function updateProductCategory(Request $request, $id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'product_categories/' . $id;
@@ -782,7 +782,7 @@ class WoocommerceController extends Controller
      */
     public function deleteProductCategory($id)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'product_categories/' . $id;
@@ -801,7 +801,7 @@ class WoocommerceController extends Controller
      */
     public function getAllVariations()
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/variations';
@@ -820,7 +820,7 @@ class WoocommerceController extends Controller
      */
     public function getAllAttributes()
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/attributes';
@@ -856,7 +856,7 @@ class WoocommerceController extends Controller
         $accountUsers = Account::find(getAccountUser()->account_id)->accountUsers->pluck('id')->toArray();
         $attributeType = TypeAttribute::where('meta->id', $attributeMeta)->whereIn("account_user_id", $accountUsers)->first();
 
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/attributes/' . $attributeMeta . '/terms';
@@ -899,7 +899,7 @@ class WoocommerceController extends Controller
     }
     public function getAttribute($attributeId)
     {
-        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/attributes/' . $attributeId;
