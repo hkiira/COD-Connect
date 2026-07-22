@@ -291,48 +291,126 @@ class WoocommerceController extends Controller
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret . "&status=" . $status . "&per_page=10";
         $response = Http::get($url);
         $orders = $response->json();
+
+        if (!is_array($orders)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to fetch orders from WooCommerce.',
+                'updated_orders' => [],
+                'unupdated_orders' => [],
+            ], 400);
+        }
+
         $accountUsers = Account::find(getAccountUser()->account_id)->accountUsers->pluck('id')->toArray();
-        $requests = collect($orders)->map(function ($order) use ($accountUsers) {
+        $updatedOrders = [];
+        $unupdatedOrders = [];
+
+        foreach ($orders as $order) {
+            if (!is_array($order) || !isset($order['id'])) {
+                continue;
+            }
+
+            $orderId = $order['id'];
+            $cityId = $order['billing']['city'] ?? null;
+            $city = $cityId ? City::where('id', $cityId)->first() : null;
+
+            $firstName = $order['billing']['first_name'] ?? '';
             $request = [];
-            $city = City::where('id', $order['billing']['city'])->first();
-            $request['customer']['name'] = $order['billing']['first_name'] == "  " ? "Client WebSite" : $order['billing']['first_name'];
-            $request['customer']['phones'][] = ['title' => $order['billing']['phone'], 'principal' => true, 'phoneTypes' => [1]];
-            $request['customer']['addresses'][] = ['title' => $order['billing']['address_1'], 'principal' => true, 'city_id' => $city ? $city->id : 4];
+            $request['customer']['name'] = (trim($firstName) === "" || $firstName === "  ") ? "Client WebSite" : $firstName;
+            $request['customer']['phones'][] = ['title' => $order['billing']['phone'] ?? '', 'principal' => true, 'phoneTypes' => [1]];
+            $request['customer']['addresses'][] = ['title' => $order['billing']['address_1'] ?? '', 'principal' => true, 'city_id' => $city ? $city->id : 4];
             $request['customer']['customer_type_id'] = 1;
             $request['warehouse_id'] = 30;
             $request['brand_source_id'] = 108;
             $request['payment_type_id'] = 1;
             $request['payment_method_id'] = 1;
             $request['order_status_id'] = 1;
-            $request['meta'] = $order["id"];
+            $request['meta'] = $orderId;
+
             $products = [];
-            foreach ($order["line_items"] as $item) {
-                // $product = Product::where('meta->id', $item["product_id"])->orWhere('reference', $item["sku"])->whereIn("account_user_id", $accountUsers)->first();
-                $variationId=$item["variation_id"];
-                $pva=ProductVariationAttribute::whereRaw("JSON_CONTAINS(meta, ?)", [json_encode(['id' => $variationId])])->first();
+            $missingVariations = [];
+            $lineItems = $order['line_items'] ?? [];
+
+            if (empty($lineItems)) {
+                $unupdatedOrders[] = [
+                    'order_id' => $orderId,
+                    'cause' => 'No line items found in order.',
+                ];
+                continue;
+            }
+
+            foreach ($lineItems as $item) {
+                $variationId = $item['variation_id'] ?? null;
+                if (!$variationId) {
+                    $missingVariations[] = 'Missing variation_id';
+                    continue;
+                }
+
+                $pva = ProductVariationAttribute::whereRaw("JSON_CONTAINS(meta, ?)", [json_encode(['id' => $variationId])])->first();
                 if ($pva) {
-                    $attributes = Attribute::whereIn('meta->name', collect($item["meta_data"])->pluck('display_value')->toArray())->whereIn("account_user_id", $accountUsers)->get()->pluck('id')->toArray();
+                    $attributes = Attribute::whereIn('meta->name', collect($item['meta_data'] ?? [])->pluck('display_value')->toArray())
+                        ->whereIn("account_user_id", $accountUsers)
+                        ->get()
+                        ->pluck('id')
+                        ->toArray();
+
                     $products[] = [
                         "id" => $pva->product->id,
-                        "quantity" => 1,//$item["quantity"],
-                        "price" => $item["price"],
+                        "quantity" => 1,
+                        "price" => $item['price'] ?? 0,
                         "attributes" => $pva->variationAttribute->childVariationAttributes->pluck('attribute_id')->toArray()
                     ];
+                } else {
+                    $missingVariations[] = $variationId;
                 }
             }
+
             $request['products'] = $products;
-            if (isset($request['products']))
-                if ($request['products']) {
-                    $storeResponse = OrderController::store(new Request([$request]));
-                    $storePayload = method_exists($storeResponse, 'getData') ? $storeResponse->getData(true) : [];
-                    if (($storePayload['statut'] ?? 0) == 1) {
-                        $this->updateOrder($order['id'], 'completed');
-                    }
+
+            if (empty($products)) {
+                $cause = !empty($missingVariations)
+                    ? 'Product variation attribute not found for variation ID(s): ' . implode(', ', $missingVariations)
+                    : 'No valid matching products found for line items.';
+                $unupdatedOrders[] = [
+                    'order_id' => $orderId,
+                    'cause' => $cause,
+                ];
+                continue;
+            }
+
+            $storeResponse = OrderController::store(new Request([$request]));
+            $storePayload = method_exists($storeResponse, 'getData') ? $storeResponse->getData(true) : [];
+
+            if (($storePayload['statut'] ?? 0) == 1) {
+                $updateRes = $this->updateOrder($orderId, 'completed');
+                $updatePayload = method_exists($updateRes, 'getData') ? $updateRes->getData(true) : [];
+                if (isset($updatePayload['code'])) {
+                    $unupdatedOrders[] = [
+                        'order_id' => $orderId,
+                        'cause' => 'Order stored locally, but WooCommerce update failed: ' . ($updatePayload['message'] ?? json_encode($updatePayload)),
+                    ];
+                } else {
+                    $updatedOrders[] = $orderId;
                 }
-        })->filter()->values()->toArray();
+            } else {
+                $storeCause = 'Order store failed: ';
+                if (isset($storePayload['data'])) {
+                    $storeCause .= is_string($storePayload['data']) ? $storePayload['data'] : json_encode($storePayload['data']);
+                } else {
+                    $storeCause .= 'Unknown error.';
+                }
+                $unupdatedOrders[] = [
+                    'order_id' => $orderId,
+                    'cause' => $storeCause,
+                ];
+            }
+        }
+
         return response()->json([
             'status' => 'success',
             'message' => 'Order notification received.',
+            'updated_orders' => $updatedOrders,
+            'unupdated_orders' => $unupdatedOrders,
         ], 200);
     }
 
