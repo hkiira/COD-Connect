@@ -305,6 +305,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     // WooCommerce Order Management (new dedicated controller)
     Route::get('wc-orders', [\App\Http\Controllers\WooCommerceOrderController::class, 'getOrdersByStatus']);
     Route::post('wc-orders/import', [\App\Http\Controllers\WooCommerceOrderController::class, 'importOrders']);
+    Route::post('wc-orders/sync-product', [\App\Http\Controllers\WooCommerceOrderController::class, 'syncProduct']);
     Route::get('wc-orders/{id}', [\App\Http\Controllers\WooCommerceOrderController::class, 'showOrder']);
     Route::get('oldsys/{model}/{id?}', [OldSysController::class, 'rest']);
     Route::post('oldsys/{model}/{id?}', [OldSysController::class, 'rest']);

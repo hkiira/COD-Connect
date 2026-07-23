@@ -43,7 +43,7 @@ class WooCommerceOrderController extends Controller
         $perPage = (int) $request->get('per_page', 10);
         $page = (int) $request->get('page', 1);
 
-        $wcResponse = Http::get($this->baseUrl . 'orders', [
+        $wcResponse = Http::withoutVerifying()->get($this->baseUrl . 'orders', [
             'consumer_key' => $this->consumerKey,
             'consumer_secret' => $this->consumerSecret,
             'status' => $status,
@@ -66,16 +66,18 @@ class WooCommerceOrderController extends Controller
             // Check if this WooCommerce order has already been imported
             $alreadyImported = Order::where('account_id', $accountId)
                 ->where(function ($q) use ($wcOrder) {
-                    $q->whereRaw("JSON_CONTAINS(meta, ?)", [json_encode(['id' => $wcOrder['id']])])
-                        ->orWhere('meta', (string) $wcOrder['id']);
+                    $q->where('meta', (string) $wcOrder['id'])
+                        ->orWhere('meta', 'LIKE', '%"id":' . $wcOrder['id'] . '%')
+                        ->orWhere('meta', 'LIKE', '%"id": ' . $wcOrder['id'] . '%');
                 })
                 ->exists();
 
             $lineItems = collect($wcOrder['line_items'])->map(function ($item) {
-                $pva = ProductVariationAttribute::whereRaw(
-                    "JSON_CONTAINS(meta, ?)",
-                    [json_encode(['id' => (int) $item['variation_id']])]
-                )->first();
+                $pva = ProductVariationAttribute::where(function ($q) use ($item) {
+                    $q->where('meta', (string) $item['variation_id'])
+                        ->orWhere('meta', 'LIKE', '%"id":' . (int) $item['variation_id'] . '%')
+                        ->orWhere('meta', 'LIKE', '%"id": ' . (int) $item['variation_id'] . '%');
+                })->first();
 
                 $systemProduct = null;
                 if ($pva && $pva->product) {
@@ -131,7 +133,7 @@ class WooCommerceOrderController extends Controller
                 'page' => $page,
                 'per_page' => $perPage,
                 'status' => $status,
-                'count' => count($wcOrders),
+                'count' => (int) $wcResponse->header('X-WP-Total') ?: count($wcOrders),
             ],
         ]);
     }
@@ -172,7 +174,7 @@ class WooCommerceOrderController extends Controller
                 $wcOrderId = (int) $orderInput['wc_order_id'];
 
                 // Fetch full WooCommerce order details
-                $wcResponse = Http::get($this->baseUrl . 'orders/' . $wcOrderId, [
+                $wcResponse = Http::withoutVerifying()->get($this->baseUrl . 'orders/' . $wcOrderId, [
                     'consumer_key' => $this->consumerKey,
                     'consumer_secret' => $this->consumerSecret,
                 ]);
@@ -191,8 +193,9 @@ class WooCommerceOrderController extends Controller
                 // Skip orders already imported
                 $existingOrder = Order::where('account_id', $accountId)
                     ->where(function ($q) use ($wcOrderId) {
-                        $q->whereRaw("JSON_CONTAINS(meta, ?)", [json_encode(['id' => $wcOrderId])])
-                            ->orWhere('meta', (string) $wcOrderId);
+                        $q->where('meta', (string) $wcOrderId)
+                            ->orWhere('meta', 'LIKE', '%"id":' . $wcOrderId . '%')
+                            ->orWhere('meta', 'LIKE', '%"id": ' . $wcOrderId . '%');
                     })
                     ->first();
 
@@ -213,10 +216,11 @@ class WooCommerceOrderController extends Controller
                 // Match line items to system products via PVA meta
                 $products = [];
                 foreach ($wcOrder['line_items'] as $item) {
-                    $pva = ProductVariationAttribute::whereRaw(
-                        "JSON_CONTAINS(meta, ?)",
-                        [json_encode(['id' => (int) $item['variation_id']])]
-                    )->first();
+                    $pva = ProductVariationAttribute::where(function ($q) use ($item) {
+                        $q->where('meta', (string) $item['variation_id'])
+                            ->orWhere('meta', 'LIKE', '%"id":' . (int) $item['variation_id'] . '%')
+                            ->orWhere('meta', 'LIKE', '%"id": ' . (int) $item['variation_id'] . '%');
+                    })->first();
 
                     if ($pva && $pva->product) {
                         $products[] = [
@@ -295,7 +299,7 @@ class WooCommerceOrderController extends Controller
 
                 if (($storePayload['statut'] ?? 0) == 1) {
                     // Update WooCommerce order status after successful creation
-                    Http::withQueryParameters([
+                    Http::withoutVerifying()->withQueryParameters([
                         'consumer_key' => $this->consumerKey,
                         'consumer_secret' => $this->consumerSecret,
                     ])->put($this->baseUrl . 'orders/' . $wcOrderId, ['status' => $wcUpdateStatus]);
@@ -345,6 +349,34 @@ class WooCommerceOrderController extends Controller
 
     public function showOrder($id)
     {
+        $accountId = getAccountUser()->account_id;
+
+        // 1. Fetch WooCommerce order
+        $wcResponse = Http::withoutVerifying()->get($this->baseUrl . 'orders/' . $id, [
+            'consumer_key' => $this->consumerKey,
+            'consumer_secret' => $this->consumerSecret,
+        ]);
+
+        $wcOrderData = null;
+        if ($wcResponse->successful()) {
+            $raw = $wcResponse->json();
+            $wcOrderData = [
+                'wc_order_id' => $raw['id'],
+                'wc_status' => $raw['status'],
+                'wc_total' => $raw['total'],
+                'wc_currency' => $raw['currency'],
+                'date_created' => $raw['date_created'],
+                'date_modified' => $raw['date_modified'] ?? null,
+                'billing' => $raw['billing'] ?? null,
+                'shipping' => $raw['shipping'] ?? null,
+                'line_items' => $raw['line_items'] ?? [],
+                'payment_method' => $raw['payment_method_title'] ?? null,
+                'customer_note' => $raw['customer_note'] ?? null,
+                'shipping_total' => $raw['shipping_total'] ?? 0,
+            ];
+        }
+
+        // 2. Find if this WooCommerce order has been imported as a System Order
         $order = Order::with([
             'customer.phones.phoneTypes',
             'customer.addresses.city',
@@ -361,40 +393,91 @@ class WooCommerceOrderController extends Controller
             'activeOrderPvas.productVariationAttribute.variationAttribute.childVariationAttributes.attribute',
             'activeOrderPvas.orderStatus',
         ])
-            ->where('account_id', getAccountUser()->account_id)
-            ->find($id);
+            ->where('account_id', $accountId)
+            ->where(function ($q) use ($id) {
+                $q->where('meta', (string) $id)
+                    ->orWhere('meta', 'LIKE', '%"id":' . $id . '%')
+                    ->orWhere('meta', 'LIKE', '%"id": ' . $id . '%');
+            })
+            ->first();
 
-        if (!$order) {
+        if (!$order && !$wcOrderData) {
             return response()->json(['statut' => 0, 'message' => 'Order not found.'], 404);
         }
 
-        // Attempt to load linked WooCommerce order
-        $wcOrderData = null;
-        $wcOrderId = is_array($order->meta) ? ($order->meta['id'] ?? null) : $order->meta;
+        if (!$order) {
+            // Synthetic response for unimported WooCommerce order
+            $customerName = trim(($wcOrderData['billing']['first_name'] ?? '') . ' ' . ($wcOrderData['billing']['last_name'] ?? ''));
+            $products = collect($wcOrderData['line_items'])->map(function ($item) {
+                // Check if already synced
+                $variationId = (int) ($item['variation_id'] ?: $item['product_id']);
+                $pva = ProductVariationAttribute::where(function ($q) use ($variationId) {
+                    $q->where('meta', (string) $variationId)
+                        ->orWhere('meta', 'LIKE', '%"id":' . $variationId . '%')
+                        ->orWhere('meta', 'LIKE', '%"id": ' . $variationId . '%');
+                })->first();
 
-        if ($wcOrderId) {
-            $wcResponse = Http::get($this->baseUrl . 'orders/' . $wcOrderId, [
-                'consumer_key' => $this->consumerKey,
-                'consumer_secret' => $this->consumerSecret,
-            ]);
-
-            if ($wcResponse->successful()) {
-                $raw = $wcResponse->json();
-                $wcOrderData = [
-                    'wc_order_id' => $raw['id'],
-                    'wc_status' => $raw['status'],
-                    'wc_total' => $raw['total'],
-                    'wc_currency' => $raw['currency'],
-                    'date_created' => $raw['date_created'],
-                    'billing' => $raw['billing'] ?? null,
-                    'shipping' => $raw['shipping'] ?? null,
-                    'line_items' => $raw['line_items'] ?? [],
-                    'payment_method' => $raw['payment_method_title'] ?? null,
-                    'customer_note' => $raw['customer_note'] ?? null,
+                return [
+                    'order_pva_id' => $item['id'],
+                    'product_id' => $item['product_id'],
+                    'wc_product_id' => $item['product_id'],
+                    'wc_variation_id' => $variationId,
+                    'is_matched' => $pva !== null,
+                    'system_pva_id' => $pva ? $pva->id : null,
+                    'product_title' => $item['name'],
+                    'product_reference' => $item['sku'],
+                    'price' => $item['price'],
+                    'quantity' => $item['quantity'],
+                    'discount' => 0,
+                    'order_status' => ['id' => null, 'title' => 'N/A'],
+                    'attributes' => collect($item['meta_data'] ?? [])->map(fn($meta) => [
+                        'id' => $meta['id'] ?? uniqid(),
+                        'title' => ($meta['display_key'] ?? '') . ': ' . strip_tags($meta['display_value'] ?? ''),
+                    ])->toArray(),
                 ];
-            }
+            });
+
+            return response()->json([
+                'statut' => 1,
+                'data' => [
+                    'id' => null,
+                    'code' => 'WC-' . $wcOrderData['wc_order_id'],
+                    'shipping_code' => '',
+                    'note' => $wcOrderData['customer_note'] ?? '',
+                    'discount' => 0,
+                    'carrier_price' => $wcOrderData['shipping_total'] ?? 0,
+                    'created_at' => $wcOrderData['date_created'],
+                    'updated_at' => $wcOrderData['date_modified'] ?? $wcOrderData['date_created'],
+                    'order_status' => ['id' => null, 'title' => $wcOrderData['wc_status']],
+                    'warehouse' => ['id' => null, 'title' => 'Not Imported'],
+                    'payment_type' => ['id' => null, 'title' => 'N/A'],
+                    'payment_method' => ['id' => null, 'title' => $wcOrderData['payment_method'] ?: 'N/A'],
+                    'brand' => null,
+                    'source' => null,
+                    'city' => ['id' => null, 'title' => $wcOrderData['billing']['city'] ?? ''],
+                    'pickup' => null,
+                    'shipment' => null,
+                    'customer' => [
+                        'id' => null,
+                        'name' => $customerName ?: 'Unknown',
+                        'phones' => [[
+                            'id' => null,
+                            'title' => $wcOrderData['billing']['phone'] ?? '',
+                            'types' => []
+                        ]],
+                        'addresses' => [[
+                            'id' => null,
+                            'title' => $wcOrderData['billing']['address_1'] ?? '',
+                            'city' => ['id' => null, 'title' => $wcOrderData['billing']['city'] ?? '']
+                        ]],
+                    ],
+                    'products' => $products,
+                    'woocommerce' => $wcOrderData,
+                ],
+            ]);
         }
 
+        // If system order exists, return it with WooCommerce data attached
         $products = $order->activeOrderPvas->map(function ($orderPva) {
             $pva = $orderPva->productVariationAttribute;
             $product = $pva->product;
@@ -456,4 +539,47 @@ class WooCommerceOrderController extends Controller
             ],
         ]);
     }
+
+    // -------------------------------------------------------------------------
+    // Function 4 — Sync a WooCommerce variation to a system product variation
+    // POST /api/wc-orders/sync-product
+    // -------------------------------------------------------------------------
+
+    public function syncProduct(Request $request)
+    {
+        $request->validate([
+            'wc_variation_id' => 'required|integer',
+            'system_pva_id' => 'required|integer',
+        ]);
+
+        $pva = ProductVariationAttribute::find($request->system_pva_id);
+        
+        if (!$pva) {
+            return response()->json(['statut' => 0, 'message' => 'System product variation not found.'], 404);
+        }
+
+        // Store the WooCommerce variation ID in the meta field (it's cast to array in the model)
+        $metaArray = is_array($pva->meta) ? $pva->meta : [];
+        
+        $exists = false;
+        foreach ($metaArray as $item) {
+            if (isset($item['id']) && $item['id'] == $request->wc_variation_id) {
+                $exists = true;
+                break;
+            }
+        }
+
+        if (!$exists) {
+            $metaArray[] = ['id' => (int) $request->wc_variation_id];
+            $pva->meta = $metaArray;
+            $pva->save();
+        }
+
+        return response()->json([
+            'statut' => 1, 
+            'message' => 'Product synced successfully.',
+            'pva' => $pva
+        ]);
+    }
 }
+

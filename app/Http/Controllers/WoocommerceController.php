@@ -49,11 +49,11 @@ class WoocommerceController extends Controller
             default:
                 return "productsuppliers";
         }
-        
+
     }
     public function sendCities()
     {
-        $defaultCities=DefaultCarrier::where('carrier_id',22)->get();
+        $defaultCities = DefaultCarrier::where('carrier_id', 22)->get();
         $cities = City::get();
         return $defaultCities->map(function ($defaultCity) {
             return ['id' => $defaultCity->city->id, 'name' => $defaultCity->city->titlear . " " . $defaultCity->city->title];
@@ -61,22 +61,30 @@ class WoocommerceController extends Controller
     }
     public function syncedProducts(Request $request)
     {
-        $datas=[];
+        $datas = [];
         foreach ($request['wc_product_ids'] as $product) {
-            $productModel = Product::whereRaw("JSON_CONTAINS(meta, '{\"id\": $product}')")->first();
-            if($productModel) {
-                $datas[]=$product;
+            $productModel = Product::where(function ($q) use ($product) {
+                $q->where('meta', (string) $product)
+                    ->orWhere('meta', 'LIKE', '%"id":' . $product . '%')
+                    ->orWhere('meta', 'LIKE', '%"id": ' . $product . '%');
+            })->first();
+            if ($productModel) {
+                $datas[] = $product;
             }
         }
         return $datas;
     }
     public function syncedAttributes(Request $request)
     {
-        $datas=[];
+        $datas = [];
         foreach ($request['wc_variation_ids'] as $variation) {
-            $variationModel=ProductVariationAttribute::whereRaw("JSON_CONTAINS(meta, ?)", [json_encode(['id' => $variation])])->first();
-            if($variationModel) {
-                $datas[]=$variation;
+            $variationModel = ProductVariationAttribute::where(function ($q) use ($variation) {
+                $q->where('meta', (string) $variation)
+                    ->orWhere('meta', 'LIKE', '%"id":' . $variation . '%')
+                    ->orWhere('meta', 'LIKE', '%"id": ' . $variation . '%');
+            })->first();
+            if ($variationModel) {
+                $datas[] = $variation;
             }
         }
         return $datas;
@@ -84,28 +92,28 @@ class WoocommerceController extends Controller
     public function syncProduct(Request $request)
     {
         $product = Product::where('id', $request['selected_product_id'])->first();
-        if($product){
-            $variationsProduct=[];
-            $variationsIdsProduct=[];
-            foreach ($product->productVariationAttributes as $key=>$productVariationAttribute) {
+        if ($product) {
+            $variationsProduct = [];
+            $variationsIdsProduct = [];
+            foreach ($product->productVariationAttributes as $key => $productVariationAttribute) {
                 $variationAttribute = $productVariationAttribute->variationAttribute;
                 if ($variationAttribute) {
                     $variationsProduct[$key] = $variationAttribute->childVariationAttributes->pluck('attribute_id')->toArray();
-                        $variationsIdsProduct[$key] = $variationAttribute->id;
+                    $variationsIdsProduct[$key] = $variationAttribute->id;
                 }
             }
             foreach ($request['variations'] as $variation) {
                 sort($variation["selected_attributes"]);
                 $key = null;
                 foreach ($variationsProduct as $index => $item) {
-                        $sortedItem = $item;
-                        sort($sortedItem);
-                        if ($sortedItem === $variation["selected_attributes"]) {
-                            $key = $index;
-                            break;
-                        }
+                    $sortedItem = $item;
+                    sort($sortedItem);
+                    if ($sortedItem === $variation["selected_attributes"]) {
+                        $key = $index;
+                        break;
+                    }
                 }
-                if($key!== null){
+                if ($key !== null) {
                     $variationAttribute = $product->productVariationAttributes->where('variation_attribute_id', $variationsIdsProduct[$key])->first();
                     if ($variationAttribute) {
                         $existingMeta = $variationAttribute->meta ?? [];
@@ -115,7 +123,7 @@ class WoocommerceController extends Controller
                         }
 
                         // Append new variation ID (only if it's not already in the array)
-                        $newValue = ["id"=>$variation['wc_variation_id']];
+                        $newValue = ["id" => $variation['wc_variation_id']];
                         if (!in_array($newValue, $existingMeta)) {
                             $existingMeta[] = $newValue;
                         }
@@ -134,11 +142,11 @@ class WoocommerceController extends Controller
             }
             // Append new variation ID (only if it's not already in the array)
             $newValue = [
-                    "id" => $request['wc_product_id'],
-                    "name" => $request['wc_product_name'],
-                    "slug" => $request['wc_product_slug'],
-                    "permalink" => $request['wc_product_permalink'],
-                ];
+                "id" => $request['wc_product_id'],
+                "name" => $request['wc_product_name'],
+                "slug" => $request['wc_product_slug'],
+                "permalink" => $request['wc_product_permalink'],
+            ];
             if (!in_array($newValue, $existingMeta)) {
                 $existingMeta[] = $newValue;
             }
@@ -163,12 +171,12 @@ class WoocommerceController extends Controller
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products';
         $noMoreData = false;
-        $data = []; 
+        $data = [];
         $i = 1;
         $accountUsers = Account::find(getAccountUser()->account_id)->accountUsers->pluck('id')->toArray();
         while ($noMoreData == false) {
             $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret . '&page=' . $i;
-            $response = Http::get($url);
+            $response = Http::withoutVerifying()->get($url);
             $products = $response->json();
             if ($products == []) {
                 $noMoreData = true;
@@ -206,7 +214,7 @@ class WoocommerceController extends Controller
         $endpoint = 'products/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $product = $response->json();
 
         return response()->json($product);
@@ -228,7 +236,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::post($url, $data);
+        $response = Http::withoutVerifying()->post($url, $data);
         $createdProduct = $response->json();
 
         return response()->json($createdProduct);
@@ -251,7 +259,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::put($url, $data);
+        $response = Http::withoutVerifying()->put($url, $data);
         $updatedProduct = $response->json();
 
         return response()->json($updatedProduct);
@@ -271,7 +279,7 @@ class WoocommerceController extends Controller
         $endpoint = 'products/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::delete($url);
+        $response = Http::withoutVerifying()->delete($url);
         $deletedProduct = $response->json();
 
         return response()->json($deletedProduct);
@@ -284,14 +292,13 @@ class WoocommerceController extends Controller
      */
     public function getAllOrders($status)
     {
-        $baseUrl = 'https://stylemen.net/en/wp-json/wc/v3/';
+        $baseUrl = 'https://stylemen.net/wp-json/wc/v3/';
         $consumerKey = 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428';
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'orders';
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret . "&status=" . $status . "&per_page=10";
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $orders = $response->json();
-
         if (!is_array($orders)) {
             return response()->json([
                 'status' => 'error',
@@ -346,7 +353,11 @@ class WoocommerceController extends Controller
                     continue;
                 }
 
-                $pva = ProductVariationAttribute::whereRaw("JSON_CONTAINS(meta, ?)", [json_encode(['id' => $variationId])])->first();
+                $pva = ProductVariationAttribute::where(function ($q) use ($variationId) {
+                    $q->where('meta', (string) $variationId)
+                        ->orWhere('meta', 'LIKE', '%"id":' . $variationId . '%')
+                        ->orWhere('meta', 'LIKE', '%"id": ' . $variationId . '%');
+                })->first();
                 if ($pva) {
                     $attributes = Attribute::whereIn('meta->name', collect($item['meta_data'] ?? [])->pluck('display_value')->toArray())
                         ->whereIn("account_user_id", $accountUsers)
@@ -428,7 +439,7 @@ class WoocommerceController extends Controller
         $endpoint = 'orders/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $order = $response->json();
 
         return response()->json($order);
@@ -450,7 +461,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::post($url, $data);
+        $response = Http::withoutVerifying()->post($url, $data);
         $createdOrder = $response->json();
 
         return response()->json($createdOrder);
@@ -475,7 +486,7 @@ class WoocommerceController extends Controller
         ];
         // $data = $request->all();
 
-        $response = Http::put($url, $data);
+        $response = Http::withoutVerifying()->put($url, $data);
         $updatedOrder = $response->json();
 
         return response()->json($updatedOrder);
@@ -495,7 +506,7 @@ class WoocommerceController extends Controller
         $endpoint = 'orders/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::delete($url);
+        $response = Http::withoutVerifying()->delete($url);
         $deletedOrder = $response->json();
 
         return response()->json($deletedOrder);
@@ -514,7 +525,7 @@ class WoocommerceController extends Controller
         $endpoint = 'customers';
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $customers = $response->json();
 
         return response()->json($customers);
@@ -534,7 +545,7 @@ class WoocommerceController extends Controller
         $endpoint = 'customers/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $customer = $response->json();
 
         return response()->json($customer);
@@ -556,7 +567,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::post($url, $data);
+        $response = Http::withoutVerifying()->post($url, $data);
         $createdCustomer = $response->json();
 
         return response()->json($createdCustomer);
@@ -579,7 +590,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::put($url, $data);
+        $response = Http::withoutVerifying()->put($url, $data);
         $updatedCustomer = $response->json();
 
         return response()->json($updatedCustomer);
@@ -599,7 +610,7 @@ class WoocommerceController extends Controller
         $endpoint = 'customers/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::delete($url);
+        $response = Http::withoutVerifying()->delete($url);
         $deletedCustomer = $response->json();
 
         return response()->json($deletedCustomer);
@@ -618,7 +629,7 @@ class WoocommerceController extends Controller
         $endpoint = 'coupons';
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $coupons = $response->json();
 
         return response()->json($coupons);
@@ -638,7 +649,7 @@ class WoocommerceController extends Controller
         $endpoint = 'coupons/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $coupon = $response->json();
 
         return response()->json($coupon);
@@ -660,7 +671,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::post($url, $data);
+        $response = Http::withoutVerifying()->post($url, $data);
         $createdCoupon = $response->json();
 
         return response()->json($createdCoupon);
@@ -683,7 +694,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::put($url, $data);
+        $response = Http::withoutVerifying()->put($url, $data);
         $updatedCoupon = $response->json();
 
         return response()->json($updatedCoupon);
@@ -703,7 +714,7 @@ class WoocommerceController extends Controller
         $endpoint = 'coupons/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::delete($url);
+        $response = Http::withoutVerifying()->delete($url);
         $deletedCoupon = $response->json();
 
         return response()->json($deletedCoupon);
@@ -723,7 +734,7 @@ class WoocommerceController extends Controller
         $endpoint = 'product_categories/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $productCategory = $response->json();
 
         return response()->json($productCategory);
@@ -745,7 +756,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::post($url, $data);
+        $response = Http::withoutVerifying()->post($url, $data);
         $createdProductCategory = $response->json();
 
         return response()->json($createdProductCategory);
@@ -768,7 +779,7 @@ class WoocommerceController extends Controller
 
         $data = $request->all();
 
-        $response = Http::put($url, $data);
+        $response = Http::withoutVerifying()->put($url, $data);
         $updatedProductCategory = $response->json();
 
         return response()->json($updatedProductCategory);
@@ -788,7 +799,7 @@ class WoocommerceController extends Controller
         $endpoint = 'product_categories/' . $id;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::delete($url);
+        $response = Http::withoutVerifying()->delete($url);
         $deletedProductCategory = $response->json();
 
         return response()->json($deletedProductCategory);
@@ -807,7 +818,7 @@ class WoocommerceController extends Controller
         $endpoint = 'products/variations';
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
 
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $variations = $response->json();
 
         return response()->json($variations);
@@ -825,7 +836,7 @@ class WoocommerceController extends Controller
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/attributes';
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $attributes = $response->json();
         $datas = [];
         if ($attributes) {
@@ -866,7 +877,7 @@ class WoocommerceController extends Controller
         while ($noMoreData == false) {
             $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
             $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret . '&page=' . $i;
-            $response = Http::get($url);
+            $response = Http::withoutVerifying()->get($url);
             $termes = $response->json();
             if ($termes) {
                 foreach ($termes as $terme) {
@@ -883,11 +894,17 @@ class WoocommerceController extends Controller
                             ]
                         ]);
                     } else {
-                        Attribute::create(['meta' => [
-                            'id' => $terme['id'],
-                            'name' => $terme['name'],
-                            'slug' => $terme['slug']
-                        ], 'title' => $termeName, 'description' => '', 'account_user_id' => getAccountUser()->id, 'types_attribute_id' => $attributeType->id]);
+                        Attribute::create([
+                            'meta' => [
+                                'id' => $terme['id'],
+                                'name' => $terme['name'],
+                                'slug' => $terme['slug']
+                            ],
+                            'title' => $termeName,
+                            'description' => '',
+                            'account_user_id' => getAccountUser()->id,
+                            'types_attribute_id' => $attributeType->id
+                        ]);
                     }
                 }
             } else {
@@ -904,7 +921,7 @@ class WoocommerceController extends Controller
         $consumerSecret = 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d';
         $endpoint = 'products/attributes/' . $attributeId;
         $url = $baseUrl . $endpoint . '?consumer_key=' . $consumerKey . '&consumer_secret=' . $consumerSecret;
-        $response = Http::get($url);
+        $response = Http::withoutVerifying()->get($url);
         $terme = $response->json();
         return $terme;
     }
