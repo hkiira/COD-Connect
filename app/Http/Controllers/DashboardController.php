@@ -251,7 +251,8 @@ class DashboardController extends Controller
                     ) THEN 1 ELSE 0 END) as confirmed_count,
                     SUM(CASE WHEN EXISTS (
                         SELECT 1 FROM order_comment oc WHERE oc.order_id = o.id AND oc.comment_id = 34
-                    ) THEN 1 ELSE 0 END) as refused_count
+                    ) THEN 1 ELSE 0 END) as refused_count,
+                    SUM(CASE WHEN o.pickup_id IS NOT NULL THEN 1 ELSE 0 END) as pickup_count
                 FROM orders o
                 INNER JOIN brand_source bs ON o.brand_source_id = bs.id
                 WHERE o.account_id = ?
@@ -267,7 +268,7 @@ class DashboardController extends Controller
 
         // Aggregate stats per source type
         $aggregateSource = function ($sourceIds) use ($sourceStats) {
-            $total = 0; $delivered = 0; $confirmed = 0; $refused = 0;
+            $total = 0; $delivered = 0; $confirmed = 0; $refused = 0; $pickup = 0;
             foreach ($sourceIds as $id) {
                 if (isset($sourceStats[$id])) {
                     $row = $sourceStats[$id];
@@ -275,9 +276,10 @@ class DashboardController extends Controller
                     $delivered += (int)$row->delivered_count;
                     $confirmed += (int)$row->confirmed_count;
                     $refused += (int)$row->refused_count;
+                    $pickup += (int)$row->pickup_count;
                 }
             }
-            return compact('total', 'delivered', 'confirmed', 'refused');
+            return compact('total', 'delivered', 'confirmed', 'refused', 'pickup');
         };
 
         $websiteAgg = $aggregateSource($websiteSourceIds);
@@ -378,7 +380,7 @@ class DashboardController extends Controller
                         'value' => number_format($websiteAgg['total']),
                         'trend' => $formatTrend($prevOrdersWebsite, $websiteAgg['total']),
                         'delivered_count' => $websiteAgg['delivered'],
-                        'delivered_percentage' => number_format($calcRate($websiteAgg['delivered'], $websiteAgg['total']), 1),
+                        'delivered_percentage' => number_format($calcRate($websiteAgg['delivered'], $websiteAgg['pickup']), 1),
                         'confirmed_count' => $websiteAgg['confirmed'],
                         'confirmed_percentage' => number_format($calcRate($websiteAgg['confirmed'], $websiteAgg['total']), 1),
                         'refused_count' => $websiteAgg['refused'],
@@ -388,7 +390,7 @@ class DashboardController extends Controller
                         'value' => number_format($whatsappAgg['total']),
                         'trend' => $formatTrend($prevOrdersWhatsapp, $whatsappAgg['total']),
                         'delivered_count' => $whatsappAgg['delivered'],
-                        'delivered_percentage' => number_format($calcRate($whatsappAgg['delivered'], $whatsappAgg['total']), 1),
+                        'delivered_percentage' => number_format($calcRate($whatsappAgg['delivered'], $whatsappAgg['pickup']), 1),
                         'confirmed_count' => $whatsappAgg['confirmed'],
                         'confirmed_percentage' => number_format($calcRate($whatsappAgg['confirmed'], $whatsappAgg['total']), 1),
                         'refused_count' => $whatsappAgg['refused'],
@@ -398,7 +400,7 @@ class DashboardController extends Controller
                         'value' => number_format($tiktokAgg['total']),
                         'trend' => $formatTrend($prevOrdersTiktok, $tiktokAgg['total']),
                         'delivered_count' => $tiktokAgg['delivered'],
-                        'delivered_percentage' => number_format($calcRate($tiktokAgg['delivered'], $tiktokAgg['total']), 1),
+                        'delivered_percentage' => number_format($calcRate($tiktokAgg['delivered'], $tiktokAgg['pickup']), 1),
                         'confirmed_count' => $tiktokAgg['confirmed'],
                         'confirmed_percentage' => number_format($calcRate($tiktokAgg['confirmed'], $tiktokAgg['total']), 1),
                         'refused_count' => $tiktokAgg['refused'],
@@ -408,7 +410,7 @@ class DashboardController extends Controller
                         'value' => number_format($magasinAgg['total']),
                         'trend' => $formatTrend($prevOrdersMagasin, $magasinAgg['total']),
                         'delivered_count' => $magasinAgg['delivered'],
-                        'delivered_percentage' => number_format($calcRate($magasinAgg['delivered'], $magasinAgg['total']), 1),
+                        'delivered_percentage' => number_format($calcRate($magasinAgg['delivered'], $magasinAgg['pickup']), 1),
                         'confirmed_count' => $magasinAgg['confirmed'],
                         'confirmed_percentage' => number_format($calcRate($magasinAgg['confirmed'], $magasinAgg['total']), 1),
                         'refused_count' => $magasinAgg['refused'],
