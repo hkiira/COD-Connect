@@ -86,6 +86,8 @@ class DashboardController extends Controller
         $totalDelivered = $deliveredOrders->count();
         $prevTotalDelivered = $prevDeliveredOrders->count();
 
+        $totalPickup = (clone $baseQuery)->whereNotNull('pickup_id')->count();
+
         $totalConfirmed = (clone $baseQuery)->whereHas('orderComments', function ($q) {
             $q->where('order_status_id', 4);
         })->where('order_status_id', '!=', 2)->count();
@@ -370,7 +372,8 @@ class DashboardController extends Controller
                     ],
                     'total_delivered' => [
                         'value' => number_format($totalDelivered),
-                        'trend' => $formatTrend($prevTotalDelivered, $totalDelivered)
+                        'trend' => $formatTrend($prevTotalDelivered, $totalDelivered),
+                        'index' => $totalPickup > 0 ? round(($totalDelivered / $totalPickup) * 100, 1) : 0
                     ],
                     'total_confirmed' => [
                         'value' => number_format($totalConfirmed),
