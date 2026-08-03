@@ -40,6 +40,10 @@ return [
         'http://localhost',
         'http://localhost:3002',
         'http://localhost:3032',
+        'https://space.codconnect.com',
+        'https://mini.codconnect.com',
+        'https://mini.codconnect.cloud',
+        'https://codconnect.cloud'
     ],
     'allowed_origins_patterns' => [],
     'allowed_headers' => ['*'],
