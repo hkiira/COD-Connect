@@ -22,7 +22,7 @@ return [
         'https://*.codconnect.cloud',
         'https://*.codconnect.com',
         'http://localhost:*',
-        'http://[IP_ADDRESS]:*'
+        'http://105.72.146.220:*'
     ],
     'allowed_headers' => ['*'],
     'exposed_headers' => [],
