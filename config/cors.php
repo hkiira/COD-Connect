@@ -17,35 +17,13 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods' => ['*'],
-    'allowed_origins' => [
-        // Production (HTTPS & HTTP)
-        'https://omnichat.codconnect.cloud',
-        'https://api-omnichat.codconnect.cloud',
-        'https://google-adk.codconnect.cloud',
-        'http://omnichat.codconnect.cloud',
-        'http://api-omnichat.codconnect.cloud',
-
-        // Plain Domains
-        'omnichat.codconnect.cloud',
-        'api-omnichat.codconnect.cloud',
-        'google-adk.codconnect.cloud',
-
-        // Local Development
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://127.0.0.1:3000',
-        'http://127.0.0.1:3001',
-        'localhost',
-        '127.0.0.1',
-        'http://localhost',
-        'http://localhost:3002',
-        'http://localhost:3032',
-        'https://space.codconnect.com',
-        'https://mini.codconnect.com',
-        'https://mini.codconnect.cloud',
-        'https://codconnect.cloud'
+    'allowed_origins' => ['*'],
+    'allowed_origins_patterns' => [
+        'https://*.codconnect.cloud',
+        'https://*.codconnect.com',
+        'http://localhost:*',
+        'http://[IP_ADDRESS]:*'
     ],
-    'allowed_origins_patterns' => [],
     'allowed_headers' => ['*'],
     'exposed_headers' => [],
     'max_age' => 0,
