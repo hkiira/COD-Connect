@@ -272,7 +272,7 @@ class NextController extends Controller
             'offers',
             'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
             'activePvas.images'
-        ])->get();
+        ])->take(50)->get();
 
         $formattedProducts = $products->map(function ($product) {
             $principalImg = $product->principalImage->first() ?? $product->images->first();
