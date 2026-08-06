@@ -1053,4 +1053,77 @@ class NextController extends Controller
 
         return $attributesGrouped;
     }
+
+    /**
+     * Get product attributes (same response data format as /filterselect/product_attributes)
+     * GET /api/next/product_attributes/{id?}
+     * GET /api/next/get_product_attributes/{id?}
+     */
+    public function product_attributes(Request $request, $id = null)
+    {
+        $productId = $id ?? $request->input('id') ?? $request->input('product_id');
+
+        if ($productId) {
+            $product = Product::find($productId);
+            if (!$product) {
+                return response()->json([
+                    'statut' => 0,
+                    'type' => 'product_attributes',
+                    'message' => 'Product not found',
+                    'data' => []
+                ], 404);
+            }
+
+            $pvas = $product->activePvas->flatMap(function ($pva) {
+                if (!$pva->variationAttribute) return collect();
+                return $pva->variationAttribute->childVariationAttributes->map(function ($variationAttribute) {
+                    return [
+                        "id" => $variationAttribute->attribute->id ?? null,
+                        "code" => $variationAttribute->attribute->code ?? '',
+                        "title" => $variationAttribute->attribute->title ?? '',
+                        "typeId" => $variationAttribute->attribute->typeAttribute->id ?? null,
+                        "typeTitle" => $variationAttribute->attribute->typeAttribute->title ?? ''
+                    ];
+                })->filter(function ($item) { return $item['id'] !== null; });
+            });
+        } else {
+            $products = Product::where('statut', 1)->get();
+            $pvas = $products->flatMap(function ($product) {
+                return $product->productVariationAttributes->flatMap(function ($pva) {
+                    if ($pva->variationAttribute) {
+                        return $pva->variationAttribute->childVariationAttributes->map(function ($variationAttribute) {
+                            return [
+                                "id" => $variationAttribute->attribute->id ?? null,
+                                "code" => $variationAttribute->attribute->code ?? '',
+                                "title" => $variationAttribute->attribute->title ?? '',
+                                "typeId" => $variationAttribute->attribute->typeAttribute->id ?? null,
+                                "typeTitle" => $variationAttribute->attribute->typeAttribute->title ?? ''
+                            ];
+                        })->filter(function ($item) { return $item['id'] !== null; });
+                    }
+                    return collect();
+                });
+            });
+        }
+
+        $datas = [];
+        foreach ($pvas as $pva) {
+            if (isset($pva['id']) && $pva['id']) {
+                $datas[$pva['id']] = [
+                    'id' => $pva['id'],
+                    'code' => $pva['code'] ? $pva['code'] : $pva['title'],
+                    'attribute_type' => $pva['typeTitle'],
+                    'title' => $pva['title']
+                ];
+            }
+        }
+
+        $sorted = collect($datas)->sortBy('attribute_type')->values();
+
+        return response()->json([
+            "statut" => 1,
+            "type" => "product_attributes",
+            "data" => $sorted->toArray()
+        ]);
+    }
 }

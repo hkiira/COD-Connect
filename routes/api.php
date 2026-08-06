@@ -358,6 +358,8 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('next/get_products', [NextController::class, 'get_products']);
     Route::get('next/get_product', [NextController::class, 'get_product']);
     Route::get('next/getProduct', [NextController::class, 'getProduct']);
+    Route::get('next/product_attributes/{id?}', [NextController::class, 'product_attributes']);
+    Route::get('next/get_product_attributes/{id?}', [NextController::class, 'product_attributes']);
     Route::get('next/get_customer', [NextController::class, 'get_customer']);
     Route::get('asap/asap-history/{start}/{end}', [AsapDeliveryController::class, 'asapHistory']);
     Route::get('asap/raw-html/{id}', [AsapDeliveryController::class, 'rawHtml']);
