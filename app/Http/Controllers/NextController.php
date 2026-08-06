@@ -242,7 +242,8 @@ class NextController extends Controller
 
         if ($brandSourceId) {
             $query->whereHas('brandSources', function ($q) use ($brandSourceId) {
-                $q->where('brand_source.id', $brandSourceId);
+                $q->where('brand_source.id', $brandSourceId)
+                  ->where('product_brand_source.statut', 1);
             });
         }
 
@@ -433,7 +434,8 @@ class NextController extends Controller
 
         if ($brandSourceId) {
             $query->whereHas('brandSources', function ($q) use ($brandSourceId) {
-                $q->where('brand_source.id', $brandSourceId);
+                $q->where('brand_source.id', $brandSourceId)
+                  ->where('product_brand_source.statut', 1);
             });
         }
 
