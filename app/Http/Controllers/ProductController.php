@@ -54,6 +54,11 @@ class ProductController extends Controller
                     $dataProduct = array_merge($dataProduct, $offer->products->pluck('id')->toArray());
                 }
             }
+            $brandSourceIds = \App\Models\BrandSource::whereIn('brand_id', $brandIds)->pluck('id')->toArray();
+            if (!empty($brandSourceIds)) {
+                $pbsProductIds = \App\Models\ProductBrandSource::whereIn('brand_source_id', $brandSourceIds)->pluck('product_id')->toArray();
+                $dataProduct = array_merge($dataProduct, $pbsProductIds);
+            }
             $request['whereArray'] = ['column' => 'id', 'values' => array_unique($dataProduct)];
         }
 
@@ -136,9 +141,12 @@ class ProductController extends Controller
             })->unique()->toArray();
             $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
         }
-        $columns = ['id', 'title', 'reference', 'created_at', 'product_type_id'];
         $request['inAccountUser'] = ['account_user_id', $account];
-        $request['statut'] = 1;
+        if (isset($request['status']) && $request['status'] !== 'all') {
+            $request['statut'] = $request['status'];
+        } elseif (isset($request['statut']) && $request['statut'] === 'all') {
+            unset($request['statut']);
+        }
 
         $search = $request['search'] ?? null;
         $startDate = $request['startDate'] ?? null;
@@ -159,7 +167,8 @@ class ProductController extends Controller
             'price',
             'principalImage',
             'images',
-            'offers',
+            'offers.brands',
+            'brandSources.brand',
         ]);
 
         if ($search !== null && $search !== '') {
@@ -334,6 +343,15 @@ class ProductController extends Controller
                 'images' => $product->images,
                 'product_type' => $product->productType->only('id', 'code', 'title'),
                 'offers' => $product->offers,
+                'brands' => $product->brandSources ? $product->brandSources->map(function ($bs) {
+                    return $bs->brand ? ['id' => $bs->brand->id, 'title' => $bs->brand->title ?? $bs->brand->name ?? ''] : null;
+                })->filter()->merge(
+                    $product->offers ? $product->offers->flatMap(function ($offer) {
+                        return $offer->brands ? $offer->brands->map(function ($b) {
+                            return ['id' => $b->id, 'title' => $b->title ?? $b->name ?? ''];
+                        }) : collect();
+                    }) : collect()
+                )->unique('id')->values() : [],
             ];
             return $productData;
         });
