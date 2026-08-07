@@ -532,7 +532,7 @@ class NextController extends Controller
         $phoneNumber = $request->input('phoneNumber');
 
         if (!$phoneNumber) {
-            return response()->json(['statut' => 0, 'message' => 'phoneNumber parameter is required.'], 200);
+            return response()->json(['statut' => 0, 'message' => 'phoneNumber parameter is required.'], 400);
         }
 
         $formattedPhone = formatPhoneNumber($phoneNumber);
@@ -551,13 +551,13 @@ class NextController extends Controller
         }
 
         if (!$phone) {
-            return response()->json(['statut' => 0, 'message' => 'Customer phone not found.'], 404);
+            return response()->json(['statut' => 0, 'message' => 'Customer phone not found.'], 200);
         }
 
         $customer = $phone->customers()->first();
 
         if (!$customer) {
-            return response()->json(['statut' => 0, 'message' => 'Customer not found.'], 404);
+            return response()->json(['statut' => 0, 'message' => 'Customer not found.'], 200);
         }
 
         // Retrieve customer address and city
