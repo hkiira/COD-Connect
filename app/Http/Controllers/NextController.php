@@ -243,7 +243,7 @@ class NextController extends Controller
         if ($brandSourceId) {
             $query->whereHas('brandSources', function ($q) use ($brandSourceId) {
                 $q->where('brand_source.id', $brandSourceId)
-                  ->where('product_brand_source.statut', 1);
+                    ->where('product_brand_source.statut', 1);
             });
         }
 
@@ -272,7 +272,9 @@ class NextController extends Controller
             'images',
             'offers',
             'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
-            'activePvas.images'
+            'activePvas.images' => function ($q) {
+                $q->orderBy('images.id', 'desc');
+            }
         ])->take(50)->get();
 
         $formattedProducts = $products->map(function ($product) {
@@ -356,7 +358,9 @@ class NextController extends Controller
             'images',
             'offers',
             'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
-            'activePvas.images'
+            'activePvas.images' => function ($q) {
+                $q->orderBy('images.id', 'desc');
+            }
         ])
             ->first();
 
@@ -435,7 +439,7 @@ class NextController extends Controller
         if ($brandSourceId) {
             $query->whereHas('brandSources', function ($q) use ($brandSourceId) {
                 $q->where('brand_source.id', $brandSourceId)
-                  ->where('product_brand_source.statut', 1);
+                    ->where('product_brand_source.statut', 1);
             });
         }
 
@@ -464,7 +468,9 @@ class NextController extends Controller
             'images',
             'offers',
             'activePvas.variationAttribute.childVariationAttributes.attribute.typeAttribute',
-            'activePvas.images'
+            'activePvas.images' => function ($q) {
+                $q->orderBy('images.id', 'desc');
+            }
         ])->get();
 
         $formattedProducts = $products->map(function ($product) {
@@ -526,7 +532,7 @@ class NextController extends Controller
         $phoneNumber = $request->input('phoneNumber');
 
         if (!$phoneNumber) {
-            return response()->json(['statut' => 0, 'message' => 'phoneNumber parameter is required.'], 400);
+            return response()->json(['statut' => 0, 'message' => 'phoneNumber parameter is required.'], 200);
         }
 
         $formattedPhone = formatPhoneNumber($phoneNumber);
@@ -1013,13 +1019,14 @@ class NextController extends Controller
     private function getGroupedAttributes($product)
     {
         $attributesGrouped = [];
+        $attributeLatestImageId = [];
 
         foreach ($product->activePvas as $pva) {
-            $pvaImageUrl = null;
-            if ($pva->images && $pva->images->isNotEmpty()) {
-                $lastImage = $pva->images->last();
-                $pvaImageUrl = asset($lastImage->photo_dir . $lastImage->photo);
-            }
+            $latestPvaImage = ($pva->images && $pva->images->isNotEmpty())
+                ? $pva->images->sortByDesc('id')->first()
+                : null;
+            $pvaImageUrl = $latestPvaImage ? asset($latestPvaImage->photo_dir . $latestPvaImage->photo) : null;
+            $pvaImageId = $latestPvaImage ? $latestPvaImage->id : 0;
 
             if ($pva->variationAttribute) {
                 foreach ($pva->variationAttribute->childVariationAttributes as $childVa) {
@@ -1035,9 +1042,13 @@ class NextController extends Controller
                             ];
                         }
 
-                        if ($key === 'colors') {
+                        if ($key === 'colors' || $key === 'color' || $key === 'couleur') {
                             if ($pvaImageUrl) {
-                                $attributesGrouped[$key][$attribute->id]['image'] = $pvaImageUrl;
+                                $currentHighestId = $attributeLatestImageId[$attribute->id] ?? -1;
+                                if ($pvaImageId > $currentHighestId) {
+                                    $attributesGrouped[$key][$attribute->id]['image'] = $pvaImageUrl;
+                                    $attributeLatestImageId[$attribute->id] = $pvaImageId;
+                                }
                             } elseif (!array_key_exists('image', $attributesGrouped[$key][$attribute->id])) {
                                 $attributesGrouped[$key][$attribute->id]['image'] = null;
                             }
@@ -1075,7 +1086,8 @@ class NextController extends Controller
             }
 
             $pvas = $product->activePvas->flatMap(function ($pva) {
-                if (!$pva->variationAttribute) return collect();
+                if (!$pva->variationAttribute)
+                    return collect();
                 return $pva->variationAttribute->childVariationAttributes->map(function ($variationAttribute) {
                     return [
                         "id" => $variationAttribute->attribute->id ?? null,
@@ -1084,7 +1096,8 @@ class NextController extends Controller
                         "typeId" => $variationAttribute->attribute->typeAttribute->id ?? null,
                         "typeTitle" => $variationAttribute->attribute->typeAttribute->title ?? ''
                     ];
-                })->filter(function ($item) { return $item['id'] !== null; });
+                })->filter(function ($item) {
+                    return $item['id'] !== null; });
             });
         } else {
             $products = Product::where('statut', 1)->get();
@@ -1099,7 +1112,8 @@ class NextController extends Controller
                                 "typeId" => $variationAttribute->attribute->typeAttribute->id ?? null,
                                 "typeTitle" => $variationAttribute->attribute->typeAttribute->title ?? ''
                             ];
-                        })->filter(function ($item) { return $item['id'] !== null; });
+                        })->filter(function ($item) {
+                            return $item['id'] !== null; });
                     }
                     return collect();
                 });
