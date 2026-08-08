@@ -36,7 +36,7 @@ class SyncWcProcessingOrders extends Command
 
         try {
             // Authenticate user context for background CLI execution
-            $user = User::where('email', 'achkar.abder@gmail.com')->first() ?? User::first();
+            $user = User::where('email', 'abder.elachqar@gmail.com')->first() ?? User::first();
             if ($user) {
                 Auth::login($user);
                 $this->info('Authenticated context user: ' . $user->email);
