@@ -26,6 +26,9 @@ class Kernel extends ConsoleKernel
 
         // Sync ASAP returns every hour
         $schedule->command('sync:returns')->hourly()->withoutOverlapping();
+
+        // Sync WooCommerce processing orders every 5 minutes
+        $schedule->command('wc:sync-processing-orders')->everyFiveMinutes()->withoutOverlapping();
     }
 
     /**
