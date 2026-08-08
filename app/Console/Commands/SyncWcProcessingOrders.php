@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use App\Http\Controllers\WoocommerceController;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Http\Request;
 
 class SyncWcProcessingOrders extends Command
@@ -32,16 +33,22 @@ class SyncWcProcessingOrders extends Command
     public function handle()
     {
         $status = $this->option('status') ?? 'processing';
-        $this->info("Starting WooCommerce orders sync for status: {$status}...");
+        $msg = "Starting WooCommerce orders sync for status: {$status}...";
+        $this->info($msg);
+        Log::info('[SyncWcProcessingOrders] ' . $msg);
 
         try {
             // Authenticate user context for background CLI execution
             $user = User::where('email', 'abder.elachqar@gmail.com')->first() ?? User::first();
             if ($user) {
                 Auth::login($user);
-                $this->info('Authenticated context user: ' . $user->email);
+                $authMsg = 'Authenticated context user: ' . $user->email;
+                $this->info($authMsg);
+                Log::info('[SyncWcProcessingOrders] ' . $authMsg);
             } else {
-                $this->error('No system user found to authenticate command execution.');
+                $errMsg = 'No system user found to authenticate command execution.';
+                $this->error($errMsg);
+                Log::error('[SyncWcProcessingOrders] ' . $errMsg);
                 return Command::FAILURE;
             }
 
@@ -50,14 +57,22 @@ class SyncWcProcessingOrders extends Command
 
             if ($response instanceof \Illuminate\Http\JsonResponse) {
                 $data = $response->getData(true);
-                $this->info('Sync finished with response: ' . json_encode($data));
+                $resMsg = 'Sync finished with response: ' . json_encode($data);
+                $this->info($resMsg);
+                Log::info('[SyncWcProcessingOrders] ' . $resMsg);
             } else {
-                $this->info('Sync finished.');
+                $resMsg = 'Sync finished.';
+                $this->info($resMsg);
+                Log::info('[SyncWcProcessingOrders] ' . $resMsg);
             }
 
             return Command::SUCCESS;
         } catch (\Exception $e) {
-            $this->error('Error during WooCommerce orders sync: ' . $e->getMessage());
+            $errMsg = 'Error during WooCommerce orders sync: ' . $e->getMessage();
+            $this->error($errMsg);
+            Log::error('[SyncWcProcessingOrders] ' . $errMsg, [
+                'exception' => $e
+            ]);
             return Command::FAILURE;
         }
     }
