@@ -893,65 +893,110 @@ class NextController extends Controller
                 }
             }
 
-            // Fetch active PVAs from the database for comparison
-            $activePvas = $order->activePvas;
-            $matchedIncoming = [];
-
-            $productsToUpdate = [];
-            $productsToActive = [];
-            $productsToInactive = [];
-
+            // We will manually sync products to ensure complete replacement.
+            $syncData = [];
             foreach ($productsTemp as $p) {
-                $matchedPva = $p['pva'];
-                $existingPva = $activePvas->first(function ($apva) use ($matchedPva) {
-                    return $apva->id === $matchedPva->id;
-                });
-
-                if ($existingPva) {
-                    $orderPvaId = $existingPva->pivot->id;
-                    $productsToUpdate[] = [
-                        'id' => $orderPvaId,
-                        'quantity' => $p['qty'],
-                        'price' => $p['price'],
-                        'discount' => 0,
-                    ];
-                    $matchedIncoming[] = $orderPvaId;
+                $pvaId = $p['pva']->id;
+                
+                if (isset($syncData[$pvaId])) {
+                    $syncData[$pvaId]['quantity'] += $p['qty'];
                 } else {
-                    $productsToActive[] = [
-                        'id' => $p['product']->id,
-                        'attributes' => $p['attributes'],
+                    $syncData[$pvaId] = [
                         'quantity' => $p['qty'],
                         'price' => $p['price'],
+                        'initial_price' => $p['default_price'],
+                        'realprice' => $p['pva']->product->orderPvas->first()->price ?? 0,
                         'discount' => 0,
-                        'offers' => $p['offers'],
+                        'order_status_id' => $order->order_status_id,
+                        'account_user_id' => getAccountUser()->id ?? $accountId,
+                        'created_at' => now(),
+                        'updated_at' => now()
                     ];
                 }
             }
 
-            foreach ($activePvas as $apva) {
-                $orderPvaId = $apva->pivot->id;
-                if (!in_array($orderPvaId, $matchedIncoming)) {
-                    $productsToInactive[] = $orderPvaId;
+            // Begin transaction to ensure atomicity
+            DB::beginTransaction();
+            try {
+                // Remove products from update payload so OrderController::update doesn't process them
+                unset($updatePayload['productsToInactive']);
+                unset($updatePayload['productsToActive']);
+                unset($updatePayload['productsToUpdate']);
+
+                // Call the static OrderController update method for non-product fields
+                $updateResponse = OrderController::update(new Request([$updatePayload]), $local = 0);
+                $responseData = $updateResponse->getData(true);
+
+                if (!isset($responseData['statut']) || $responseData['statut'] != 1) {
+                    throw new \Exception($responseData['message'] ?? 'Failed to update order details');
                 }
+
+                // Completely replace the product list using sync()
+                $order->productVariationAttributes()->sync($syncData);
+
+                DB::commit();
+
+                // Load fresh data to return the final state
+                $order->refresh();
+                $order->load(['orderStatus', 'activePvas.product', 'activePvas.variationAttribute.childVariationAttributes.attribute']);
+
+                $finalProducts = $order->activePvas->map(function ($pva) {
+                    $attributes = $pva->variationAttribute?->childVariationAttributes?->map(function ($child) {
+                        return [
+                            'id' => $child->attribute->id,
+                            'title' => $child->attribute->title
+                        ];
+                    })->toArray() ?? [];
+
+                    return [
+                        'id' => $pva->product_id,
+                        'name' => $pva->product->title,
+                        'quantity' => $pva->pivot->quantity,
+                        'price' => floatval($pva->pivot->price),
+                        'attributes' => $attributes
+                    ];
+                })->toArray();
+
+                return response()->json([
+                    'statut' => 1,
+                    'message' => 'Order updated successfully',
+                    'order' => [
+                        'order_id' => $order->id,
+                        'status' => $order->orderStatus?->title,
+                        'final_price' => floatval($order->activePvas->sum(function($pva) { return $pva->pivot->price * $pva->pivot->quantity; })),
+                        'products' => $finalProducts
+                    ]
+                ]);
+            } catch (\Exception $e) {
+                DB::rollBack();
+                return response()->json([
+                    'statut' => 0,
+                    'message' => 'Failed to update order',
+                    'errors' => $e->getMessage()
+                ], 422);
             }
-
-            $updatePayload['productsToInactive'] = $productsToInactive;
-            $updatePayload['productsToActive'] = $productsToActive;
-            $updatePayload['productsToUpdate'] = $productsToUpdate;
-        }
-
-        // Call the static OrderController update method
-        $updateResponse = OrderController::update(new Request([$updatePayload]), $local = 0);
-        $responseData = $updateResponse->getData(true);
-
-        if (isset($responseData['statut']) && $responseData['statut'] == 1) {
-            return response()->json(['statut' => 1, 'message' => 'Order updated successfully']);
         } else {
-            return response()->json([
-                'statut' => 0,
-                'message' => 'Failed to update order',
-                'errors' => $responseData['data'] ?? null
-            ], 422);
+            // No products to update, just update the other fields
+            $updateResponse = OrderController::update(new Request([$updatePayload]), $local = 0);
+            $responseData = $updateResponse->getData(true);
+
+            if (isset($responseData['statut']) && $responseData['statut'] == 1) {
+                $order->refresh();
+                return response()->json([
+                    'statut' => 1,
+                    'message' => 'Order updated successfully',
+                    'order' => [
+                        'order_id' => $order->id,
+                        'status' => $order->orderStatus?->title
+                    ]
+                ]);
+            } else {
+                return response()->json([
+                    'statut' => 0,
+                    'message' => 'Failed to update order',
+                    'errors' => $responseData['data'] ?? null
+                ], 422);
+            }
         }
     }
 
