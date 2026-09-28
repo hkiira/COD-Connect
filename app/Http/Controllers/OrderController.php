@@ -27,6 +27,7 @@ use App\Models\Product;
 use App\Models\Account;
 use App\Models\OrderStatus;
 use App\Services\GoogleSheetsService;
+use App\Services\AfraShippingService;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
@@ -1085,7 +1086,10 @@ class OrderController extends Controller
             $data['orderInfo']['warehouse'] = $order->warehouse;
             $data['orderInfo']['payment_type'] = $order->paymentType ? $order->paymentType->only('id', 'title') : null;
 
-            $data['orderInfo']['pickup'] = $order->pickup ? $order->pickup->only('id', 'code', 'title') : null;
+            $data['orderInfo']['pickup'] = $order->pickup ? $order->pickup->only('id', 'code', 'title', 'carrier_id') : null;
+            $data['orderInfo']['afra_return_state'] = (int) $order->order_status_id === 9 &&
+                (int) $order->pickup?->carrier_id === 26
+                    ? \App\Models\AfraOrderOperation::where('order_id', $order->id)->value('return_state') : null;
 
             if ($order->shipment) {
                 $data['orderInfo']['shipment'] = $order->shipment->only('id', 'code', 'title');
@@ -1213,15 +1217,15 @@ class OrderController extends Controller
             $comments = FilterController::searchs(new Request($request['comments']['active']), $model, ['id', 'title'], false)->map(function ($activeComment) {
                 return [
                     "id" => $activeComment->id,
-                    "title" => $activeComment->comment->title,
+                    "title" => $activeComment->comment?->title ?? 'AfraDelivery',
                     "note" => $activeComment->title,
                     "created_at" => $activeComment->created_at,
                     "postpone" => $activeComment->postpone,
                     "statut" => $activeComment->order_status_id,
                     "employee" => [
-                        "id" => $activeComment->accountUser->id,
-                        "name" => $activeComment->accountUser->user->firstname . " " . $activeComment->accountUser->user->lastname,
-                        "images" => $activeComment->accountUser->user->images
+                        "id" => $activeComment->accountUser?->id,
+                        "name" => trim(($activeComment->accountUser?->user?->firstname ?? '') . " " . ($activeComment->accountUser?->user?->lastname ?? '')),
+                        "images" => $activeComment->accountUser?->user?->images
                     ]
                 ];
             });
@@ -1287,6 +1291,7 @@ class OrderController extends Controller
     public static function update(Request $requests, $local = 0)
     {
         $productsToActive = [];
+        $afraSync = [];
         $validator = Validator::make($requests->except('_method'), [
             '*.id' => 'required|exists:orders,id',
             '*.comment.id' => 'exists:comments,id|max:255',
@@ -1394,10 +1399,15 @@ class OrderController extends Controller
                 'data' => $validator->errors(),
             ]);
         }
-        $orders = collect($requests->except('_method'))->map(function ($request) use ($productsToActive, $local) {
+        $orders = collect($requests->except('_method'))->map(function ($request) use ($productsToActive, $local, &$afraSync) {
             $comment = null;
             //récupérer la commande a modifier
             $order = Order::find($request['id']);
+            $afraService = app(AfraShippingService::class);
+            $afraEligible = $local === 0 && (int) $order->account_id === (int) getAccountUser()->account_id
+                && (int) $order->pickup?->carrier_id === 26 && (bool) $order->shipping_code;
+            $previousStatus = (int) $order->order_status_id;
+            $previousFingerprint = $afraEligible ? $afraService->fingerprint($order) : null;
             /*if (isset($request['pickup_id'])) {
                 $pickUp = Pickup::find($request['pickup_id']);
                 if ($pickUp->carrier_id) {
@@ -1557,6 +1567,17 @@ class OrderController extends Controller
             // Score is now calculated on-demand from account_user_order_status and order_comment tables
 
             CompensationableController::edit($order->id);
+            if ($afraEligible) {
+                $updatedOrder = Order::find($order->id);
+                if ($updatedOrder->shipping_code && (int) $updatedOrder->pickup?->carrier_id === 26) {
+                    if ($previousFingerprint !== $afraService->fingerprint($updatedOrder)) {
+                        $afraSync[$order->id]['update'] = $afraService->update($updatedOrder, getAccountUser()->id);
+                    }
+                    if ($previousStatus !== 9 && (int) $updatedOrder->order_status_id === 9) {
+                        $afraSync[$order->id]['return'] = $afraService->requestReturn($updatedOrder, getAccountUser()->id);
+                    }
+                }
+            }
             if ($local == 1)
                 return $order->activeOrderPvas;
             if ($local == 2)
@@ -1568,6 +1589,7 @@ class OrderController extends Controller
         return response()->json([
             'statut' => 1,
             'data' => $orders,
+            'afra_sync' => $afraSync,
         ]);
     }
 
@@ -1894,4 +1916,3 @@ class OrderController extends Controller
         }
     }
 }
-

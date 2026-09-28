@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AfraShippingController;
 
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\ReviewQuestionController;
@@ -92,7 +93,6 @@ use App\Http\Controllers\{
     OldSysController,
     PVAController,
     SynchronisationController,
-    OrderfirstController,
     SpeedafController,
     SpeedafwController,
     AfraDeliveryController,
@@ -269,7 +269,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::post('orders/{id}/sync-sheet', [OrderController::class, 'syncSheet']);
     Route::post('orders/count-by-phones', [OrderController::class, 'countByPhones']);
     Route::post('orders/exchange', [OrderController::class, 'createExchange']);
-    Route::resource('orders_first', OrderfirstController::class);
+    Route::resource('orders_first', OrderController::class);
     Route::resource('order_pvas', OrderPvaController::class);
     Route::resource('order_statuses', OrderStatusController::class);
     Route::resource('comments', CommentController::class);
@@ -335,6 +335,19 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::post('afra/import_orders', [AfraDeliveryController::class, 'importOrders']);
     Route::post('afra/export/{id}', [AfraDeliveryController::class, 'exportPickupOrders']);
 
+    Route::get('afra-shipping/account', [AfraShippingController::class, 'account']);
+    Route::put('afra-shipping/account', [AfraShippingController::class, 'saveAccount']);
+    Route::post('afra-shipping/login', [AfraShippingController::class, 'login']);
+    Route::get('afra-shipping/orders', [AfraShippingController::class, 'orders']);
+    Route::get('afra-shipping/cities', [AfraShippingController::class, 'cities']);
+    Route::put('afra-shipping/cities', [AfraShippingController::class, 'mapCity']);
+    Route::get('afra-shipping/statuses', [AfraShippingController::class, 'statuses']);
+    Route::put('afra-shipping/statuses', [AfraShippingController::class, 'mapStatus']);
+    Route::post('afra-shipping/pickups/{id}/sync', [AfraShippingController::class, 'syncPickup']);
+    Route::post('afra-shipping/statuses/sync', [AfraShippingController::class, 'syncStatusesNow']);
+    Route::get('afra-shipping/runs/{id}', [AfraShippingController::class, 'run']);
+    Route::post('afra-shipping/orders/{id}/return/retry', [AfraShippingController::class, 'retryReturn']);
+
     Route::get('afradelivery/{entity}/{id?}/{type?}', [AfraDeliveryController::class, 'rest']);
     Route::post('afradelivery/{entity}/{id?}/{type?}', [AfraDeliveryController::class, 'rest']);
     // GET endpoint to fetch the questions for building the form
@@ -395,4 +408,3 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
 // Route::post('checkcities', [SynchronisationController::class, 'checkCities']);
 Route::prefix('analytics')->middleware('auth:sanctum')->group(function () {
 });
-

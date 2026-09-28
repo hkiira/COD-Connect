@@ -75,8 +75,11 @@ class SynchronisationController extends Controller
     }
     public function pickup($id)
     {
-        $sessionId = $this->login();
         $pickup = Pickup::where('id', $id)->first();
+        if ($pickup && (int) $pickup->carrier_id === 26) {
+            return app(AfraShippingController::class)->syncPickup((int) $id);
+        }
+        $sessionId = $this->login();
         if ($pickup->carrier_id == 22) {
             foreach ($pickup->orders()->whereNull('shipping_code')->get() as $key => $order) {
                 $total = 0;

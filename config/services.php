@@ -31,4 +31,9 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    'afra' => [
+        'base_url' => env('AFRA_API_URL', 'https://afradelivery.com/api/seller'),
+        'ca_bundle' => env('AFRA_CA_BUNDLE'),
+    ],
+
 ];

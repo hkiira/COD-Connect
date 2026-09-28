@@ -180,7 +180,8 @@ class Order extends Model
     {
         return $this->belongsToMany(ProductVariationAttribute::class, 'order_pva')
             ->withPivot('id', 'order_status_id', 'price', 'quantity', 'realprice', 'initial_price', 'discount')
-            ->wherePivotNotIn('order_status_id', [2, 3]);
+            ->wherePivotNotIn('order_status_id', [2, 3])
+            ->wherePivotNull('deleted_at');
     }
 
     public function inactivePvas()

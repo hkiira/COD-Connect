@@ -12,10 +12,10 @@
         "google/apiclient": "^2.0",
         "guzzlehttp/guzzle": "^7.5",
         "khaled.alshamaa/ar-php": "^6.3",
-        "laravel/framework": "^12.0",
-        "laravel/passport": "^12.0",
+        "laravel/framework": "^13.0",
+        "laravel/passport": "^13.0",
         "laravel/sanctum": "^4.0",
-        "laravel/tinker": "^2.9",
+        "laravel/tinker": "^3.0",
         "maatwebsite/excel": "^3.1",
         "php-webdriver/webdriver": "^1.15",
         "simplesoftwareio/simple-qrcode": "^4.2",
@@ -25,11 +25,12 @@
     },
     "require-dev": {
         "fakerphp/faker": "^1.9.1",
+        "laravel/boost": "^2.0",
         "laravel/pint": "^1.0",
         "laravel/sail": "^1.0.1",
         "mockery/mockery": "^1.6",
         "nunomaduro/collision": "^8.0",
-        "phpunit/phpunit": "^11.0",
+        "phpunit/phpunit": "^12.0",
         "spatie/laravel-ignition": "^2.0"
     },
     "autoload": {

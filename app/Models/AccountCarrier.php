@@ -19,6 +19,7 @@ class AccountCarrier extends Model
         'statut'
     ];
     protected $table = 'account_carrier' ;
+    protected $hidden = ['password', 'token'];
 
 
     public function carrier(){

@@ -7,9 +7,10 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Passport\HasApiTokens;
+use Laravel\Passport\Contracts\OAuthenticatable;
 use Spatie\Permission\Traits\HasRoles;
 use Illuminate\Database\Eloquent\SoftDeletes; // Import the SoftDeletes trait
-class User extends Authenticatable
+class User extends Authenticatable implements OAuthenticatable
 {
     use SoftDeletes;
     protected $dates = ['deleted_at'];

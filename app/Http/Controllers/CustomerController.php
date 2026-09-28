@@ -359,6 +359,12 @@ class CustomerController extends Controller
             return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
         }
 
+        $afraService = app(\App\Services\AfraShippingService::class);
+        $afraOrders = $isOrder ? collect() : \App\Models\Order::where('account_id', getAccountUser()->account_id)
+            ->where('customer_id', $id)->whereNotNull('shipping_code')
+            ->whereHas('pickup', fn ($q) => $q->where('carrier_id', 26))->get();
+        $before = $afraOrders->mapWithKeys(fn ($order) => [$order->id => $afraService->fingerprint($order)]);
+
         DB::transaction(function () use ($data, $customer) {
             $item = $data[0];
             $customer->update(\Illuminate\Support\Arr::only($item, ['name', 'email', 'customer_type_id', 'note']));
@@ -410,10 +416,19 @@ class CustomerController extends Controller
         if ($isOrder == 1)
             return collect([['phones' => $updatedCustomer->phones, 'addresses' => $updatedCustomer->addresses, 'customer' => $updatedCustomer]]);
 
+        $afraSync = [];
+        foreach ($afraOrders as $order) {
+            $fresh = $order->fresh();
+            if ($before->get($order->id) !== $afraService->fingerprint($fresh)) {
+                $afraSync[$order->id] = $afraService->update($fresh, getAccountUser()->id);
+            }
+        }
+
         return response()->json([
             'statut' => 1,
             'data' => $updatedCustomer,
-            'message' => 'Customer updated successfully'
+            'message' => 'Customer updated successfully',
+            'afra_sync' => $afraSync,
         ]);
     }
 
