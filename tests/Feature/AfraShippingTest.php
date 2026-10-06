@@ -73,7 +73,9 @@ class AfraShippingTest extends TestCase
         Schema::create('phoneables', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('phone_id'), $t->unsignedBigInteger('phoneable_id'), $t->string('phoneable_type'), $t->integer('statut')->default(1), $t->timestamps()]);
         Schema::create('addressables', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('address_id'), $t->unsignedBigInteger('addressable_id'), $t->string('addressable_type'), $t->integer('statut')->default(1), $t->timestamps()]);
         Schema::create('products', fn (Blueprint $t) => [$t->id(), $t->string('title'), $t->softDeletes(), $t->timestamps()]);
-        Schema::create('product_variation_attribute', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('product_id'), $t->softDeletes(), $t->timestamps()]);
+        Schema::create('product_variation_attribute', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('product_id'), $t->unsignedBigInteger('variation_attribute_id')->nullable(), $t->softDeletes(), $t->timestamps()]);
+        Schema::create('variation_attributes', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('variation_attribute_id')->nullable(), $t->unsignedBigInteger('attribute_id')->nullable(), $t->integer('statut')->default(1), $t->softDeletes(), $t->timestamps()]);
+        Schema::create('attributes', fn (Blueprint $t) => [$t->id(), $t->string('title'), $t->softDeletes(), $t->timestamps()]);
         Schema::create('pickups', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('account_user_id'), $t->unsignedBigInteger('carrier_id'), $t->softDeletes(), $t->timestamps()]);
         Schema::create('orders', fn (Blueprint $t) => [$t->id(), $t->string('code')->nullable(), $t->unsignedBigInteger('account_id'), $t->unsignedBigInteger('customer_id'), $t->unsignedBigInteger('pickup_id')->nullable(), $t->unsignedBigInteger('city_id'), $t->unsignedBigInteger('order_status_id'), $t->unsignedBigInteger('shipment_id')->nullable(), $t->unsignedBigInteger('order_id')->nullable(), $t->string('type')->default('sale'), $t->string('shipping_code')->nullable(), $t->decimal('discount', 10, 2)->default(0), $t->decimal('carrier_price', 10, 2)->default(0), $t->decimal('real_carrier_price', 10, 2)->nullable(), $t->text('note')->nullable(), $t->softDeletes(), $t->timestamps()]);
         Schema::create('order_pva', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('order_id'), $t->unsignedBigInteger('product_variation_attribute_id'), $t->unsignedBigInteger('order_status_id'), $t->integer('quantity'), $t->decimal('price', 10, 2), $t->decimal('realprice', 10, 2)->nullable(), $t->decimal('initial_price', 10, 2)->nullable(), $t->decimal('discount', 10, 2)->nullable(), $t->softDeletes(), $t->timestamps()]);
@@ -120,6 +122,22 @@ class AfraShippingTest extends TestCase
         $this->assertSame('normal', $payload['order_type']);
         $this->assertSame('no', $payload['test_product']);
         $this->assertArrayNotHasKey('agency_id', $payload);
+    }
+
+    public function test_product_name_sent_to_afra_includes_the_variation(): void
+    {
+        DB::table('attributes')->insert([['id' => 1, 'title' => '42'], ['id' => 2, 'title' => 'Noir']]);
+        DB::table('variation_attributes')->insert([
+            ['id' => 10, 'variation_attribute_id' => null, 'attribute_id' => null],
+            ['id' => 11, 'variation_attribute_id' => 10, 'attribute_id' => 1],
+            ['id' => 12, 'variation_attribute_id' => 10, 'attribute_id' => 2],
+        ]);
+        DB::table('products')->where('id', 1)->update(['title' => 'Sneaker 103']);
+        DB::table('product_variation_attribute')->where('id', 1)->update(['variation_attribute_id' => 10]);
+
+        $payload = app(AfraShippingService::class)->payload(Order::find(1));
+
+        $this->assertSame(['Sneaker 103 42 Noir'], collect($payload['products'])->pluck('product_name')->unique()->values()->all());
     }
 
     public function test_test_product_follows_the_account_setting(): void
