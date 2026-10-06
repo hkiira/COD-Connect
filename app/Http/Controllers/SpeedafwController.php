@@ -16,11 +16,11 @@ class SpeedafwController extends Controller
     public function __construct()
     {
         $this->config = [
-            'app_code' => env('SPEEDAF_APPCODE', '880056'),
-            'secret_key' => env('SPEEDAF_SECRETKEY', '5oQpOLF7'),
-            'customer_code' => env('SPEEDAF_CUSTOMERCODE', ''),
-            'base_path' => env('SPEEDAF_BASE_URL', 'https://apis.speedaf.com/'),
-            'vip_path' => env('SPEEDAF_VIP_URL', 'https://csp.speedaf.com/'),
+            'app_code' => (config('services.speedaf.app_code') ?? '880056'),
+            'secret_key' => (config('services.speedaf.secret_key') ?? '5oQpOLF7'),
+            'customer_code' => (config('services.speedaf.customer_code') ?? ''),
+            'base_path' => (config('services.speedaf.base_url') ?? 'https://apis.speedaf.com/'),
+            'vip_path' => (config('services.speedaf.vip_url') ?? 'https://csp.speedaf.com/'),
         ];
     }
 
@@ -613,10 +613,10 @@ class SpeedafwController extends Controller
             'acceptCountryCode' => $data['acceptCountryCode'] ?? 'MA',
             'acceptProvinceName' => $data['acceptProvinceName'] ?? '',
             'acceptCityName' => $data['acceptCityName'] ?? '',
-            'sendName' => $data['sendName'] ?? env('SPEEDAF_SENDER_NAME', 'Default Sender'),
-            'sendAddress' => $data['sendAddress'] ?? env('SPEEDAF_SENDER_ADDRESS', 'Default Address'),
-            'sendMobile' => $data['sendMobile'] ?? env('SPEEDAF_SENDER_PHONE', '0000000000'),
-            'sendCityName' => $data['sendCityName'] ?? env('SPEEDAF_SENDER_CITY', 'Casablanca'),
+            'sendName' => $data['sendName'] ?? (config('services.speedaf.sender.name') ?? 'Default Sender'),
+            'sendAddress' => $data['sendAddress'] ?? (config('services.speedaf.sender.address') ?? 'Default Address'),
+            'sendMobile' => $data['sendMobile'] ?? (config('services.speedaf.sender.phone') ?? '0000000000'),
+            'sendCityName' => $data['sendCityName'] ?? (config('services.speedaf.sender.city') ?? 'Casablanca'),
             'parcelWeight' => floatval($data['parcelWeight'] ?? 0.5),
             'goodsQTY' => intval($data['goodsQTY'] ?? 1),
         ];

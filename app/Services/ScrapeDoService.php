@@ -16,7 +16,7 @@ class ScrapeDoService
      */
     public static function getTokens(): array
     {
-        $envTokens = env('SCRAPEDO_TOKENS');
+        $envTokens = config('services.scrapedo.tokens');
         if (!empty($envTokens)) {
             return array_map('trim', explode(',', $envTokens));
         }

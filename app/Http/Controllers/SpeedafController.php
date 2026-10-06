@@ -14,13 +14,13 @@ class SpeedafController extends Controller
 {
     // Utility: Get config from env
     private function getAppCode() {
-        return env('SPEEDAF_APPCODE', 'YOUR_APPCODE');
+        return (config('services.speedaf.app_code') ?? 'YOUR_APPCODE');
     }
     private function getSecretKey() {
-        return env('SPEEDAF_SECRETKEY', 'YOUR_SECRETKEY');
+        return (config('services.speedaf.secret_key') ?? 'YOUR_SECRETKEY');
     }
     private function getBaseUrl() {
-        return env('SPEEDAF_BASE_URL', 'https://apis.speedaf.com/open-api/express/');
+        return (config('services.speedaf.base_url') ?? 'https://apis.speedaf.com/open-api/express/');
     }
 
     // Utility: DES CBC PKCS5Padding encryption (OpenSSL)
@@ -107,8 +107,8 @@ class SpeedafController extends Controller
         // Normalize payload and ensure required fields
         $incoming = $request->all();
         $payload = $incoming;
-        $payload['customerCode'] = $payload['customerCode'] ?? env('SPEEDAF_CUSTOMERCODE');
-        $payload['platformSource'] = $payload['platformSource'] ?? env('SPEEDAF_PLATFORMSOURCE');
+        $payload['customerCode'] = $payload['customerCode'] ?? config('services.speedaf.customer_code');
+        $payload['platformSource'] = $payload['platformSource'] ?? config('services.speedaf.platform_source');
 
         $req = $this->buildRequestBody($payload);
         $url = $this->getBaseUrl() . 'order/createOrder?timestamp=' . $req['timestamp'] . '&appCode=' . $req['appCode'];
@@ -169,8 +169,8 @@ class SpeedafController extends Controller
         $payload['mailNoList'] = $trackingList; // compatibility alias
         $payload['mailNo'] = count($trackingList) === 1 ? $trackingList[0] : null;
         $payload['billCode'] = count($trackingList) === 1 ? $trackingList[0] : ($payload['billCode'] ?? null);
-        $payload['customerCode'] = $payload['customerCode'] ?? env('SPEEDAF_CUSTOMERCODE');
-        $payload['platformSource'] = $payload['platformSource'] ?? env('SPEEDAF_PLATFORMSOURCE');
+        $payload['customerCode'] = $payload['customerCode'] ?? config('services.speedaf.customer_code');
+        $payload['platformSource'] = $payload['platformSource'] ?? config('services.speedaf.platform_source');
 
         // Build encrypted request using normalized payload
         $req = $this->buildRequestBody($payload);
