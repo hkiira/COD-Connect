@@ -31,6 +31,28 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // Read here, not with env() in the code: once `php artisan config:cache` runs (the aaPanel deploy
+    // does), env() returns null outside config files. Defaults stay in the controllers.
+    'speedaf' => [
+        'app_code'        => env('SPEEDAF_APPCODE'),
+        'secret_key'      => env('SPEEDAF_SECRETKEY'),
+        'customer_code'   => env('SPEEDAF_CUSTOMERCODE'),
+        'platform_source' => env('SPEEDAF_PLATFORMSOURCE'),
+        'base_url'        => env('SPEEDAF_BASE_URL'),
+        'vip_url'         => env('SPEEDAF_VIP_URL'),
+        'sender'          => [
+            'name'    => env('SPEEDAF_SENDER_NAME'),
+            'address' => env('SPEEDAF_SENDER_ADDRESS'),
+            'phone'   => env('SPEEDAF_SENDER_PHONE'),
+            'city'    => env('SPEEDAF_SENDER_CITY'),
+        ],
+    ],
+
+    'scrapedo' => [
+        // comma-separated scrape.do tokens
+        'tokens' => env('SCRAPEDO_TOKENS'),
+    ],
+
     'afra' => [
         'base_url' => env('AFRA_API_URL', 'https://afradelivery.com/api/seller'),
         'ca_bundle' => env('AFRA_CA_BUNDLE'),
