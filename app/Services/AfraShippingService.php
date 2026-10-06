@@ -25,11 +25,11 @@ use Illuminate\Support\Str;
  */
 class AfraShippingService
 {
-    /** Local statuses that Afra can no longer change: delivered, cancelled, paid, returned. */
-    private const CLOSED_STATUSES = [7, 8, 10, 11];
-
     /** Status that makes the app ask Afra to send the parcel back (chosen by the business). */
     public const RETURN_STATUS = 9;
+
+    /** Only orders "En cours" (in delivery) are updated from Afra's statuses (business choice). */
+    public const SYNCED_STATUSES = [6];
 
     public const DELIVERED_STATUS = 7;
     public const CANCELLED_STATUS = 8;
@@ -45,6 +45,9 @@ class AfraShippingService
 
     /** How many Afra pages "Rechercher chez Afra" reads at most (100 orders per page). */
     private const SEARCH_PAGES = 50;
+
+    /** How many of the newest pages the status sync reads to find "En cours" orders without number. */
+    private const SEARCH_PAGES_IN_SYNC = 10;
 
     /** Safety stop when reading the whole order list (100 orders per page). */
     private const MAX_PAGES = 500;
@@ -643,23 +646,28 @@ class AfraShippingService
     }
 
     /**
-     * Reads Afra's order list until every open local Afra order was seen, and applies each new Afra
-     * status as the mapped status comment. Statuses without a mapping are only reported.
+     * Reads Afra's order list and, for every local Afra order "En cours" (status 6) seen there, applies
+     * its Afra status as the mapped status comment. "En cours" orders of Afra pickups that have no Afra
+     * number yet are found on the way by their code in the client name ("Name - CODE") and get their
+     * number and status. Statuses without a mapping are only recorded and reported.
      */
     public function syncStatuses(AfraSyncRun $run): void
     {
         $accountId = (int) $run->account_id;
         $client = $this->client($accountId);
 
-        $open = Order::where('account_id', $accountId)->whereNotNull('shipping_code')
-            ->whereNotIn('order_status_id', self::CLOSED_STATUSES)->whereNull('shipment_id')
-            ->whereHas('pickup', fn ($q) => $q->where('carrier_id', AfraShippingClient::carrierId()))
-            ->pluck('id', 'shipping_code');
-        if ($open->isEmpty()) {
+        $inProgress = fn () => Order::where('account_id', $accountId)
+            ->whereIn('order_status_id', self::SYNCED_STATUSES)->whereNull('shipment_id')
+            ->whereHas('pickup', fn ($q) => $q->where('carrier_id', AfraShippingClient::carrierId()));
+        $open = $inProgress()->whereNotNull('shipping_code')->pluck('id', 'shipping_code');
+        $withoutNumber = $inProgress()->whereNull('shipping_code')->pluck('id', 'code')
+            ->mapWithKeys(fn ($id, $code) => [mb_strtolower((string) $code) => $id]);
+        if ($open->isEmpty() && $withoutNumber->isEmpty()) {
             $run->update(['message' => 'Aucune commande Afra en cours.']);
 
             return;
         }
+        $usedNumbers = Order::where('account_id', $accountId)->whereNotNull('shipping_code')->pluck('shipping_code')->flip();
 
         $statusIds = collect($client->getStatuses())
             ->mapWithKeys(fn ($s) => [self::normalize((string) ($s['fr_name'] ?? '')) => (int) ($s['id'] ?? 0)]);
@@ -668,34 +676,66 @@ class AfraShippingService
 
         $remaining = $open->keys()->flip();
         $unmapped = [];
+        $numbersFound = 0;
         $readWholeList = false;
-        for ($page = 1; $remaining->isNotEmpty(); $page++) {
-            $data = $client->getOrders($page, 100);
+        $interrupted = null;
+
+        // Afra lists oldest first: "En cours" orders are on the last pages, so read from the end and stop
+        // once they were all seen. Orders without number are only looked for in the newest pages.
+        $first = $client->getOrders(1, 100);
+        $lastPage = max(1, (int) ($first['pagination']['last_page'] ?? 1));
+        for ($page = $lastPage, $read = 0; $page >= 1; $page--, $read++) {
+            $lookingForNumbers = $withoutNumber->isNotEmpty() && $read < self::SEARCH_PAGES_IN_SYNC;
+            if ($remaining->isEmpty() && !$lookingForNumbers) {
+                break;
+            }
+            if ($read >= self::MAX_PAGES) {
+                break;
+            }
+            try {
+                $data = $page === 1 ? $first : $client->getOrders($page, 100);
+            } catch (AfraUncertainException $e) {
+                // keep what was already updated; the next run starts again from the newest pages
+                $interrupted = 'lecture interrompue à la page '.$page.' ('.$e->getMessage().')';
+                break;
+            }
+
             foreach ($data['orders'] ?? [] as $remote) {
                 $number = (string) ($remote['number'] ?? '');
-                if (!$remaining->has($number)) {
+                if ($number === '') {
                     continue;
                 }
-                $remaining->forget($number);
-                $run->increment('processed');
 
+                if ($remaining->has($number)) {
+                    $orderId = $open[$number];
+                    $remaining->forget($number);
+                } elseif ($lookingForNumbers && !$usedNumbers->has($number)
+                    && ($orderId = $this->orderIdInClientName((string) ($remote['client'] ?? ''), $withoutNumber))) {
+                    if (!Order::whereKey($orderId)->whereNull('shipping_code')->update(['shipping_code' => $number])) {
+                        continue;
+                    }
+                    $withoutNumber = $withoutNumber->reject(fn ($id) => (int) $id === $orderId);
+                    $usedNumbers->put($number, true);
+                    AfraOrderOperation::updateOrCreate(['order_id' => $orderId], ['create_state' => 'sent', 'last_error' => null]);
+                    $this->comment(Order::find($orderId), (int) $run->account_user_id, 'Afra: numéro '.$number.' retrouvé (par le code).');
+                    $numbersFound++;
+                } else {
+                    continue;
+                }
+
+                $run->increment('processed');
                 $status = trim((string) ($remote['status'] ?? ''));
                 $comment = $comments->get($statusIds->get(self::normalize($status)))?->comment;
-                $outcome = $this->applyRemoteStatus(Order::find($open[$number]), $status, $comment, (int) $run->account_user_id);
+                $outcome = $this->applyRemoteStatus(Order::find($orderId), $status, $comment, (int) $run->account_user_id);
                 if ($outcome === 'unmapped') {
-                    $unmapped[$status ?: '(vide)'] = true;
+                    $unmapped[$status ?: '(vide)'] = ($unmapped[$status ?: '(vide)'] ?? 0) + 1;
                     $outcome = 'skipped';
                 }
                 $run->increment($outcome);
             }
 
-            $lastPage = (int) ($data['pagination']['last_page'] ?? 0);
-            if (empty($data['orders']) || ($lastPage && $page >= $lastPage)) {
+            if ($page === 1) {
                 $readWholeList = true;
-                break;
-            }
-            if ($page >= self::MAX_PAGES) {
-                break;
             }
         }
 
@@ -711,31 +751,57 @@ class AfraShippingService
         }
 
         $notes = [];
+        if ($interrupted) {
+            $notes[] = $interrupted;
+        }
+        if ($numbersFound) {
+            $notes[] = $numbersFound.' numéro(s) Afra retrouvé(s)';
+        }
         if ($unmapped) {
-            $notes[] = 'Statuts Afra sans association: '.implode(', ', array_keys($unmapped));
+            $notes[] = 'Statuts Afra sans association (commandes non mises à jour): '
+                .collect($unmapped)->map(fn ($n, $s) => $s.' ('.$n.')')->implode(', ');
         }
         if ($remaining->isNotEmpty()) {
             $notes[] = $remaining->count().' commande(s) introuvable(s) chez Afra';
         }
+        if ($withoutNumber->isNotEmpty()) {
+            $notes[] = $withoutNumber->count().' commande(s) sans numéro Afra (« Rechercher chez Afra » pour les retrouver par téléphone)';
+        }
         $run->update(['message' => $notes ? implode(' · ', $notes) : null]);
     }
 
+    /** The order whose code is a word of the Afra client name ("Name - CODE", "Name-CODE"). */
+    private function orderIdInClientName(string $client, $idsByCode): ?int
+    {
+        foreach (preg_split('/[\s\-]+/', mb_strtolower($client), -1, PREG_SPLIT_NO_EMPTY) as $word) {
+            if ($idsByCode->has($word)) {
+                return (int) $idsByCode[$word];
+            }
+        }
+
+        return null;
+    }
+
     /**
-     * Keeps the last Afra status of the order (used by the returns list and the order page) and, when
-     * it changed, applies the mapped comment once. A status without mapping is only recorded.
+     * Keeps the last Afra status of the order (used by the returns list and the order page), and applies
+     * the mapped comment when this status was not applied yet: a status that had no mapping when it was
+     * first seen is applied as soon as it gets one.
      */
     private function applyRemoteStatus(Order $order, string $status, ?Comment $comment, int $actorId): string
     {
         $operation = AfraOrderOperation::firstOrCreate(['order_id' => $order->id]);
-        if ($operation->remote_status === $status) {
-            return 'skipped';
+        if ($operation->remote_status !== $status) {
+            $operation->update(['remote_status' => $status, 'remote_status_at' => now()]);
         }
-
-        $operation->update(['remote_status' => $status, 'remote_status_at' => now()]);
         if (!$comment) {
             return 'unmapped';
         }
+        if ($operation->applied_status === $status) {
+            return 'skipped';
+        }
+
         $this->addStatusComment($order, $comment, 'Afra: '.$status, $actorId);
+        $operation->update(['applied_status' => $status]);
 
         return 'synchronized';
     }

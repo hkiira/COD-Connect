@@ -24,6 +24,9 @@ use RuntimeException;
  */
 class AfraShippingClient
 {
+    /** A read that times out is tried this many times in all. */
+    private const READ_ATTEMPTS = 3;
+
     private ?AccountCarrier $link = null;
 
     public function __construct(private int $accountId)
@@ -170,7 +173,7 @@ class AfraShippingClient
         }
 
         // TLS validation remains enabled when no custom bundle is configured.
-        return Http::acceptJson()->asJson()->timeout(30)->withOptions($options);
+        return Http::acceptJson()->asJson()->timeout((int) config('services.afra.timeout', 60))->withOptions($options);
     }
 
     private function url(string $path): string
@@ -219,8 +222,20 @@ class AfraShippingClient
     /** Authenticated call, re-logging in once when the cached token was rejected. */
     private function authorized(string $method, string $path, array $data = []): array
     {
-        $call = function (string $token) use ($method, $path, $data) {
-            return $this->send(fn () => $this->http()->withToken($token)->{$method}($this->url($path), $data));
+        // Afra's list pages can be slow: a read (GET) that times out is tried again. A write is never
+        // repeated, since Afra may have applied it (it becomes "uncertain" instead).
+        $attempts = $method === 'get' ? self::READ_ATTEMPTS : 1;
+        $call = function (string $token) use ($method, $path, $data, $attempts) {
+            for ($attempt = 1; ; $attempt++) {
+                try {
+                    return $this->send(fn () => $this->http()->withToken($token)->{$method}($this->url($path), $data));
+                } catch (AfraUncertainException $e) {
+                    if ($attempt >= $attempts) {
+                        throw $e;
+                    }
+                    sleep(2 * $attempt);
+                }
+            }
         };
 
         $response = $call($this->token());

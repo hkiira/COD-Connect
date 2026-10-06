@@ -8,7 +8,7 @@ class AfraOrderOperation extends Model
 {
     protected $fillable = [
         'order_id', 'create_state', 'create_attempted_at', 'return_state', 'delete_state', 'exchange_state',
-        'remote_status', 'remote_status_at', 'missing_since', 'last_error',
+        'remote_status', 'remote_status_at', 'applied_status', 'missing_since', 'last_error',
     ];
 
     protected $casts = [
