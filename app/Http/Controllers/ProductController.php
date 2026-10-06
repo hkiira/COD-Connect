@@ -28,6 +28,9 @@ use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\VariationAttributesController;
 use App\Http\Controllers\HelperFunctions;
 use App\Models\BrandSource;
+use App\Support\ProductOwnership;
+use App\Support\Products\ProductValidator;
+use Illuminate\Support\Facades\DB;
 
 class ProductController extends Controller
 {
@@ -520,123 +523,21 @@ class ProductController extends Controller
 
     public static function store(Request $requests)
     {
-        $account = getAccountUser()->account_id;
-        $users = AccountUser::where(['account_id' => $account, 'statut' => 1])->get()->pluck('id')->toArray();
+        // The product form sends "...ToActive" keys; this method validates and reads the plain ones.
+        $requests->replace(ProductOwnership::normalizeCreatePayload($requests->input()));
 
-        $existsById = function (string $model, ?callable $scope = null) {
-            return function ($attribute, $value, $fail) use ($model, $scope) {
-                $query = $model::query()->where('id', $value);
-                if ($scope) {
-                    $scope($query, $value, $attribute);
-                }
-                if (!$query->exists()) {
-                    $fail('not exist');
-                }
-            };
-        };
+        $payload = $requests->except('_method');
 
-        $existsInAccount = function (string $model, array $extraConditions = [], ?callable $scope = null) use ($account, $existsById) {
-            return $existsById($model, function ($query) use ($account, $extraConditions, $scope) {
-                $query->where('account_id', $account)->where($extraConditions);
-                if ($scope) {
-                    $scope($query);
-                }
-            });
-        };
-
-        $existsInUsers = function (string $model) use ($users, $existsById) {
-            return $existsById($model, function ($query) use ($users) {
-                $query->whereIn('account_user_id', $users);
-            });
-        };
-
-        $validateAvailableImage = function (string $imageableType) use ($account) {
-            return function ($attribute, $value, $fail) use ($account, $imageableType) {
-                $image = Image::where(['id' => $value, 'account_id' => $account])->first();
-                if (!$image) {
-                    $fail('not exist');
-                    return;
-                }
-
-                $alreadyAttached = \App\Models\Imageable::where('image_id', $image->id)
-                    ->where('imageable_type', $imageableType)
-                    ->exists();
-
-                if ($alreadyAttached) {
-                    $fail('exist');
-                }
-            };
-        };
-
-        $validator = Validator::make($requests->except('_method'), [
-            '*.default_measurement_id' => 'exists:measurements,id',
-            '*.product_type_id' => 'exists:product_types,id',
-            '*.measurements.*.id' => 'exists:measurements,id',
-            '*.measurements.*.quantity' => 'numeric',
-            '*.price' => 'required|numeric',
-            '*.title' => ['required', 'string', 'max:255'],
-            '*.reference' => ['required', 'string', 'max:255'],
-            '*.warehouses.*' => [
-                $existsInAccount(Warehouse::class, ['warehouse_type_id' => 1]),
-            ],
-            '*.brands.*' => [
-                $existsInAccount(Brand::class, ['statut' => 1]),
-            ],
-            '*.categories.*' => [
-                $existsInUsers(Taxonomy::class),
-            ],
-            '*.suppliers' => 'array',
-            '*.suppliers.*.id' => [
-                'sometimes',
-                'required',
-                $existsInAccount(Supplier::class),
-            ],
-            '*.suppliers.*.price' => 'sometimes|required|numeric',
-            '*.attributes.*' => [
-                $existsInUsers(Attribute::class),
-            ],
-            '*.productVariationAttributes.id' => [
-                $existsInAccount(ProductVariationAttribute::class),
-            ],
-            '*.productVariationAttributes.quantity' => "numeric",
-            '*.offers.*' => [
-                'string',
-                $existsInAccount(Offer::class, [], function ($query) {
-                    $query->where('offer_type_id', '!=', 1);
-                }),
-            ],
-            '*.images.*' => [
-                'string',
-                $validateAvailableImage("App\Models\Product"),
-            ],
-            '*.imageVariations.*.image' => [
-                'string',
-                $validateAvailableImage("App\Models\ProductVariationAttribute"),
-            ],
-
-            '*.imageVariations.*.attribute.*' => [
-                'string',
-                $existsInUsers(Attribute::class),
-            ],
-            '*.imageVariations.*.attributes.*' => [
-                'string',
-                $existsInUsers(Attribute::class),
-            ],
-            '*.principalImage' => [
-                'string',
-                $validateAvailableImage("App\Models\Product"),
-            ],
-            '*.statut' => 'required',
-            '*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
-            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
-        ]);
+        // References must be unique for requests coming through the API route; machine imports may repeat them.
+        $validator = ProductValidator::forCurrentAccount()->forCreate($payload, $requests->route() !== null);
         if ($validator->fails()) {
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
-            ]);
+            ], 422);
         }
-        $products = collect($requests->except('_method'))->map(function ($request) {
+        // One transaction for the whole batch: a failure halfway must not leave half a product behind.
+        $products = DB::transaction(fn () => collect($requests->except('_method'))->map(function ($request) {
             $request["account_user_id"] = getAccountUser()->id;
             $request['code'] = DefaultCodeController::getAccountCode('Product', getAccountUser()->account_id);
             $request['product_type_id'] = $request['product_type_id'] ?? 1;
@@ -777,7 +678,7 @@ class ProductController extends Controller
             }
 
             return $product;
-        });
+        }));
 
         return response()->json([
             'statut' => 1,
@@ -891,6 +792,10 @@ class ProductController extends Controller
 
     public function edit(Request $request, $id)
     {
+        if (! ProductOwnership::owns($id)) {
+            return response()->json(['statut' => 0, 'data' => 'not exist'], 404);
+        }
+
         $request = collect($request->query())->toArray();
         $data = [];
         $normalize = function ($payload, $columns = []) {
@@ -1284,107 +1189,19 @@ class ProductController extends Controller
 
     public function update(Request $requests, $id)
     {
-        $account = getAccountUser()->account_id;
-        $users = AccountUser::where(['account_id' => $account, 'statut' => 1])->get()->pluck('id')->toArray();
+        $payload = $requests->except('_method');
 
-        $existsById = function (string $model) {
-            return function ($attribute, $value, $fail) use ($model) {
-                if (!$model::where('id', $value)->first()) {
-                    $fail("not exist");
-                }
-            };
-        };
-
-        $existsInAccount = function (string $model, array $extraConditions = []) use ($account) {
-            return function ($attribute, $value, $fail) use ($model, $account, $extraConditions) {
-                $conditions = array_merge(['id' => $value, 'account_id' => $account], $extraConditions);
-                if (!$model::where($conditions)->first()) {
-                    $fail("not exist");
-                }
-            };
-        };
-
-        $existsInUsers = function (string $model) use ($users) {
-            return function ($attribute, $value, $fail) use ($model, $users) {
-                if (!$model::where('id', $value)->whereIn('account_user_id', $users)->first()) {
-                    $fail("not exist");
-                }
-            };
-        };
-
-        $validator = Validator::make($requests->except('_method'), [
-            '*.id' => 'required|exists:products,id',
-            '*.reference' => [ // Validate title field
-                'max:255', // Title should not exceed 255 characters
-                function ($attribute, $value, $fail) use ($requests, $users) { // Custom validation rule
-                    // Call the function to rename removed records
-                    RestoreController::renameRemovedRecords('product', 'title', $value);
-
-                    // Extract index from Taxonomy name
-                    $index = str_replace(['*', '.title'], '', $attribute);
-                    // Get the ID and title from the request
-                    $id = $requests->input("{$index}.id"); // Get ID from request
-                    $titleModel = Product::where('title', $value)->whereIn('account_user_id', $users)->first();
-                    $idModel = Product::where('id', $id)->whereIn('account_user_id', $users)->first(); // Find model by ID
-        
-                    // Check if a country with the same title exists but with a different ID
-                    if ($titleModel && $idModel && $titleModel->id !== $idModel->id) {
-                        $fail("exist"); // Validation fails with custom message
-                    }
-                },
-            ],
-            '*.title' => [ // Validate title field
-                'max:255', // Title should not exceed 255 characters
-                function ($attribute, $value, $fail) use ($requests, $users) { // Custom validation rule
-                    // Call the function to rename removed records
-                    RestoreController::renameRemovedRecords('Product', 'title', $value);
-
-                    // Extract index from Taxonomy name
-                    $index = str_replace(['*', '.title'], '', $attribute);
-                    // Get the ID and title from the request
-                    $id = $requests->input("{$index}.id"); // Get ID from request
-                    $titleModel = Product::where('title', $value)->whereIn('account_user_id', $users)->first();
-                    $idModel = Product::where('id', $id)->whereIn('account_user_id', $users)->first(); // Find model by ID
-        
-                    // Check if a country with the same title exists but with a different ID
-                    if ($titleModel && $idModel && $titleModel->id !== $idModel->id) {
-                        $fail("exist"); // Validation fails with custom message
-                    }
-                },
-            ],
-            '*.warehousesToActive.*' => [$existsInAccount(Warehouse::class, ['warehouse_type_id' => 1])],
-            '*.warehousesToInactive.*' => [$existsInAccount(Warehouse::class, ['warehouse_type_id' => 1])],
-            '*.taxonomiesToActive.*' => [$existsById(Taxonomy::class)],
-            '*.taxonomiesToInactive.*' => [$existsById(Taxonomy::class)],
-            '*.suppliersToActive.*.price' => 'required',
-            '*.suppliersToActive.*.id' => [$existsInAccount(Supplier::class)],
-            '*.suppliersToInactive.*' => [$existsInAccount(Supplier::class)],
-            '*.attributes.*' => [$existsInUsers(Attribute::class)],
-            '*.brandsToActive.*' => [$existsInAccount(Brand::class)],
-            '*.brandsToInactive.*' => [$existsInAccount(Brand::class)],
-            '*.offersToActive.*' => [$existsInAccount(Offer::class)],
-            '*.offersToInactive.*' => [$existsInAccount(Offer::class)],
-            '*.imageVariations.*.image' => ['string', $existsInAccount(Image::class)],
-            '*.imageVariations.*.attributes.*' => [$existsById(Attribute::class)],
-            '*.images.*' => [
-                'string',
-                $existsInAccount(Image::class),
-            ],
-            '*.principalImage' => [
-                'string',
-                $existsInAccount(Image::class),
-            ],
-            '*.newImages.*' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
-            '*.newPrincipalImage' => 'image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
-        ]);
+        $productValidator = ProductValidator::forCurrentAccount();
+        $productValidator->releaseRemovedTitles($payload);
+        $validator = $productValidator->forUpdate($payload);
         if ($validator->fails()) {
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
-            ]);
+            ], 422);
         }
         //update mazal khassni nfker liha f logique dialha mezian 7ite fiha 3 type de produits de préférence 7ta ndwiw fiha ensemble
-        $products = collect($requests->except('_method'))->map(function ($request) {
+        $products = DB::transaction(fn () => collect($requests->except('_method'))->map(function ($request) {
             $request["account_user_id"] = getAccountUser()->id;
             $product = Product::find($request['id']);
             if (!$product) {
@@ -1692,7 +1509,7 @@ class ProductController extends Controller
             }
             $product = Product::find($product->id);
             return $product;
-        })->filter()->values();
+        })->filter()->values());
 
         return response()->json([
             'statut' => 1,
@@ -1703,7 +1520,11 @@ class ProductController extends Controller
 
     public function destroy($id)
     {
-        $product = Product::find($id);
+        $product = ProductOwnership::owns($id) ? Product::find($id) : null;
+        if (! $product) {
+            return response()->json(['statut' => 0, 'data' => 'not exist'], 404);
+        }
+
         $product->delete();
         return response()->json([
             'statut' => 1,
@@ -1713,7 +1534,7 @@ class ProductController extends Controller
 
     public function updateVariationImages(Request $request, $id)
     {
-        $product = Product::with('activePvas.imageables')->find($id);
+        $product = ProductOwnership::owns($id) ? Product::with('activePvas.imageables')->find($id) : null;
         if (!$product) {
             return response()->json([
                 'statut' => 0,

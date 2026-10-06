@@ -34,6 +34,10 @@ return [
     'afra' => [
         'base_url' => env('AFRA_API_URL', 'https://afradelivery.com/api/seller'),
         'ca_bundle' => env('AFRA_CA_BUNDLE'),
+        // carriers.id of AFRA DELIVERY in this installation
+        'carrier_id' => (int) env('AFRA_CARRIER_ID', 26),
+        // The API does not say how long an access token lives: keep it a while, re-login on 401.
+        'token_ttl' => (int) env('AFRA_TOKEN_TTL', 3000),
     ],
 
 ];

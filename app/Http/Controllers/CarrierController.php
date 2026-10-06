@@ -171,10 +171,9 @@ class CarrierController extends Controller
                 "account_id" => $request["account_id"],
                 "autocode" => $request["autocode"],
                 "username" => isset($request["username"]) ? $request['username'] : null,
-                "password" => (int) $carrier->id === 26
-                    ? (isset($request['password']) && $request['password'] !== '' ? \Illuminate\Support\Facades\Crypt::encryptString($request['password']) : null)
-                    : ($request['password'] ?? null),
-                "token" => (int) $carrier->id === 26 ? null : ($request['token'] ?? null),
+                // encrypted by the EncryptedCredential cast
+                "password" => $request['password'] ?? null,
+                "token" => $request['token'] ?? null,
                 "statut" => 1
             ]);
             if (isset($request['phones'])) {

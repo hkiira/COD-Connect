@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToAccount;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Order extends Model
 {
     use SoftDeletes;
+    use BelongsToAccount;
     protected $dates = ['deleted_at'];
 
     protected $fillable = [

@@ -14,6 +14,7 @@ return new class extends Migration {
         }
 
         Schema::create('afra_status_mappings', function (Blueprint $table) {
+            $table->engine = 'InnoDB'; // foreign keys + indexes over MyISAM's 1000 bytes
             $table->id();
             $table->foreignId('account_id')->constrained();
             $table->unsignedBigInteger('afra_status_id');
@@ -23,6 +24,7 @@ return new class extends Migration {
         });
 
         Schema::create('afra_sync_runs', function (Blueprint $table) {
+            $table->engine = 'InnoDB'; // foreign keys + indexes over MyISAM's 1000 bytes
             $table->id();
             $table->foreignId('account_id')->constrained();
             $table->foreignId('account_user_id')->nullable()->constrained('account_user');
@@ -38,6 +40,7 @@ return new class extends Migration {
         });
 
         Schema::create('afra_order_operations', function (Blueprint $table) {
+            $table->engine = 'InnoDB'; // foreign keys + indexes over MyISAM's 1000 bytes
             $table->id();
             $table->foreignId('order_id')->constrained()->unique();
             $table->string('create_state', 16)->nullable();

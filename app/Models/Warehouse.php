@@ -3,12 +3,14 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Models\Concerns\BelongsToAccount;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes; // Import the SoftDeletes trait
 
 class Warehouse extends Model
 {
     use SoftDeletes;
+    use BelongsToAccount;
     protected $dates = ['deleted_at'];
     protected $fillable = ['code', 'title', 'warehouse_nature_id', 'warehouse_type_id', 'warehouse_id', 'account_id', 'statut'];
 

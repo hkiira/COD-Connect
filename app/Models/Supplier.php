@@ -3,12 +3,14 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Models\Concerns\BelongsToAccount;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes; // Import the SoftDeletes trait
 
 class Supplier extends Model
 {
     use SoftDeletes;
+    use BelongsToAccount;
     protected $dates = ['deleted_at'];
     protected $fillable = [
         'code',

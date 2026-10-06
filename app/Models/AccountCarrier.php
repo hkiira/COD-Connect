@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\EncryptedCredential;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes; // Import the SoftDeletes trait
 
@@ -16,10 +17,18 @@ class AccountCarrier extends Model
         'username',
         'password',
         'token',
+        'settings',
         'statut'
     ];
     protected $table = 'account_carrier' ;
     protected $hidden = ['password', 'token'];
+
+    /** Carrier logins are encrypted at rest; read them as plain text. */
+    protected $casts = [
+        'password' => EncryptedCredential::class,
+        'token'    => EncryptedCredential::class,
+        'settings' => 'array',
+    ];
 
 
     public function carrier(){

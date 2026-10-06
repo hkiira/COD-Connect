@@ -1087,9 +1087,16 @@ class OrderController extends Controller
             $data['orderInfo']['payment_type'] = $order->paymentType ? $order->paymentType->only('id', 'title') : null;
 
             $data['orderInfo']['pickup'] = $order->pickup ? $order->pickup->only('id', 'code', 'title', 'carrier_id') : null;
-            $data['orderInfo']['afra_return_state'] = (int) $order->order_status_id === 9 &&
-                (int) $order->pickup?->carrier_id === 26
-                    ? \App\Models\AfraOrderOperation::where('order_id', $order->id)->value('return_state') : null;
+            $afraOperation = AfraShippingService::isAfraOrder($order)
+                ? \App\Models\AfraOrderOperation::where('order_id', $order->id)->first() : null;
+            $data['orderInfo']['afra_return_state'] = (int) $order->order_status_id === AfraShippingService::RETURN_STATUS
+                ? $afraOperation?->return_state : null;
+            // failed / uncertain → the order page offers "Renvoyer à Afra"
+            $data['orderInfo']['afra_create_state'] = $order->shipping_code ? null : $afraOperation?->create_state;
+            $data['orderInfo']['afra_last_error'] = $afraOperation?->last_error;
+            $data['orderInfo']['afra_status'] = $afraOperation?->remote_status;
+            $data['orderInfo']['afra_status_at'] = $afraOperation?->remote_status_at;
+            $data['orderInfo']['is_afra'] = (bool) $afraOperation || AfraShippingService::isAfraOrder($order);
 
             if ($order->shipment) {
                 $data['orderInfo']['shipment'] = $order->shipment->only('id', 'code', 'title');
@@ -1405,8 +1412,10 @@ class OrderController extends Controller
             $order = Order::find($request['id']);
             $afraService = app(AfraShippingService::class);
             $afraEligible = $local === 0 && (int) $order->account_id === (int) getAccountUser()->account_id
-                && (int) $order->pickup?->carrier_id === 26 && (bool) $order->shipping_code;
+                && AfraShippingService::isAfraOrder($order) && (bool) $order->shipping_code;
             $previousStatus = (int) $order->order_status_id;
+            // kept before the update: taking an order out of its pickup may clear its shipping code
+            $previousAfraCode = (string) $order->shipping_code;
             $previousFingerprint = $afraEligible ? $afraService->fingerprint($order) : null;
             /*if (isset($request['pickup_id'])) {
                 $pickUp = Pickup::find($request['pickup_id']);
@@ -1569,11 +1578,16 @@ class OrderController extends Controller
             CompensationableController::edit($order->id);
             if ($afraEligible) {
                 $updatedOrder = Order::find($order->id);
-                if ($updatedOrder->shipping_code && (int) $updatedOrder->pickup?->carrier_id === 26) {
+                $leftAfraPickup = !AfraShippingService::isAfraOrder($updatedOrder);
+                $cancelled = $previousStatus !== AfraShippingService::CANCELLED_STATUS
+                    && (int) $updatedOrder->order_status_id === AfraShippingService::CANCELLED_STATUS;
+                if ($leftAfraPickup || $cancelled) {
+                    $afraSync[$order->id]['delete'] = $afraService->cancelAtAfra($updatedOrder, $previousAfraCode, getAccountUser()->id);
+                } elseif ($updatedOrder->shipping_code) {
                     if ($previousFingerprint !== $afraService->fingerprint($updatedOrder)) {
                         $afraSync[$order->id]['update'] = $afraService->update($updatedOrder, getAccountUser()->id);
                     }
-                    if ($previousStatus !== 9 && (int) $updatedOrder->order_status_id === 9) {
+                    if ($previousStatus !== AfraShippingService::RETURN_STATUS && (int) $updatedOrder->order_status_id === AfraShippingService::RETURN_STATUS) {
                         $afraSync[$order->id]['return'] = $afraService->requestReturn($updatedOrder, getAccountUser()->id);
                     }
                 }
@@ -1852,6 +1866,12 @@ class OrderController extends Controller
                     'message' => 'Delivery has been successfully swapped.'
                 ];
             });
+
+            // The Afra parcel now carries the new order: send Afra its products and amount.
+            $swapped = Order::find($newOrderId);
+            if ($swapped?->shipping_code && AfraShippingService::isAfraOrder($swapped)) {
+                $response['afra_sync'][$swapped->id]['update'] = app(AfraShippingService::class)->update($swapped, getAccountUser()->id);
+            }
 
             return response()->json($response);
 

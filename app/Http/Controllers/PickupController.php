@@ -283,7 +283,10 @@ class PickupController extends Controller
     {
         $comment = ($pickup->statut == 0) ? ['id' => 48, "title" => "En préparation"] : ['id' => 81, "title" => "En cours"];
         $pickupId = $pickup->id;
+        $afraCodes = [];
         if ($canceled == 1) {
+            // read before the update: once out of the pickup, the order is no longer linked to Afra
+            $afraCodes = \App\Services\AfraShippingService::afraCodes(array_values($request->toArray()));
             $comment = collect($request)->map(function ($orderId) {
                 $order = Order::find($orderId);
                 $lastComment = $order->orderComments()->whereNotIn('order_status_id', [5, 6, 7, 8, 9, 10, 11])->orderByDesc('created_at')->first();
@@ -302,6 +305,9 @@ class PickupController extends Controller
             ];
         }, $request->toArray(), array_keys($request->toArray())));
         $orders = OrderController::update(new Request($datas), $local = 1);
+        if ($afraCodes) {
+            app(\App\Services\AfraShippingService::class)->cancelRemovedOrders($afraCodes, getAccountUser()->id);
+        }
         return $orders;
     }
     public static function store(Request $requests)
@@ -402,6 +408,9 @@ class PickupController extends Controller
             'collector',
             'accountUser.user.images',
             'orders.orderPvas',
+            'orders.customer:id,name',
+            'orders.city:id,title',
+            'orders.orderStatus:id,title',
         ])->whereIn('account_user_id', $accountUserIds)->find($id);
 
         if (!$pickup) {
@@ -833,7 +842,11 @@ class PickupController extends Controller
     public function destroy($id)
     {
         $pickup = Pickup::find($id);
+        $afraCodes = \App\Services\AfraShippingService::afraCodes($pickup->orders()->pluck('id')->all());
         $pickup->delete();
+        if ($afraCodes) {
+            app(\App\Services\AfraShippingService::class)->cancelRemovedOrders($afraCodes, getAccountUser()->id);
+        }
         return response()->json([
             'statut' => 1,
             'data' => $pickup,

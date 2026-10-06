@@ -30,11 +30,13 @@ class Kernel extends ConsoleKernel
         // Sync WooCommerce processing orders every 5 minutes
         $schedule->command('wc:sync-processing-orders')->everyFiveMinutes()->withoutOverlapping();
 
+        // Afra: read the statuses of the open Afra orders of every account that has credentials.
         $schedule->call(function () {
-            \App\Models\AccountCarrier::where('carrier_id', 26)->whereNotNull('username')->whereNotNull('password')
+            \App\Models\AccountCarrier::where('carrier_id', \App\Services\AfraShippingClient::carrierId())
+                ->whereNotNull('username')->whereNotNull('password')
                 ->each(function ($link) {
                     $running = \App\Models\AfraSyncRun::where('account_id', $link->account_id)
-                        ->where('kind', 'statuses')->whereIn('status', ['queued', 'running'])->exists();
+                        ->where('kind', 'statuses')->active()->exists();
                     if ($running) return;
                     $actorId = \App\Models\AccountUser::where('account_id', $link->account_id)->value('id');
                     if (!$actorId) return;
@@ -47,6 +49,14 @@ class Kernel extends ConsoleKernel
                     \App\Jobs\SyncAfraShippingJob::dispatch($run->id);
                 });
         })->name('afra-status-sync')->everyFifteenMinutes()->withoutOverlapping();
+
+        // Afra has no webhook: compare its city list with our copy once a day.
+        $schedule->command('afra:check-cities')->dailyAt('06:00')->withoutOverlapping();
+
+        // No permanent queue worker on the server: run the Afra jobs (pickup sends, status syncs)
+        // from the scheduler. A run started from the app begins within the minute.
+        $schedule->command('queue:work database --queue=afra --stop-when-empty --max-time=55 --tries=1')
+            ->everyMinute()->withoutOverlapping(10)->runInBackground();
     }
 
     /**

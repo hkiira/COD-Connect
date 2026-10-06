@@ -7,6 +7,7 @@ use App\Http\Controllers\AfraShippingController;
 use App\Http\Controllers\Api\ReviewController;
 use App\Http\Controllers\Api\ReviewQuestionController;
 use App\Http\Controllers\{
+    CatalogToolsController,
     RoleController,
     OrderStatusController,
     UserController,
@@ -123,7 +124,7 @@ use App\Services\AsapDeliveryService;
 //     return $request->user();
 // });
 Route::post('register_new_account', [RegisterController::class, 'register_new_account']);
-Route::post('login', [RegisterController::class, 'login'])->name('login');
+Route::post('login', [RegisterController::class, 'login'])->middleware('throttle:login')->name('login');
 Route::get('filterselect/wp-cities', [FilterController::class, 'cities']);
 Route::get('webhooks/asap-delivery', [AsapDeliveryWebhookController::class, 'handle'])->middleware('asap.webhook');
 // Route::resource('PhoneTypes', PhoneTypesController::class);
@@ -320,8 +321,21 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::post('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);
     Route::get('overviews/sales', [OverviewController::class, 'sales']);
     Route::get('overviews/logistics', [OverviewController::class, 'logistics']);
+    Route::get('overviews/logistics/exceptions', [OverviewController::class, 'logisticsExceptions']);
+    Route::get('overviews/logistics/cities', [OverviewController::class, 'logisticsCities']);
+    Route::get('overviews/logistics/billing', [OverviewController::class, 'logisticsBilling']);
     Route::get('overviews/procurement', [OverviewController::class, 'procurement']);
     Route::get('overviews/catalog', [OverviewController::class, 'catalog']);
+    Route::get('overviews/catalog/quality', [OverviewController::class, 'catalogQuality']);
+
+    Route::prefix('catalog-tools')->group(function () {
+        Route::get('stock-alerts', [CatalogToolsController::class, 'stockAlerts']);
+        Route::get('stock-reconciliation', [CatalogToolsController::class, 'stockReconciliation']);
+        Route::post('stock-adjust', [CatalogToolsController::class, 'stockAdjust']);
+        Route::get('export', [CatalogToolsController::class, 'export']);
+        Route::post('import', [CatalogToolsController::class, 'import']);
+        Route::post('bulk-update', [CatalogToolsController::class, 'bulkUpdate']);
+    });
     Route::get('overviews/finance', [OverviewController::class, 'finance']);
     Route::get('overviews/administration', [OverviewController::class, 'administration']);
     // Speedafv public API
@@ -332,7 +346,6 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::post('speedaf/create-order', [SpeedafController::class, 'createOrder']);
     Route::post('speedaf/export/{id}', [SpeedafController::class, 'exportPickupOrders']);
     Route::post('speedaf/import_orders', [SpeedafController::class, 'importOrders']);
-    Route::post('afra/import_orders', [AfraDeliveryController::class, 'importOrders']);
     Route::post('afra/export/{id}', [AfraDeliveryController::class, 'exportPickupOrders']);
 
     Route::get('afra-shipping/account', [AfraShippingController::class, 'account']);
@@ -341,15 +354,29 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('afra-shipping/orders', [AfraShippingController::class, 'orders']);
     Route::get('afra-shipping/cities', [AfraShippingController::class, 'cities']);
     Route::put('afra-shipping/cities', [AfraShippingController::class, 'mapCity']);
+    Route::post('afra-shipping/cities/auto', [AfraShippingController::class, 'autoLinkCities']);
+    Route::get('afra-shipping/cities/changes', [AfraShippingController::class, 'cityChanges']);
+    Route::post('afra-shipping/cities/check', [AfraShippingController::class, 'checkCities']);
+    Route::post('afra-shipping/cities/changes/{id}/resolve', [AfraShippingController::class, 'resolveCityChange']);
+    Route::post('afra-shipping/cities/changes/{id}/apply-price', [AfraShippingController::class, 'applyCityPrice']);
+
+    Route::get('notifications', [\App\Http\Controllers\NotificationController::class, 'index']);
+    Route::post('notifications/read-all', [\App\Http\Controllers\NotificationController::class, 'markAllRead']);
+    Route::post('notifications/{id}/read', [\App\Http\Controllers\NotificationController::class, 'markRead']);
     Route::get('afra-shipping/statuses', [AfraShippingController::class, 'statuses']);
     Route::put('afra-shipping/statuses', [AfraShippingController::class, 'mapStatus']);
     Route::post('afra-shipping/pickups/{id}/sync', [AfraShippingController::class, 'syncPickup']);
     Route::post('afra-shipping/statuses/sync', [AfraShippingController::class, 'syncStatusesNow']);
     Route::get('afra-shipping/runs/{id}', [AfraShippingController::class, 'run']);
     Route::post('afra-shipping/orders/{id}/return/retry', [AfraShippingController::class, 'retryReturn']);
-
-    Route::get('afradelivery/{entity}/{id?}/{type?}', [AfraDeliveryController::class, 'rest']);
-    Route::post('afradelivery/{entity}/{id?}/{type?}', [AfraDeliveryController::class, 'rest']);
+    Route::post('afra-shipping/orders/{id}/resend', [AfraShippingController::class, 'resendOrder']);
+    Route::post('afra-shipping/orders/match-codes', [AfraShippingController::class, 'matchCodes']);
+    Route::get('afra-shipping/tracking', [AfraShippingController::class, 'tracking']);
+    Route::get('afra-shipping/returns', [AfraShippingController::class, 'returns']);
+    Route::get('afra-shipping/returns/lookup', [AfraShippingController::class, 'lookupReturn']);
+    Route::post('afra-shipping/returns/receive', [AfraShippingController::class, 'receiveReturns']);
+    Route::post('afra-shipping/payments/reconcile', [AfraShippingController::class, 'reconcilePayment']);
+    Route::post('afra-shipping/payments', [AfraShippingController::class, 'createPayment']);
     // GET endpoint to fetch the questions for building the form
     Route::get('/orders/{order}/reviews/questions', [ReviewController::class, 'index']);
 

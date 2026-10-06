@@ -293,6 +293,11 @@ class ExitslipController extends Controller
                     if (!$warehouseId) {
                         $fail("Warehouse ID not found");
                     }
+                    $lineIndex = explode('.', $attribute)[1] ?? null;
+                    $quantity = (float) ($payload['productVariationAttributes'][$lineIndex]['quantity'] ?? 0);
+                    if ($message = \App\Support\StockGuard::insufficient((int) $warehouseId, (int) $value, $quantity)) {
+                        $fail($message);
+                    }
                 },
             ],
             'productVariationAttributes.*.quantity' => 'required|numeric',

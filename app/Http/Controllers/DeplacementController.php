@@ -268,6 +268,10 @@ class DeplacementController extends Controller
                     if (!$warehousePva) {
                         $fail("Warehouse product not found");
                     }
+                    $quantity = (float) ($requests[$firstIndex]['productVariationAttributes'][$keys[2] ?? null]['quantity'] ?? 0);
+                    if ($message = \App\Support\StockGuard::insufficient((int) $warehouseId, (int) $value, $quantity)) {
+                        $fail($message);
+                    }
                 },
             ],
             '*.productVariationAttributes.*.quantity' => 'required|numeric',
