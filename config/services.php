@@ -60,6 +60,8 @@ return [
         'carrier_id' => (int) env('AFRA_CARRIER_ID', 26),
         // The API does not say how long an access token lives: keep it a while, re-login on 401.
         'token_ttl' => (int) env('AFRA_TOKEN_TTL', 3000),
+        // seconds per HTTP call; the order list pages are slow
+        'timeout' => (int) env('AFRA_TIMEOUT', 60),
     ],
 
 ];

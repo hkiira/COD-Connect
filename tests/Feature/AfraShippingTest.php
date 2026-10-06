@@ -80,7 +80,7 @@ class AfraShippingTest extends TestCase
         Schema::create('order_comment', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('order_id'), $t->unsignedBigInteger('comment_id')->nullable(), $t->unsignedBigInteger('account_user_id'), $t->unsignedBigInteger('order_status_id'), $t->string('title')->nullable(), $t->dateTime('postpone')->nullable(), $t->integer('score')->nullable(), $t->string('type')->default('comment'), $t->softDeletes(), $t->timestamps()]);
         Schema::create('afra_status_mappings', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('account_id'), $t->unsignedBigInteger('afra_status_id'), $t->unsignedBigInteger('comment_id')->nullable(), $t->boolean('is_return')->default(false), $t->unsignedBigInteger('order_status_id')->nullable(), $t->timestamps()]);
         Schema::create('afra_sync_runs', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('account_id'), $t->unsignedBigInteger('account_user_id')->nullable(), $t->unsignedBigInteger('pickup_id')->nullable(), $t->string('kind'), $t->string('status'), $t->integer('processed')->default(0), $t->integer('synchronized')->default(0), $t->integer('skipped')->default(0), $t->integer('failed')->default(0), $t->text('message')->nullable(), $t->timestamps()]);
-        Schema::create('afra_order_operations', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('order_id')->unique(), $t->string('create_state')->nullable(), $t->timestamp('create_attempted_at')->nullable(), $t->string('return_state')->nullable(), $t->string('delete_state')->nullable(), $t->string('exchange_state')->nullable(), $t->string('remote_status')->nullable(), $t->timestamp('remote_status_at')->nullable(), $t->timestamp('missing_since')->nullable(), $t->text('last_error')->nullable(), $t->timestamps()]);
+        Schema::create('afra_order_operations', fn (Blueprint $t) => [$t->id(), $t->unsignedBigInteger('order_id')->unique(), $t->string('create_state')->nullable(), $t->timestamp('create_attempted_at')->nullable(), $t->string('return_state')->nullable(), $t->string('delete_state')->nullable(), $t->string('exchange_state')->nullable(), $t->string('remote_status')->nullable(), $t->timestamp('remote_status_at')->nullable(), $t->string('applied_status')->nullable(), $t->timestamp('missing_since')->nullable(), $t->text('last_error')->nullable(), $t->timestamps()]);
     }
 
     private function makeOrder(int $id, int $city = 1): void
@@ -380,6 +380,58 @@ class AfraShippingTest extends TestCase
         $this->assertSame(1, DB::table('order_comment')->where('order_id', 1)->count());
     }
 
+    public function test_status_sync_updates_only_orders_en_cours_and_applies_a_mapping_added_later(): void
+    {
+        DB::table('orders')->where('id', 1)->update(['shipping_code' => 'AF-1', 'order_status_id' => 6]);
+        $this->makeOrder(2); // "En souffrance": not updated from Afra
+        DB::table('orders')->where('id', 2)->update(['shipping_code' => 'AF-2', 'order_status_id' => 9]);
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_ends_with($url, '/login')) return Http::response(['access_token' => 'token']);
+            if (str_contains($url, 'get-available-status')) return Http::response([['id' => 5, 'fr_name' => 'Livré']]);
+            return Http::response(['pagination' => ['last_page' => 1], 'orders' => [
+                ['number' => 'AF-1', 'status' => 'Livré'],
+                ['number' => 'AF-2', 'status' => 'Livré'],
+            ]]);
+        });
+        $service = app(AfraShippingService::class);
+        $run = fn () => AfraSyncRun::create(['account_id' => 1, 'account_user_id' => 1, 'kind' => 'statuses', 'status' => 'running']);
+
+        // no mapping yet: the status is only recorded and reported
+        $first = $run();
+        $service->syncStatuses($first);
+        $this->assertSame(6, (int) Order::find(1)->order_status_id);
+        $this->assertStringContainsString('Livré (1)', $first->fresh()->message);
+
+        // mapped afterwards: the next sync applies it, although Afra's status did not change
+        DB::table('afra_status_mappings')->insert(['account_id' => 1, 'afra_status_id' => 5, 'comment_id' => 25]);
+        $service->syncStatuses($run());
+        $this->assertSame(7, (int) Order::find(1)->order_status_id);
+        $this->assertSame(9, (int) Order::find(2)->order_status_id);
+        $this->assertDatabaseMissing('afra_order_operations', ['order_id' => 2, 'remote_status' => 'Livré']);
+    }
+
+    public function test_status_sync_finds_en_cours_orders_without_number_by_their_code(): void
+    {
+        DB::table('orders')->where('id', 1)->update(['order_status_id' => 6]); // no Afra number
+        DB::table('afra_status_mappings')->insert(['account_id' => 1, 'afra_status_id' => 4, 'comment_id' => 31]);
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_ends_with($url, '/login')) return Http::response(['access_token' => 'token']);
+            if (str_contains($url, 'get-available-status')) return Http::response([['id' => 4, 'fr_name' => 'Injoignable']]);
+            return Http::response(['pagination' => ['last_page' => 1], 'orders' => [
+                ['number' => '138999', 'client' => 'Client 1-CMD1', 'status' => 'Injoignable'],
+            ]]);
+        });
+        $run = AfraSyncRun::create(['account_id' => 1, 'account_user_id' => 1, 'kind' => 'statuses', 'status' => 'running']);
+
+        app(AfraShippingService::class)->syncStatuses($run);
+
+        $this->assertSame('138999', Order::find(1)->shipping_code);
+        $this->assertDatabaseHas('order_comment', ['order_id' => 1, 'comment_id' => 31]);
+        $this->assertStringContainsString('1 numéro(s) Afra retrouvé(s)', $run->fresh()->message);
+    }
+
     public function test_status_sync_stops_reading_pages_once_every_open_order_was_seen(): void
     {
         DB::table('orders')->where('id', 1)->update(['shipping_code' => 'AF-1', 'order_status_id' => 6]);
@@ -392,7 +444,38 @@ class AfraShippingTest extends TestCase
 
         app(AfraShippingService::class)->syncStatuses(AfraSyncRun::create(['account_id' => 1, 'account_user_id' => 1, 'kind' => 'statuses', 'status' => 'running']));
 
-        Http::assertSentCount(3); // login, statuses, page 1 only
+        // login, statuses, page 1 (gives the page count), then the last page only: Afra lists oldest first
+        Http::assertSentCount(4);
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'current_page=50'));
+        Http::assertNotSent(fn ($r) => str_contains($r->url(), 'current_page=49'));
+    }
+
+    public function test_status_sync_keeps_what_was_updated_when_a_page_times_out(): void
+    {
+        DB::table('orders')->where('id', 1)->update(['shipping_code' => 'AF-1', 'order_status_id' => 6]);
+        $this->makeOrder(2);
+        DB::table('orders')->where('id', 2)->update(['shipping_code' => 'AF-2', 'order_status_id' => 6]);
+        DB::table('afra_status_mappings')->insert(['account_id' => 1, 'afra_status_id' => 5, 'comment_id' => 25]);
+        $timeouts = 0;
+        Http::fake(function ($request) use (&$timeouts) {
+            $url = $request->url();
+            if (str_ends_with($url, '/login')) return Http::response(['access_token' => 'token']);
+            if (str_contains($url, 'get-available-status')) return Http::response([['id' => 5, 'fr_name' => 'Livré']]);
+            if (str_contains($url, 'current_page=3')) return Http::response(['pagination' => ['last_page' => 3], 'orders' => [['number' => 'AF-1', 'status' => 'Livré']]]);
+            if (str_contains($url, 'current_page=2')) {
+                $timeouts++;
+                throw new ConnectionException('Operation timed out');
+            }
+            return Http::response(['pagination' => ['last_page' => 3], 'orders' => [['number' => 'AF-2', 'status' => 'Livré']]]);
+        });
+        $run = AfraSyncRun::create(['account_id' => 1, 'account_user_id' => 1, 'kind' => 'statuses', 'status' => 'running']);
+
+        app(AfraShippingService::class)->syncStatuses($run);
+
+        $this->assertSame(7, (int) Order::find(1)->order_status_id); // page 3 was applied
+        $this->assertStringContainsString('lecture interrompue à la page 2', $run->fresh()->message);
+        $this->assertSame(3, $timeouts); // a read that times out is tried 3 times
+        $this->assertDatabaseMissing('afra_order_operations', ['order_id' => 2, 'missing_since' => null, 'remote_status' => 'Livré']);
     }
 
     // endregion
