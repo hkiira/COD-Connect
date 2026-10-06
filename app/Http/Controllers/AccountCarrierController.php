@@ -209,7 +209,7 @@ class AccountCarrierController extends Controller
             $account_id = getAccountUser()->account_id;
             $accountCarrier = AccountCarrier::where(['account_id' => $account_id, 'carrier_id' => $request['id']])->first();
             $carrier_only = collect($request)->only('id', 'autocode', 'username', 'password', 'token', 'statut');
-            if ((int) $accountCarrier->carrier_id === 26) {
+            if ((int) $accountCarrier->carrier_id === \App\Services\AfraShippingClient::carrierId()) {
                 // Afra credentials are managed only by AfraShippingController (encrypted at rest).
                 $carrier_only = $carrier_only->except(['username', 'password', 'token']);
             }

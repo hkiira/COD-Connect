@@ -76,7 +76,7 @@ class SynchronisationController extends Controller
     public function pickup($id)
     {
         $pickup = Pickup::where('id', $id)->first();
-        if ($pickup && (int) $pickup->carrier_id === 26) {
+        if ($pickup && (int) $pickup->carrier_id === \App\Services\AfraShippingClient::carrierId()) {
             return app(AfraShippingController::class)->syncPickup((int) $id);
         }
         $sessionId = $this->login();
@@ -145,7 +145,7 @@ class SynchronisationController extends Controller
         } elseif ($pickup->carrier_id == 22) {
             $xlsx = new AsapDeliveryController();
             return $xlsx->exportPickupOrders($id);
-        } elseif ($pickup->carrier_id == 26) {
+        } elseif ((int) $pickup->carrier_id === \App\Services\AfraShippingClient::carrierId()) {
             $xlsx = new AfraDeliveryController();
             return $xlsx->exportPickupOrders($id);
         }

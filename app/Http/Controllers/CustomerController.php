@@ -362,7 +362,7 @@ class CustomerController extends Controller
         $afraService = app(\App\Services\AfraShippingService::class);
         $afraOrders = $isOrder ? collect() : \App\Models\Order::where('account_id', getAccountUser()->account_id)
             ->where('customer_id', $id)->whereNotNull('shipping_code')
-            ->whereHas('pickup', fn ($q) => $q->where('carrier_id', 26))->get();
+            ->whereHas('pickup', fn ($q) => $q->where('carrier_id', \App\Services\AfraShippingClient::carrierId()))->get();
         $before = $afraOrders->mapWithKeys(fn ($order) => [$order->id => $afraService->fingerprint($order)]);
 
         DB::transaction(function () use ($data, $customer) {

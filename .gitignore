@@ -22,3 +22,8 @@ yarn-error.log
 /.vscode
 /.zed
 database_backup_before_merge.sql
+
+# Local-only files
+/error_log
+/speedafw-env-config.txt
+*.php.backup

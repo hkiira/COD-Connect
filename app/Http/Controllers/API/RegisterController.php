@@ -174,10 +174,10 @@ class RegisterController extends BaseController
         if($validator->fails()){
             return response()->json([
                 'statut' => 0,
-                'Validation Error.' => $request->all()
-            ]);       
+                'Validation Error.' => $validator->errors()
+            ]);
         }
-        if (!auth()->attempt($request->all())) {
+        if (!auth()->attempt($request->only('email', 'password'))) {
             return response()->json([
                 'statut' => 0,
                 'error_message' => 'Incorrect Details,Please try again'],200);

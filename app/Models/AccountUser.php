@@ -3,11 +3,13 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Notifications\Notifiable;
 use Spatie\Permission\Traits\HasRoles;
 
 class AccountUser extends Model
 {
     use HasRoles;
+    use Notifiable;
     protected $guard_name = "api";
     protected $table = 'account_user';
     protected $fillable = [
