@@ -182,7 +182,7 @@ class AfraShippingService
     /** create-order / update-order body for a local order. */
     public function payload(Order $order): array
     {
-        $order->loadMissing(['customer.activePhones', 'customer.activeAddresses', 'activePhones', 'activeAddresses', 'activePvas.product']);
+        $order->loadMissing(['customer.activePhones', 'customer.activeAddresses', 'activePhones', 'activeAddresses', 'activePvas.product', 'activePvas.variationAttribute.childVariationAttributes.attribute']);
         $address = $order->activeAddresses->first() ?: $order->customer?->activeAddresses->first();
         $phone = $order->activePhones->first() ?: $order->customer?->activePhones->first();
 
@@ -244,7 +244,7 @@ class AfraShippingService
                 : ($gross > 0 ? intdiv($target * $lineValues[$i], $gross) : intdiv($target, $lines->count()));
             $allocated += $lineCents;
 
-            $name = $pva->product?->title ?: 'Produit';
+            $name = self::productName($pva);
             $unit = intdiv($lineCents, $quantity);
             $extra = $lineCents - $unit * $quantity;
             if ($extra === 0) {
@@ -260,10 +260,22 @@ class AfraShippingService
         return $products;
     }
 
+    /**
+     * Product name as the courier sees it: title then the variation values, e.g. "Sneaker 103 42 Noir".
+     * Needs activePvas.product and activePvas.variationAttribute.childVariationAttributes.attribute.
+     */
+    public static function productName($pva): string
+    {
+        $values = $pva->variationAttribute?->childVariationAttributes
+            ?->map(fn ($child) => trim((string) $child->attribute?->title))->filter()->all() ?? [];
+
+        return trim(implode(' ', [$pva->product?->title ?: 'Produit', ...$values]));
+    }
+
     /** Changes only to what Afra receives (status and local-only fields are left out). */
     public function fingerprint(Order $order): string
     {
-        $order->loadMissing(['customer.activePhones', 'customer.activeAddresses', 'activePhones', 'activeAddresses', 'activePvas.product']);
+        $order->loadMissing(['customer.activePhones', 'customer.activeAddresses', 'activePhones', 'activeAddresses', 'activePvas.product', 'activePvas.variationAttribute.childVariationAttributes.attribute']);
 
         return hash('sha256', json_encode([
             $order->customer?->name,

@@ -19,10 +19,10 @@ class AfraDeliveryController extends Controller
         abort_unless((int) $pickup->carrier_id === AfraShippingClient::carrierId() &&
             (int) $pickup->accountUser?->account_id === (int) getAccountUser()->account_id, 404);
 
-        $rows = Order::with(['customer.activePhones', 'customer.activeAddresses.city', 'activePvas.product'])
+        $rows = Order::with(['customer.activePhones', 'customer.activeAddresses.city', 'activePvas.product', 'activePvas.variationAttribute.childVariationAttributes.attribute'])
             ->where('pickup_id', $id)->where('account_id', getAccountUser()->account_id)
             ->orderByDesc('id')->get()->map(function ($order) {
-                $products = $order->activePvas->map(fn ($pva) => $pva->product?->title.' × '.$pva->pivot->quantity)->implode("\n");
+                $products = $order->activePvas->map(fn ($pva) => AfraShippingService::productName($pva).' × '.$pva->pivot->quantity)->implode("\n");
 
                 return [
                     $order->code,
