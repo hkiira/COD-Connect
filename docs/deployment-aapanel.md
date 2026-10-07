@@ -59,3 +59,25 @@ After adding the secrets, open the repository's **Actions** tab and run
 automatically. A failed run normally means one of these is missing: the SSH
 authorized key, the verified known-hosts entry, the application path, or the
 server's GitHub deploy key.
+
+## Database maintenance after a deploy or a restore
+
+The order, product and catalog indexes live in idempotent migrations (they skip
+what already exists). After a restore from a dump, or on a first deploy, run:
+
+```bash
+php artisan migrate --force
+```
+
+If a dump taken before these migrations is restored, the indexes on `orders`
+(`account_id, order_status_id, created_at`, `account_id, code`, `shipping_code`,
+`pickup_id, order_status_id`) and `order_comment` disappear and the order list
+becomes slow; running the command above recreates them. On a large table the
+first run can take about 15 seconds.
+
+Data repair commands are dry runs unless `--apply` is passed:
+
+| Command | Purpose |
+| --- | --- |
+| `php artisan orders:backfill-type` | Mark old returns/exchanges with `type = 'return'`. |
+| `php artisan orders:dedupe-codes --since=YYYY-MM-DD` | List duplicate order codes; `--apply` renames them (changes visible codes). |
