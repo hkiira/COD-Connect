@@ -64,6 +64,12 @@ return [
         'timeout' => (int) env('WOOCOMMERCE_TIMEOUT', 30),
     ],
 
+    // the one-off importer of another store (ImportController): kept only until that migration is retired
+    'woocommerce_import' => [
+        'consumer_key' => env('WOOCOMMERCE_IMPORT_KEY'),
+        'consumer_secret' => env('WOOCOMMERCE_IMPORT_SECRET'),
+    ],
+
     'afra' => [
         'base_url' => env('AFRA_API_URL', 'https://afradelivery.com/api/seller'),
         'ca_bundle' => env('AFRA_CA_BUNDLE'),
