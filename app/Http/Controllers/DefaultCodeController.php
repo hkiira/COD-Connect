@@ -8,6 +8,7 @@ use App\Models\DefaultCode;
 use App\Models\AccountCode;
 use App\Models\Account;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class DefaultCodeController extends Controller
@@ -77,23 +78,26 @@ class DefaultCodeController extends Controller
     public static function getAccountCode($controller, $accountId)
     {
         $defaultCode = DefaultCode::where('controller', $controller)->first();
-        if ($defaultCode) {
-            $accountCode = AccountCode::where(['account_id' => $accountId, 'default_code_id' => $defaultCode->id])->first();
-            $random = substr(str_shuffle('ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 0, 2);
-            if ($accountCode) {
-                $accountCode->update(['counter' => ($accountCode->counter + 1)]);
-                return $accountCode->prefixe . $accountCode->counter . $random;
-            } else {
-                $accountCode = AccountCode::create([
-                    "account_id" => $accountId,
-                    "default_code_id" => $defaultCode->id,
-                    "prefixe" => $defaultCode->prefix,
-                    "counter" => 1,
-                ]);
-                return $accountCode->prefixe . $accountCode->counter . $random;
-            }
+        if (!$defaultCode) {
+            return null;
         }
-        return null;
+
+        $random = substr(str_shuffle('ABCDEFGHIJKLMNOPQRSTUVWXYZ'), 0, 2);
+        $keys = ['account_id' => $accountId, 'default_code_id' => $defaultCode->id];
+
+        // Read-modify-write under a row lock: two concurrent requests used to read the same
+        // counter and hand out the same code.
+        return DB::transaction(function () use ($keys, $defaultCode, $random) {
+            $accountCode = AccountCode::where($keys)->lockForUpdate()->first();
+
+            if (!$accountCode) {
+                $accountCode = AccountCode::create($keys + ['prefixe' => $defaultCode->prefix, 'counter' => 0]);
+            }
+
+            $accountCode->increment('counter');
+
+            return $accountCode->prefixe . $accountCode->fresh()->counter . $random;
+        });
     }
     public function edit(Request $request, $id)
     {

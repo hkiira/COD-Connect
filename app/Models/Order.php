@@ -35,7 +35,7 @@ class Order extends Model
         'city_id',
         'account_id',
         'order_id',
-        'score', // Added score field
+        'type', // sale | return | exchange (was silently dropped, every order was stored as a sale)
         'discount',
         'sync'
     ];

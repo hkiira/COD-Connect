@@ -63,6 +63,13 @@ return [
             'level' => env('LOG_LEVEL', 'debug'),
         ],
 
+        'order_transitions' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/order_transitions.log'),
+            'level' => 'warning',
+            'days' => 30,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),

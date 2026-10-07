@@ -432,8 +432,8 @@ class ImportController extends Controller
     }
     public function orders_website()
     {
-        $consumer_key = "ck_24b91172606b51b191e4797252710c54402d93ab";
-        $consumer_secret = "cs_05f60c41fda8b2bdc8d7a18dd8465d48e044dbf0";
+        $consumer_key = (string) config('services.woocommerce_import.consumer_key');
+        $consumer_secret = (string) config('services.woocommerce_import.consumer_secret');
         $url = "https://stylemen.net/wp-json/wc/v3/orders?consumer_key={$consumer_key}&consumer_secret={$consumer_secret}&status=processing&per_page=10";
         $client = new Client();
         $response = $client->request('GET', $url, ['headers' => ['Content-Type' => 'application/json']]);

@@ -275,3 +275,35 @@ function checkAndCreateAutomaticComment(int $orderId)
         // The total score can be calculated on-demand using calculateTotalOrderScore()
     }
 }
+
+/**
+ * Total scores of many orders with two grouped queries (same rule as calculateTotalOrderScore:
+ * comment scores are capped at 10). Used by the order list instead of two queries per row.
+ * @param array<int> $orderIds
+ * @return array<int, int|float> order id => score
+ */
+function calculateTotalOrderScores(array $orderIds): array
+{
+    if (empty($orderIds)) {
+        return [];
+    }
+
+    $statusScores = \DB::table('account_user_order_status')
+        ->whereIn('order_id', $orderIds)
+        ->groupBy('order_id')
+        ->selectRaw('order_id, SUM(score) as total')
+        ->pluck('total', 'order_id');
+
+    $commentScores = \DB::table('order_comment')
+        ->whereIn('order_id', $orderIds)
+        ->groupBy('order_id')
+        ->selectRaw('order_id, SUM(score) as total')
+        ->pluck('total', 'order_id');
+
+    $scores = [];
+    foreach ($orderIds as $id) {
+        $scores[$id] = ($statusScores[$id] ?? 0) + min($commentScores[$id] ?? 0, 10);
+    }
+
+    return $scores;
+}

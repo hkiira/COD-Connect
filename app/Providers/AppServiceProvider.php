@@ -23,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
-        
+        // a status change of an order that came from WooCommerce is pushed back to the store
+        \App\Models\Order::observe(\App\Observers\OrderObserver::class);
     }
 }

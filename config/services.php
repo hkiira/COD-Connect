@@ -53,6 +53,23 @@ return [
         'tokens' => env('SCRAPEDO_TOKENS'),
     ],
 
+    'woocommerce' => [
+        'base_url' => env('WOOCOMMERCE_BASE_URL'),
+        'consumer_key' => env('WOOCOMMERCE_CONSUMER_KEY'),
+        'consumer_secret' => env('WOOCOMMERCE_CONSUMER_SECRET'),
+        // keep true: a store with a broken certificate must be fixed, not trusted blindly
+        'verify_ssl' => (bool) env('WOOCOMMERCE_VERIFY_SSL', true),
+        // path of a CA bundle when the server has none configured for PHP (same idea as AFRA_CA_BUNDLE)
+        'ca_bundle' => env('WOOCOMMERCE_CA_BUNDLE'),
+        'timeout' => (int) env('WOOCOMMERCE_TIMEOUT', 30),
+    ],
+
+    // the one-off importer of another store (ImportController): kept only until that migration is retired
+    'woocommerce_import' => [
+        'consumer_key' => env('WOOCOMMERCE_IMPORT_KEY'),
+        'consumer_secret' => env('WOOCOMMERCE_IMPORT_SECRET'),
+    ],
+
     'afra' => [
         'base_url' => env('AFRA_API_URL', 'https://afradelivery.com/api/seller'),
         'ca_bundle' => env('AFRA_CA_BUNDLE'),
