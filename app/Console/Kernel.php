@@ -27,8 +27,12 @@ class Kernel extends ConsoleKernel
         // Sync ASAP returns every hour
         $schedule->command('sync:returns')->hourly()->withoutOverlapping();
 
-        // Sync WooCommerce processing orders every 5 minutes
-        $schedule->command('wc:sync-processing-orders')->everyFiveMinutes()->withoutOverlapping();
+        // WooCommerce: import the new orders of every store that has auto-import on, per store and warehouse
+        $schedule->command('wc:sync-stores')->everyFiveMinutes()->withoutOverlapping();
+
+        // WooCommerce status pushes are queued by the order observer; no permanent worker, so the scheduler runs them.
+        $schedule->command('queue:work database --queue=woocommerce --stop-when-empty --max-time=55 --tries=3')
+            ->everyMinute()->withoutOverlapping(10)->runInBackground();
 
         // Afra: read the statuses of the open Afra orders of every account that has credentials.
         $schedule->call(function () {
