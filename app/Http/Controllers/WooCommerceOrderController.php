@@ -21,9 +21,18 @@ class WooCommerceOrderController extends Controller
 
     public function __construct()
     {
-        $this->baseUrl = config('services.woocommerce.base_url', 'https://stylemen.net/wp-json/wc/v3/');
-        $this->consumerKey = config('services.woocommerce.consumer_key', 'ck_60f4fbf0c53746e9fbb6f64866979bf9f5a36428');
-        $this->consumerSecret = config('services.woocommerce.consumer_secret', 'cs_dc5958ff74d9fa6ca2f550fd722418d58104ba9d');
+        $this->baseUrl = rtrim((string) config('services.woocommerce.base_url'), '/') . '/';
+        $this->consumerKey = (string) config('services.woocommerce.consumer_key');
+        $this->consumerSecret = (string) config('services.woocommerce.consumer_secret');
+    }
+
+    /** Authenticated client: credentials travel in the Authorization header, never in the URL. */
+    private function wc(): \Illuminate\Http\Client\PendingRequest
+    {
+        return Http::withBasicAuth($this->consumerKey, $this->consumerSecret)
+            ->withOptions(['verify' => config('services.woocommerce.verify_ssl', true) ? (config('services.woocommerce.ca_bundle') ?: true) : false])
+            ->timeout((int) config('services.woocommerce.timeout', 30))
+            ->acceptJson();
     }
 
     // -------------------------------------------------------------------------
@@ -43,9 +52,7 @@ class WooCommerceOrderController extends Controller
         $perPage = (int) $request->get('per_page', 10);
         $page = (int) $request->get('page', 1);
 
-        $wcResponse = Http::withoutVerifying()->get($this->baseUrl . 'orders', [
-            'consumer_key' => $this->consumerKey,
-            'consumer_secret' => $this->consumerSecret,
+        $wcResponse = $this->wc()->get($this->baseUrl . 'orders', [
             'status' => $status,
             'per_page' => $perPage,
             'page' => $page,
@@ -168,16 +175,15 @@ class WooCommerceOrderController extends Controller
         $accountId = getAccountUser()->account_id;
         $results = [];
 
+        $wcToUpdate = [];
+
         DB::beginTransaction();
         try {
             foreach ($request->get('orders') as $orderInput) {
                 $wcOrderId = (int) $orderInput['wc_order_id'];
 
                 // Fetch full WooCommerce order details
-                $wcResponse = Http::withoutVerifying()->get($this->baseUrl . 'orders/' . $wcOrderId, [
-                    'consumer_key' => $this->consumerKey,
-                    'consumer_secret' => $this->consumerSecret,
-                ]);
+                $wcResponse = $this->wc()->get($this->baseUrl . 'orders/' . $wcOrderId);
 
                 if ($wcResponse->failed()) {
                     $results[] = [
@@ -298,11 +304,8 @@ class WooCommerceOrderController extends Controller
                     : [];
 
                 if (($storePayload['statut'] ?? 0) == 1) {
-                    // Update WooCommerce order status after successful creation
-                    Http::withoutVerifying()->withQueryParameters([
-                        'consumer_key' => $this->consumerKey,
-                        'consumer_secret' => $this->consumerSecret,
-                    ])->put($this->baseUrl . 'orders/' . $wcOrderId, ['status' => $wcUpdateStatus]);
+                    // the WooCommerce order is updated after the commit (see below), never before
+                    $wcToUpdate[] = $wcOrderId;
 
                     $results[] = [
                         'wc_order_id' => $wcOrderId,
@@ -321,6 +324,16 @@ class WooCommerceOrderController extends Controller
             }
 
             DB::commit();
+
+            // The local orders exist now: tell WooCommerce. A failure here is logged, not fatal, so the
+            // import is never reported as failed (and retried, creating duplicates) because of it.
+            foreach ($wcToUpdate as $wcOrderId) {
+                try {
+                    $this->wc()->put($this->baseUrl . 'orders/' . $wcOrderId, ['status' => $wcUpdateStatus]);
+                } catch (\Throwable $e) {
+                    Log::warning("WooCommerce order {$wcOrderId} was imported but its status could not be updated: " . $e->getMessage());
+                }
+            }
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('WooCommerceOrderController@importOrders: ' . $e->getMessage(), [
@@ -352,10 +365,7 @@ class WooCommerceOrderController extends Controller
         $accountId = getAccountUser()->account_id;
 
         // 1. Fetch WooCommerce order
-        $wcResponse = Http::withoutVerifying()->get($this->baseUrl . 'orders/' . $id, [
-            'consumer_key' => $this->consumerKey,
-            'consumer_secret' => $this->consumerSecret,
-        ]);
+        $wcResponse = $this->wc()->get($this->baseUrl . 'orders/' . $id);
 
         $wcOrderData = null;
         if ($wcResponse->successful()) {
