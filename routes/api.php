@@ -33,7 +33,6 @@ use App\Http\Controllers\{
     SourceController,
     DeliveryMenController,
     SupplierOrderController,
-    OrderPvaController,
     SupplierReceiptController,
     OfferController,
     VariationAttributesController,
@@ -266,12 +265,11 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('salaries', SalaryController::class);
     Route::resource('bonuses', BonusController::class);
     Route::get('orders/counts', [OrderController::class, 'counts']);
-    Route::resource('orders', OrderController::class);
+    // no GET orders/{id}: the details screen reads orders/{id}/edit
+    Route::resource('orders', OrderController::class)->except(['show']);
     Route::post('orders/{id}/sync-sheet', [OrderController::class, 'syncSheet']);
     Route::post('orders/count-by-phones', [OrderController::class, 'countByPhones']);
     Route::post('orders/exchange', [OrderController::class, 'createExchange']);
-    Route::resource('orders_first', OrderController::class);
-    Route::resource('order_pvas', OrderPvaController::class);
     Route::resource('order_statuses', OrderStatusController::class);
     Route::resource('comments', CommentController::class);
     Route::resource('subcomments', SubCommentController::class);
@@ -314,7 +312,6 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('customer', CustomerController::class);
     Route::resource('brand_source', SourceController::class);
     Route::resource('delivery_men', DeliveryMenController::class);
-    Route::get('orders/test-total/{orderId}', [OrderController::class, 'testCalculateTotal']);
     Route::post('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
     Route::get('synchronisation/{entity}/{id?}/{type?}', [SynchronisationController::class, 'rest']);
     Route::get('scrap/{entity}/{id?}/{type?}', [ScrapController::class, 'rest']);

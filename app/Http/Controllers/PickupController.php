@@ -13,6 +13,8 @@ use App\Models\Warehouse;
 use App\Models\Pickup;
 use App\Models\Carrier;
 use App\Models\Collector;
+use App\Support\Orders\OrderOwnership;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class PickupController extends Controller
@@ -60,7 +62,7 @@ class PickupController extends Controller
                 $analytics['delivred'] += (in_array($order->order_status_id, [7, 10])) ? 1 : 0;
                 $analytics['shipped'] += (in_array($order->order_status_id, [8, 9, 11])) ? 1 : 0;
                 $shipping += $order->carrier_price;
-                $order->orderPvas->map(function ($orderPva) use (&$total) {
+                $order->orderPvas->whereNotIn('order_status_id', [2, 3])->map(function ($orderPva) use (&$total) {
                     $total += ($orderPva->quantity * $orderPva->price);
                 });
             });
@@ -334,13 +336,8 @@ class PickupController extends Controller
             '*.orders.*' => [
                 'required',
                 'int',
-                function ($attribute, $value, $fail) {
-                    /*$account = getAccountUser()->account_id;
-                    $order=Order::where(['id'=>$value,'pickup_id'=>null])->first();
-                    if (!$order) {
-                            $fail("not exist");
-                    }*/
-                },
+                // an order of another account must never be put in this account's pickup
+                fn ($attribute, $value, $fail) => OrderOwnership::ownsOrder($value) ?: $fail('not exist'),
             ],
             '*.warehouse_id' => [
                 'int',
@@ -357,10 +354,11 @@ class PickupController extends Controller
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
-            ]);
+            ], 422);
         };
         $from_warehouse = $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first()->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first();
-        $pickups = collect($requests->except('_method'))->map(function ($request) use ($from_warehouse) {
+        // Pickup, order statuses, exit slip and stock move together or not at all.
+        $pickups = DB::transaction(fn () => collect($requests->except('_method'))->map(function ($request) use ($from_warehouse) {
             $request["account_user_id"] = getAccountUser()->id;
             $account_id = getAccountUser()->account_id;
             $request['code'] = (isset($request['code'])) ? $request['code'] : DefaultCodeController::getAccountCode('Pickup', $account_id);
@@ -389,7 +387,7 @@ class PickupController extends Controller
                 $pickup->update(['mouvement_id' => $exitslip->id]);
             }
             return $pickup;
-        });
+        }));
         return response()->json([
             'statut' => 1,
             'data' => $pickups,
@@ -425,7 +423,7 @@ class PickupController extends Controller
             $analytics['delivred'] += in_array($order->order_status_id, [7, 10]) ? 1 : 0;
             $analytics['shipped']  += in_array($order->order_status_id, [8, 9, 11]) ? 1 : 0;
             $shipping += $order->carrier_price;
-            $order->orderPvas->each(function ($orderPva) use (&$total) {
+            $order->orderPvas->whereNotIn('order_status_id', [2, 3])->each(function ($orderPva) use (&$total) {
                 $total += $orderPva->quantity * $orderPva->price;
             });
         });
@@ -456,7 +454,7 @@ class PickupController extends Controller
             return response()->json([
                 'statut' => 0,
                 'data' => 'not exist'
-            ]);
+            ], 404);
         if (isset($request['pickupInfo'])) {
             $data["pickupInfo"]['data'] = $pickup;
             // Add the list of orders in the same structure as active orders
@@ -768,18 +766,13 @@ class PickupController extends Controller
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
-            ]);
+            ], 422);
         };
         $pickups = collect($requests->except('_method'))->map(function ($request) {
             $pickup_only = collect($request)->only('id', 'collector_id', 'title', 'comment', 'statut');
             $pickup = Pickup::find($pickup_only['id']);
-            if ($pickup_only['statut'] == 1 && $pickup->statut == 0) {
-                $pickup->update($pickup_only->all());
-                $this->validatePickup(new Request($pickup->orders->pluck('id')->toArray()), $pickup);
-            } else {
-                $pickup->update($pickup_only->all());
-                $this->validatePickup(new Request($pickup->orders->pluck('id')->toArray()), $pickup);
-            }
+            $pickup->update($pickup_only->all());
+            $this->validatePickup(new Request($pickup->orders->pluck('id')->toArray()), $pickup);
             $warehouse = Warehouse::find($pickup->warehouse_id);
             $fromWarehouseParent = $warehouse ? $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first() : null;
             $from_warehouse = $fromWarehouseParent ? $fromWarehouseParent->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first() : null;
@@ -795,10 +788,11 @@ class PickupController extends Controller
 
             // Keep one mouvement per pickup and sync it with the real current pickup stock.
             if ((isset($request['ordersToInactive']) || isset($request['ordersToActive'])) && $from_warehouse) {
-                $pickup = Pickup::with('orders.orderPvas')->find($pickup->id);
+                $pickup = Pickup::with('orders.activeOrderPvas')->find($pickup->id);
                 $productVariationAttributes = [];
                 $pickup->orders->each(function ($order) use (&$productVariationAttributes) {
-                    $order->orderPvas->each(function ($orderPva) use (&$productVariationAttributes) {
+                    // cancelled / out-of-stock lines do not leave with the carrier
+                    $order->activeOrderPvas->each(function ($orderPva) use (&$productVariationAttributes) {
                         if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
                             $productVariationAttributes[$orderPva->product_variation_attribute_id]["quantity"] += $orderPva->quantity;
                         } else {

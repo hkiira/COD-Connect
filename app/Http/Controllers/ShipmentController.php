@@ -331,7 +331,7 @@ class ShipmentController extends Controller
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
-            ]);
+            ], 422);
         };
         $to_warehouse = $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first()->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first();
         $shipments = collect($requests->except('_method'))->map(function ($request) use ($to_warehouse) {
@@ -425,7 +425,7 @@ class ShipmentController extends Controller
             return response()->json([
                 'statut' => 0,
                 'data' => 'not exist'
-            ]);
+            ], 404);
         if (isset($request['shipmentInfo'])) {
             $shipment['orders'] = $shipment->childShipments->flatMap(function ($childShipment) {
                 return $childShipment->orders->map(function ($order) {
@@ -963,7 +963,7 @@ class ShipmentController extends Controller
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
-            ]);
+            ], 422);
         };
 
         $shipments = collect($requests->except('_method'))->map(function ($request) {
@@ -977,8 +977,9 @@ class ShipmentController extends Controller
                 $total = 0;
                 
                 if(isset($request['ordersToActive'])){
+                    // one call for the whole list: validateShip already loops over every order
+                    $this->validateShip(new Request($request['ordersToActive']), $shipmentChild, $isRetour = 0);
                     foreach ($request['ordersToActive'] as $orderData) {
-                        $this->validateShip(new Request($request['ordersToActive']), $shipmentChild, $isRetour = 0);
                         $order=Order::find($orderData['id']);
                         $carrierTotal += $order->real_carrier_price;
                         $order->activeOrderPvas->map(function ($pva) use (&$total) {
@@ -1051,12 +1052,13 @@ class ShipmentController extends Controller
 
                 if ($to_warehouse) {
                     // Reload shipmentChild with fresh order PVAs after order status changes.
-                    $shipmentChild = Shipment::with('orders.orderPvas')->find($shipmentChild->id);
+                    $shipmentChild = Shipment::with('orders.activeOrderPvas')->find($shipmentChild->id);
 
                     // Rebuild PVA totals from real current shipment child orders.
                     $productVariationAttributes = [];
                     $shipmentChild->orders->each(function ($order) use (&$productVariationAttributes) {
-                        $order->orderPvas->each(function ($orderPva) use (&$productVariationAttributes) {
+                        // cancelled / out-of-stock lines must not come back into the stock
+                        $order->activeOrderPvas->each(function ($orderPva) use (&$productVariationAttributes) {
                             if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
                                 $productVariationAttributes[$orderPva->product_variation_attribute_id]['quantity'] += $orderPva->quantity;
                             } else {

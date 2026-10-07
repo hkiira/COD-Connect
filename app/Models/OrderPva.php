@@ -25,6 +25,7 @@ class OrderPva extends Model
         'created_at',
         'updated_at',
         'product_variation_attribute_id',
+        'source_order_pva_id', // link to the original line of a return / exchange
         'order_status_id'
     ];
 
