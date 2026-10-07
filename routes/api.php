@@ -89,7 +89,6 @@ use App\Http\Controllers\{
     ExpenseController,
     DashboardController,
     OldApiController,
-    WoocommerceController,
     OldSysController,
     PVAController,
     SynchronisationController,
@@ -299,8 +298,27 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::post('asap/{entity}/{id?}/{type?}', [AsapDeliveryController::class, 'rest']);
     Route::post('register_new_user', [RegisterController::class, 'register_new_user']);
     Route::get('filterselect/{model}/{id?}', [FilterController::class, 'filterselect']);
-    Route::get('woocommerce/{model}/{id?}', [WoocommerceController::class, 'rest']);
-    Route::post('woocommerce/{model}/{id?}', [WoocommerceController::class, 'rest']);
+    // WooCommerce control panel: the stores of the account (several websites per account)
+    Route::get('wc/stores', [\App\Http\Controllers\WooCommerceStoreController::class, 'index']);
+    Route::post('wc/stores', [\App\Http\Controllers\WooCommerceStoreController::class, 'store']);
+    Route::put('wc/stores/{id}', [\App\Http\Controllers\WooCommerceStoreController::class, 'update']);
+    Route::delete('wc/stores/{id}', [\App\Http\Controllers\WooCommerceStoreController::class, 'destroy']);
+    Route::post('wc/stores/{id}/test', [\App\Http\Controllers\WooCommerceStoreController::class, 'test']);
+    Route::get('wc/stores/{id}/overview', [\App\Http\Controllers\WooCommerceStoreController::class, 'overview']);
+    Route::get('wc/stores/{id}/products', [\App\Http\Controllers\WooCommerceProductController::class, 'index']);
+    Route::get('wc/stores/{id}/products/{productId}/variations', [\App\Http\Controllers\WooCommerceProductController::class, 'variations']);
+    Route::post('wc/stores/{id}/links', [\App\Http\Controllers\WooCommerceProductController::class, 'link']);
+    Route::delete('wc/stores/{id}/links/{linkId}', [\App\Http\Controllers\WooCommerceProductController::class, 'unlink']);
+    Route::post('wc/stores/{id}/auto-match', [\App\Http\Controllers\WooCommerceProductController::class, 'autoMatch']);
+    Route::get('wc/stores/{id}/orders', [\App\Http\Controllers\WooCommerceOrderController::class, 'listForStore']);
+    Route::get('wc/stores/{id}/status-mappings', [\App\Http\Controllers\WooCommerceStatusController::class, 'index']);
+    Route::put('wc/stores/{id}/status-mappings', [\App\Http\Controllers\WooCommerceStatusController::class, 'update']);
+    Route::post('wc/stores/{id}/orders/push-status', [\App\Http\Controllers\WooCommerceStatusController::class, 'pushMany']);
+    Route::post('wc/stores/{id}/orders/{wcOrderId}/push-status', [\App\Http\Controllers\WooCommerceStatusController::class, 'pushOne']);
+    Route::get('wc/stores/{id}/logs', [\App\Http\Controllers\WooCommerceLogController::class, 'index']);
+    Route::post('wc/stores/{id}/logs/{logId}/retry', [\App\Http\Controllers\WooCommerceLogController::class, 'retry']);
+    Route::post('wc/stores/{id}/orders/import', [\App\Http\Controllers\WooCommerceOrderController::class, 'importForStore']);
+    Route::get('wc/stores/{id}/orders/{wcOrderId}', [\App\Http\Controllers\WooCommerceOrderController::class, 'showForStore']);
     // WooCommerce Order Management (new dedicated controller)
     Route::get('wc-orders', [\App\Http\Controllers\WooCommerceOrderController::class, 'getOrdersByStatus']);
     Route::post('wc-orders/import', [\App\Http\Controllers\WooCommerceOrderController::class, 'importOrders']);
