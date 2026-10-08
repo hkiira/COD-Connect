@@ -25,14 +25,27 @@ class WooCommerceClient
 
     private function http(): PendingRequest
     {
-        $verify = $this->store->verify_ssl
-            ? ($this->store->ca_bundle ?: config('services.woocommerce.ca_bundle') ?: true)
-            : false;
+        $verify = $this->store->verify_ssl ? $this->caBundle() ?? true : false;
 
         return Http::withBasicAuth((string) $this->store->consumer_key, (string) $this->store->consumer_secret)
             ->withOptions(['verify' => $verify])
             ->timeout((int) config('services.woocommerce.timeout', 30))
             ->acceptJson();
+    }
+
+    /**
+     * A CA bundle file to verify the store with, when one is configured and exists on this machine. A path that is not
+     * a file here (one copied from another computer, for instance) is ignored: the system certificates are used.
+     */
+    private function caBundle(): ?string
+    {
+        foreach ([$this->store->ca_bundle, config('services.woocommerce.ca_bundle')] as $path) {
+            if (is_string($path) && $path !== '' && is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 
     private function url(string $path): string

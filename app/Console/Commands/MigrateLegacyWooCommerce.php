@@ -48,7 +48,6 @@ class MigrateLegacyWooCommerce extends Command
                 'consumer_key' => $key,
                 'consumer_secret' => $secret,
                 'verify_ssl' => (bool) config('services.woocommerce.verify_ssl', true),
-                'ca_bundle' => config('services.woocommerce.ca_bundle'),
                 'import_statuses' => ['processing'],
             ]);
             $this->info("Created store #{$store->id}.");
