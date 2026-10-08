@@ -1098,6 +1098,7 @@ class OrderController extends Controller
             $data['orderInfo']['payment_type'] = $order->paymentType ? $order->paymentType->only('id', 'title') : null;
 
             $data['orderInfo']['pickup'] = $order->pickup ? $order->pickup->only('id', 'code', 'title', 'carrier_id') : null;
+            $data['orderInfo']['carrier'] = $order->pickup?->carrier?->only('id', 'title');
             $afraOperation = AfraShippingService::isAfraOrder($order)
                 ? \App\Models\AfraOrderOperation::where('order_id', $order->id)->first() : null;
             $data['orderInfo']['afra_return_state'] = (int) $order->order_status_id === AfraShippingService::RETURN_STATUS
