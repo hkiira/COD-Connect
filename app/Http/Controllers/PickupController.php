@@ -217,19 +217,20 @@ class PickupController extends Controller
             /*$orderData['carriers'] = $data->city->activeCarriers->map(function ($carrier) {
                 return $carrier->only('id', 'title');
             });*/
+            // history rows can point to an agent that no longer exists (or the system): no crash for them
             $orderData['user'] = $data->userCreated->map(function ($user) {
                 return [
                     "id" => $user->id,
-                    "firstname" => $user->user->firstname,
-                    "lastname" => $user->user->lastname,
-                    "images" => $user->user->images,
+                    "firstname" => $user->user?->firstname,
+                    "lastname" => $user->user?->lastname,
+                    "images" => $user->user?->images,
                 ];
             });
             $orderData['comments'] = $data->lastOrderComments->map(function ($comment) {
                 return [
                     "id" => $comment->id,
                     "title" => $comment->title,
-                    "user" => $comment->accountUser->user,
+                    "user" => $comment->accountUser?->user,
                     "status" => $comment->orderStatus,
                 ];
             });
