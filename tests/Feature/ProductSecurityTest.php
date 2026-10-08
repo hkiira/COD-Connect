@@ -102,6 +102,21 @@ class ProductSecurityTest extends TestCase
             ->assertJsonPath('statut', 0);
     }
 
+    public function test_the_list_can_be_searched_and_stays_in_the_account(): void
+    {
+        $product = DB::table('products')->whereIn('account_user_id', $this->accountUserIds())->whereNull('deleted_at')->whereNotNull('title')->first();
+        if (! $product) {
+            $this->markTestSkipped('The account has no product.');
+        }
+
+        // the order and exchange screens search by name or reference
+        $rows = $this->getJson('/api/products?' . http_build_query(['search' => $product->title, 'pagination' => ['per_page' => 50, 'current_page' => 0]]))
+            ->assertOk()->json('data');
+
+        $this->assertContains((int) $product->id, array_map(fn ($row) => (int) $row['id'], $rows));
+        $this->assertNotContains($this->foreignProductId, array_map(fn ($row) => (int) $row['id'], $rows));
+    }
+
     public function test_foreign_product_cannot_be_read_for_edit(): void
     {
         $this->getJson("/api/products/{$this->foreignProductId}/edit?productInfo=1")->assertNotFound();

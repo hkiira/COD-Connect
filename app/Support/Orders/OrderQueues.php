@@ -56,6 +56,9 @@ final class OrderQueues
         $now = now();
         $recent = OrderAge::daysSql() . ' <= ' . self::ABANDONED_RECENT_DAYS;
 
+        // a return (pieces coming back: nothing to confirm, ship or collect) has its own list
+        $query->where('orders.type', '!=', 'return');
+
         match ($key) {
             'confirmation.new' => $query->where('orders.order_status_id', OrderStatus::PENDING)
                 ->whereNull('orders.callback_at'),
