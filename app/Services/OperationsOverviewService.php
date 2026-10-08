@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Support\OverviewLabels;
+use App\Support\Orders\OrderAge;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -329,18 +330,10 @@ class OperationsOverviewService
             WHERE op.order_id = orders.id AND op.deleted_at IS NULL AND op.order_status_id NOT IN (2, 3))';
     }
 
-    /**
-     * Days since the order entered its current status: first status comment with that status
-     * (order_comment, the current history), else the older status history, else its last update.
-     */
+    /** Days since the order entered its current status (same rule as the order workspaces). */
     private function statusAgeSql(): string
     {
-        return 'DATEDIFF(NOW(), COALESCE(
-            (SELECT MIN(oc.created_at) FROM order_comment oc
-                WHERE oc.order_id = orders.id AND oc.order_status_id = orders.order_status_id AND oc.deleted_at IS NULL),
-            (SELECT MAX(h.created_at) FROM account_user_order_status h
-                WHERE h.order_id = orders.id AND h.order_status_id = orders.order_status_id AND h.deleted_at IS NULL),
-            orders.updated_at))';
+        return OrderAge::daysSql();
     }
 
     /** Shipped orders with what the exception lists show, oldest in their status first. */

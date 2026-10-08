@@ -39,6 +39,30 @@ class Order extends Model
         'discount',
         'sync'
     ];
+
+    // assigned_to, callback_at and claimed_* are set by the workspace endpoints only, never from a request payload
+    protected $casts = [
+        'assigned_at' => 'datetime',
+        'callback_at' => 'datetime',
+        'claimed_until' => 'datetime',
+    ];
+
+    protected static function booted(): void
+    {
+        // a callback and a focus-mode claim belong to the status they were set in (only written when there is one)
+        static::saving(function (Order $order) {
+            if ($order->exists && $order->isDirty('order_status_id')) {
+                if (! $order->isDirty('callback_at') && $order->getRawOriginal('callback_at') !== null) {
+                    $order->callback_at = null;
+                }
+                if ($order->getRawOriginal('claimed_by') !== null) {
+                    $order->claimed_by = null;
+                    $order->claimed_until = null;
+                }
+            }
+        });
+    }
+
     // Relation avec la commande parente (si applicable)
     public function parentOrder()
     {
@@ -234,5 +258,33 @@ class Order extends Model
     public function reviewAnswers()
     {
         return $this->hasManyThrough(ReviewAnswer::class, Review::class);
+    }
+
+    /** Calls made to the customer about this order (confirmation and follow-up). */
+    public function calls()
+    {
+        return $this->hasMany(OrderCall::class);
+    }
+
+    public function latestCall()
+    {
+        return $this->hasOne(OrderCall::class)->latestOfMany('called_at');
+    }
+
+    /** The agent responsible for the order. */
+    public function assignee()
+    {
+        return $this->belongsTo(AccountUser::class, 'assigned_to');
+    }
+
+    /** The agent who has the order open in focus mode, until claimed_until. */
+    public function claimer()
+    {
+        return $this->belongsTo(AccountUser::class, 'claimed_by');
+    }
+
+    public function afraOperation()
+    {
+        return $this->hasOne(AfraOrderOperation::class);
     }
 }

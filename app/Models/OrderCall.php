@@ -16,6 +16,13 @@ class OrderCall extends Model
         'note',
         'call_duration',
     ];
+
+    /** What an agent can record after calling the customer. */
+    public const RESULTS = ['answered', 'no_answer', 'busy', 'switched_off', 'wrong_number', 'callback'];
+
+    protected $casts = [
+        'called_at' => 'datetime',
+    ];
     // Relationships
     public function order() {
         return $this->belongsTo(Order::class);

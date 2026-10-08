@@ -7,6 +7,9 @@ use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use App\Models\Customer;
 use App\Support\Orders\OrderOwnership;
 use App\Support\Orders\DuplicateOrderGuard;
+use App\Support\Orders\OrderAge;
+use App\Support\Orders\OrderListFilters;
+use App\Support\Orders\OrderQueues;
 use App\Models\Source;
 use App\Models\CustomerType;
 use App\Models\City;
@@ -48,32 +51,27 @@ class OrderController extends Controller
         ];
 
         // the sort column goes into SQL: only these are accepted
-        $sortable = ['id', 'code', 'shipping_code', 'created_at', 'updated_at', 'order_status_id', 'carrier_price', 'discount', 'total'];
+        $sortable = ['id', 'code', 'shipping_code', 'created_at', 'updated_at', 'order_status_id', 'carrier_price', 'discount', 'total', 'callback_at', 'status_age'];
         $sortBy = in_array($request['sort'][0]['column'] ?? null, $sortable, true) ? $request['sort'][0]['column'] : 'created_at';
         $sortOrder = strtolower((string) ($request['sort'][0]['order'] ?? 'desc')) === 'asc' ? 'asc' : 'desc';
 
-        $ordersQuery = Order::where('account_id', getAccountUser()->account_id)->withAvg([
+        // a workspace queue (confirmation.new, tracking.stuck...): an unknown one is an error, not "all orders"
+        $queue = $request['queue'] ?? null;
+        if ($queue !== null && ! OrderQueues::exists($queue)) {
+            return response()->json(['statut' => 0, 'message' => 'Unknown queue.'], 422);
+        }
+
+        // filters shared with the workspace counters (OrderWorkspaceController::queueCounts)
+        $ordersQuery = OrderListFilters::query($request)->withAvg([
             'reviewAnswers as review_score' => function ($query) {
                 $query->whereHas('question', function ($q) {
                     $q->where('type', 'stars');
                 });
             }
-        ], 'answer_value');
+        ], 'answer_value')->withCount('calls');
 
-        // Check if reviews filtering is requested
-        $hasReviews = null;
-        if (isset($request['has_reviews'])) {
-            $hasReviews = filter_var($request['has_reviews'], FILTER_VALIDATE_BOOLEAN);
-        } elseif (isset($request['filter']['has_reviews'])) {
-            $hasReviews = filter_var($request['filter']['has_reviews'], FILTER_VALIDATE_BOOLEAN);
-        }
-
-        if ($hasReviews !== null) {
-            if ($hasReviews) {
-                $ordersQuery->whereHas('review');
-            } else {
-                $ordersQuery->whereDoesntHave('review');
-            }
+        if ($queue !== null) {
+            OrderQueues::apply($ordersQuery, $queue, OrderListFilters::ageOptions($request));
         }
 
         if ($sortBy === 'total') {
@@ -84,69 +82,10 @@ class OrderController extends Controller
             $ordersQuery->select('orders.*')
                 ->selectSub($totalSubquery, 'total_value')
                 ->orderBy('total_value', $sortOrder);
+        } elseif ($sortBy === 'status_age') {
+            $ordersQuery->orderByRaw(OrderAge::daysSql() . ' ' . $sortOrder);
         } else {
-            $ordersQuery->orderBy($sortBy, $sortOrder);
-        }
-
-        // Define filter mapping: key => [type, path]
-        $filterMap = [
-            'products' => ['relation', 'activeOrderPvas.productVariationAttribute.product', 'id'],
-            'warehouses' => ['column', 'warehouse_id'],
-            'categories' => ['relation', 'activeOrderPvas.productVariationAttribute.product.taxonomies', 'id'],
-            'brands' => ['relation', 'brandSource.brand', 'id'],
-            'sources' => ['relation', 'brandSource.source', 'id'],
-            'customer_types' => ['relation', 'customer', 'customer_type_id'],
-            'cities' => ['relation', 'customer.addresses', 'city_id'],
-            'regions' => ['relation', 'customer.addresses.city.region', 'id'],
-            'countries' => ['relation', 'customer.addresses.city.region.country', 'id'],
-            'status' => ['column', 'order_status_id'],
-            'types' => ['column', 'type'],
-            'sectors' => ['column', 'sector_id'],
-            'carriers' => ['relation', 'pickup.carrier', 'id'],
-        ];
-
-
-        foreach ($filterMap as $key => $info) {
-            if (!empty($request[$key]) && is_array($request[$key])) {
-                if ($info[0] === 'column') {
-                    $ordersQuery = $ordersQuery->whereIn($info[1], $request[$key]);
-                } elseif ($info[0] === 'relation') {
-                    $relation = $info[1];
-                    $column = $info[2];
-                    $ordersQuery = $ordersQuery->whereHas($relation, function ($q) use ($request, $key, $column) {
-                        $q->whereIn($column, $request[$key]);
-                    });
-                }
-            }
-        }
-
-        // Add search filter for code, customer name, customer phone, and address title
-        if (!empty($request['search']) && is_string($request['search'])) {
-            $search = $request['search'];
-            $ordersQuery = $ordersQuery->where(function ($query) use ($search) {
-                $query->where('code', 'like', "%$search%")->orWhere('shipping_code', 'like', "%$search%")
-                    ->orWhereHas('customer', function ($q) use ($search) {
-                        $q->where('name', 'like', "%$search%")
-                            ->orWhereHas('phones', function ($q2) use ($search) {
-                                $q2->where('title', 'like', "%$search%");
-                            })
-                            ->orWhereHas('addresses', function ($q3) use ($search) {
-                                $q3->where('title', 'like', "%$search%");
-                            });
-                    });
-            });
-        }
-
-        // Add date filter
-        if (!empty($request['startDate']) || !empty($request['endDate'])) {
-            if (!empty($request['startDate'])) {
-                $startDateTime = $request['startDate'] . ' 00:00:00';
-                $ordersQuery = $ordersQuery->where('created_at', '>=', $startDateTime);
-            }
-            if (!empty($request['endDate'])) {
-                $endDateTime = $request['endDate'] . ' 23:59:59';
-                $ordersQuery = $ordersQuery->where('created_at', '<=', $endDateTime);
-            }
+            $ordersQuery->orderBy('orders.' . $sortBy, $sortOrder);
         }
 
         $total = $ordersQuery->count();
@@ -171,6 +110,10 @@ class OrderController extends Controller
                 'customer.addresses.city',
                 'brandSource.brand.images',
                 'brandSource.source.images',
+                'assignee.user',
+                'claimer.user',
+                'latestCall',
+                'afraOperation',
                 ...self::orderPvaPaths('activeOrderPvas'),
                 ...self::orderPvaPaths('inactiveOrderPvas'),
             ])
@@ -183,7 +126,12 @@ class OrderController extends Controller
         }
         $scores = calculateTotalOrderScores($orders->pluck('id')->all());
 
-        $datas = $orders->map(function ($data) use ($scores) {
+        // days in the current status, for the page only (one query, not a subquery per filtered row)
+        $ages = $orders->isEmpty() ? [] : Order::whereIn('orders.id', $orders->pluck('id'))
+            ->selectRaw('orders.id, ' . OrderAge::daysSql() . ' as days')
+            ->pluck('days', 'id')->all();
+
+        $datas = $orders->map(function ($data) use ($scores, $ages) {
             $orderData = $data->only('id', 'code', 'shipping_code', 'note', 'order_id', 'type', 'created_at', 'updated_at', 'pickup_id', 'shipment_id');
             $orderData['reference'] = $data->code;
 
@@ -309,6 +257,10 @@ class OrderController extends Controller
             $orderData['source'] = $sourceArr;
             $orderData['review_score'] = isset($data->review_score) ? (float) round($data->review_score, 2) : null;
 
+            // workspace fields: owner, callback, calls, focus-mode claim, time in status, carrier status
+            $orderData = array_merge($orderData, self::workspaceFields($data));
+            $orderData['status_age_days'] = isset($ages[$data->id]) ? (int) $ages[$data->id] : null;
+
             // Format reviews
             $orderData['reviews'] = [];
             if ($data->review && $data->review->answers) {
@@ -431,6 +383,41 @@ class OrderController extends Controller
         ];
     }
 
+    /** An agent (account_user) as the order screens show it. */
+    public static function agentSummary($accountUser): ?array
+    {
+        if (! $accountUser) {
+            return null;
+        }
+        $user = $accountUser->user;
+        $name = trim(($user->firstname ?? '') . ' ' . ($user->lastname ?? ''));
+
+        return [
+            'id' => $accountUser->id,
+            'firstname' => $user->firstname ?? null,
+            'lastname' => $user->lastname ?? null,
+            'name' => $name !== '' ? $name : ($user->name ?? null),
+        ];
+    }
+
+    /** What the order workspaces show on an order: owner, callback, calls, focus-mode claim, carrier status. */
+    public static function workspaceFields(Order $order): array
+    {
+        $claimed = $order->claimed_by && $order->claimed_until && $order->claimed_until->isFuture();
+
+        return [
+            'assignee' => self::agentSummary($order->assignee),
+            'assigned_at' => $order->assigned_at,
+            'callback_at' => $order->callback_at,
+            'calls_count' => (int) ($order->calls_count ?? $order->calls()->count()),
+            'last_call' => $order->latestCall?->only('id', 'result', 'called_at', 'note'),
+            'claim' => $claimed ? ['agent' => self::agentSummary($order->claimer), 'until' => $order->claimed_until] : null,
+            'carrier_status' => $order->afraOperation?->remote_status
+                ? ['status' => $order->afraOperation->remote_status, 'at' => $order->afraOperation->remote_status_at]
+                : null,
+        ];
+    }
+
     public function counts(Request $request)
     {
         $accountId = getAccountUser()->account_id;
@@ -449,6 +436,9 @@ class OrderController extends Controller
         $pendingPayments = $counts[7] ?? 0;
         $pendingReturns = ($counts[8] ?? 0) + ($counts[9] ?? 0);
 
+        // the workspace badges of the menu: what needs someone now
+        $queueCount = fn (string $queue) => OrderQueues::apply(OrderListFilters::query([]), $queue)->count();
+
         return response()->json([
             'statut' => 1,
             'data' => [
@@ -459,6 +449,9 @@ class OrderController extends Controller
                 'In transit' => $inTransit,
                 'pending_payments' => $pendingPayments,
                 'pending_returns' => $pendingReturns,
+                'to_confirm' => $queueCount('confirmation.new') + $queueCount('confirmation.callbacks_due'),
+                'stuck' => $queueCount('tracking.stuck'),
+                'unpaid' => $queueCount('recovery.unpaid'),
             ]
         ]);
     }
@@ -1116,6 +1109,20 @@ class OrderController extends Controller
             $data['orderInfo']['afra_status_at'] = $afraOperation?->remote_status_at;
             $data['orderInfo']['is_afra'] = (bool) $afraOperation || AfraShippingService::isAfraOrder($order);
 
+            // workspace fields and the call log, newest first
+            $order->load('assignee.user', 'claimer.user', 'latestCall', 'afraOperation');
+            $data['orderInfo'] = array_merge($data['orderInfo'], self::workspaceFields($order));
+            $data['orderInfo']['calls'] = $order->calls()->with('employee.user')->orderByDesc('called_at')->orderByDesc('id')->limit(50)->get()
+                ->map(fn ($call) => [
+                    'id' => $call->id,
+                    'called_at' => $call->called_at,
+                    'call_number' => (int) $call->call_number,
+                    'result' => $call->result,
+                    'note' => $call->note,
+                    'call_duration' => $call->call_duration,
+                    'agent' => self::agentSummary($call->employee),
+                ]);
+
             if ($order->shipment) {
                 $data['orderInfo']['shipment'] = $order->shipment->only('id', 'code', 'title');
                 $data['orderInfo']['shipment']['type'] = $order->shipment->shipmentType ? $order->shipment->shipmentType->only('id', 'code', 'title') : null;
@@ -1268,7 +1275,7 @@ class OrderController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'id' => 'required|exists:comments,id|max:255',
-            'postponed' => 'date',
+            'postponed' => 'nullable|date',
         ]);
         if ($validator->fails()) {
             return response()->json([
@@ -1290,11 +1297,17 @@ class OrderController extends Controller
             'source' => 'OrderController::changeStatus',
         ]);
 
+        // the date a "postponed" reason asks for: kept on the history row and returned so update() sets the callback
+        $postponed = $comment->postponed && ! empty($request['postponed'])
+            ? \Carbon\Carbon::parse($request['postponed'])
+            : null;
+
         $comment->orders()->attach($order->id, [
             'title' => ($request['title']) ? $request['title'] : $comment->title,
             'order_status_id' => $orderStatut,
             'account_user_id' => getAccountUser()->id,
             'score' => $commentScore,
+            'postpone' => $postponed?->toDateTimeString(),
             'created_at' => now(),
             'updated_at' => now()
         ]);
@@ -1303,7 +1316,7 @@ class OrderController extends Controller
         // Note: No longer updating orders table score since we removed the column
         // Score is now calculated on-demand from account_user_order_status and order_comment tables
 
-        return ['statut' => $orderStatut, 'is_change' => 0];
+        return ['statut' => $orderStatut, 'is_change' => 0, 'postponed' => $postponed];
     }
 
     public static function update(Request $requests, $local = 0)
@@ -1458,6 +1471,10 @@ class OrderController extends Controller
             }
             if (isset($request['comment'])) {
                 $comment = OrderController::changeStatus(new Request(collect($request['comment'])->toArray()), $order);
+                // saved with the order below; any other status change clears it (Order::booted)
+                if (! empty($comment['postponed'])) {
+                    $order->callback_at = $comment['postponed'];
+                }
                 if ($comment['statut'] == 2) {
                     $request['shipping_code'] = null;
                     $request['pickup_id'] = null;
