@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Models\WooCommerce\OrderLink;
+use App\Models\WooCommerce\Store;
 use App\Services\WooCommerce\StatusPusher;
+use App\Services\WooCommerce\SyncAlerts;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -39,6 +41,17 @@ class PushWooCommerceOrderStatus implements ShouldQueue
 
         if ($link) {
             $pusher->push($link, null, quiet: true);
+        }
+    }
+
+    /** Every attempt failed: the bell says which order WooCommerce still shows with its old status. */
+    public function failed(\Throwable $e): void
+    {
+        $link = OrderLink::withoutGlobalScopes()->find($this->orderLinkId);
+        $store = $link ? Store::withoutGlobalScopes()->find($link->store_id) : null;
+
+        if ($store) {
+            app(SyncAlerts::class)->pushFailed($store, (int) $link->wc_order_id, $e->getMessage());
         }
     }
 }

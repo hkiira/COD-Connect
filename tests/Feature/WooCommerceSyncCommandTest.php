@@ -2,11 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Models\AccountUser;
 use App\Models\User;
+use App\Notifications\AppAlert;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
 use Laravel\Passport\Passport;
 use Tests\TestCase;
 
@@ -28,7 +31,7 @@ class WooCommerceSyncCommandTest extends TestCase
     {
         parent::setUp();
 
-        config(['app.url' => 'http://localhost']);
+        config(['app.url' => 'http://localhost', 'cache.default' => 'array']);
         $this->app['url']->forceRootUrl('http://localhost');
         $this->baseUrl = 'http://localhost';
 
@@ -91,6 +94,62 @@ class WooCommerceSyncCommandTest extends TestCase
         $this->assertDatabaseMissing('woocommerce_order_links', ['store_id' => $this->storeId, 'wc_order_id' => 8002]);
         $this->assertNotNull(DB::table('woocommerce_stores')->where('id', $this->storeId)->value('last_checked_at'));
         $this->assertNull(DB::table('woocommerce_stores')->where('id', $this->storeId)->value('last_error'));
+    }
+
+    /** @return array<int, array<string, mixed>> the bell notifications one active user of the store's account got, in order */
+    private function alerts(): array
+    {
+        $accountId = DB::table('woocommerce_stores')->where('id', $this->storeId)->value('account_id');
+        $recipient = AccountUser::where('account_id', $accountId)->where('statut', 1)->firstOrFail();
+
+        return Notification::sent($recipient, AppAlert::class)->map(fn (AppAlert $alert) => $alert->toArray($recipient))->values()->all();
+    }
+
+    public function test_an_order_waiting_for_unlinked_products_is_announced_once(): void
+    {
+        Notification::fake();
+        $this->fakeStore();
+
+        Artisan::call('wc:sync-stores', ['--store' => $this->storeId]);
+        Artisan::call('wc:sync-stores', ['--store' => $this->storeId]);
+
+        $alerts = $this->alerts();
+        $this->assertSame(['WooCommerce order #8002 is waiting'], array_column($alerts, 'title'));
+        $this->assertSame("/dashboard/woocommerce/products?store={$this->storeId}", $alerts[0]['link']);
+    }
+
+    public function test_a_store_that_stops_answering_is_announced_once_then_when_it_is_back(): void
+    {
+        Notification::fake();
+        $down = true;
+        Http::fake(function () use (&$down) {
+            return $down
+                ? Http::response(['message' => 'Unauthorized'], 401)
+                : Http::response([], 200, ['X-WP-Total' => '0', 'X-WP-TotalPages' => '0']);
+        });
+
+        Artisan::call('wc:sync-stores', ['--store' => $this->storeId]);
+        Artisan::call('wc:sync-stores', ['--store' => $this->storeId]);
+
+        $this->assertNotNull(DB::table('woocommerce_stores')->where('id', $this->storeId)->value('last_error'));
+        $this->assertSame(['WooCommerce sync stopped: TEST auto'], array_column($this->alerts(), 'title'));
+
+        $down = false;
+        Artisan::call('wc:sync-stores', ['--store' => $this->storeId]);
+
+        $this->assertSame(['WooCommerce sync stopped: TEST auto', 'WooCommerce sync is back: TEST auto'], array_column($this->alerts(), 'title'));
+        $this->assertNull(DB::table('woocommerce_stores')->where('id', $this->storeId)->value('last_error'));
+    }
+
+    public function test_a_dry_run_sends_no_alert(): void
+    {
+        Notification::fake();
+        $this->fakeStore();
+
+        Artisan::call('wc:sync-stores', ['--store' => $this->storeId, '--dry-run' => true]);
+
+        $this->assertStringContainsString('1 waiting for product links', Artisan::output());
+        Notification::assertNothingSent();
     }
 
     public function test_a_store_without_auto_import_is_left_alone(): void
