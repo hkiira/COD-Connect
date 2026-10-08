@@ -120,7 +120,10 @@ class OrderWorkspaceTest extends TestCase
             ->assertStatus(422);
 
         $at = now()->addDay()->setTime(10, 0);
-        $this->postJson("/api/orders/{$this->orderId}/calls", ['result' => 'callback', 'callback_at' => $at->toIso8601String()])->assertOk();
+        // sent with the Moroccan offset: stored as the same instant in the app timezone
+        $this->postJson("/api/orders/{$this->orderId}/calls", [
+            'result' => 'callback', 'callback_at' => $at->copy()->setTimezone('Africa/Casablanca')->toIso8601String(),
+        ])->assertOk();
 
         $this->assertSame($at->toDateTimeString(), Order::find($this->orderId)->callback_at->toDateTimeString());
         $this->assertTrue($this->inQueue('confirmation.scheduled', $this->orderId));

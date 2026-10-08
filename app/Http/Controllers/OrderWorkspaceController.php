@@ -127,7 +127,10 @@ class OrderWorkspaceController extends Controller
                 'call_duration' => $request['call_duration'],
             ]);
 
-            $order->callback_at = $request['result'] === 'callback' ? Carbon::parse($request['callback_at']) : null;
+            // stored in the app timezone, whatever offset the client sent
+            $order->callback_at = $request['result'] === 'callback'
+                ? Carbon::parse($request['callback_at'])->setTimezone(config('app.timezone'))
+                : null;
             if ($order->assigned_to === null) {
                 $order->assigned_to = $agent->id;
                 $order->assigned_at = now();

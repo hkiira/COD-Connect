@@ -1299,7 +1299,7 @@ class OrderController extends Controller
 
         // the date a "postponed" reason asks for: kept on the history row and returned so update() sets the callback
         $postponed = $comment->postponed && ! empty($request['postponed'])
-            ? \Carbon\Carbon::parse($request['postponed'])
+            ? \Carbon\Carbon::parse($request['postponed'])->setTimezone(config('app.timezone'))
             : null;
 
         $comment->orders()->attach($order->id, [
