@@ -6,7 +6,8 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * What the order workspaces (confirmation, tracking, recovery) need on an order:
- * who owns it, when the customer must be called back, and which agent has it open in focus mode.
+ * who owns it, when the customer must be called back (the date of a "postponed" reason),
+ * and which agent has it open in focus mode.
  */
 return new class extends Migration
 {
@@ -22,18 +23,10 @@ return new class extends Migration
             $table->index(['account_id', 'order_status_id', 'assigned_to'], 'orders_account_status_assignee_index');
             $table->index(['account_id', 'callback_at'], 'orders_account_callback_index');
         });
-
-        Schema::table('order_calls', function (Blueprint $table) {
-            $table->index(['order_id', 'called_at'], 'order_calls_order_called_index');
-        });
     }
 
     public function down(): void
     {
-        Schema::table('order_calls', function (Blueprint $table) {
-            $table->dropIndex('order_calls_order_called_index');
-        });
-
         Schema::table('orders', function (Blueprint $table) {
             $table->dropIndex('orders_account_status_assignee_index');
             $table->dropIndex('orders_account_callback_index');

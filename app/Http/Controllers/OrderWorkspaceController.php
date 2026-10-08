@@ -3,11 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\AccountUser;
+use App\Models\MessageTemplate;
 use App\Models\Order;
-use App\Models\OrderCall;
 use App\Support\Orders\OrderAge;
 use App\Support\Orders\OrderListFilters;
 use App\Support\Orders\OrderQueues;
+use App\Support\Orders\OrderReasons;
 use App\Support\Orders\OrderStatus;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -16,8 +17,10 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
 /**
- * The tools of the order workspaces: queue counters, the call log, assignment to agents and the
- * focus mode queue (one order at a time, never the same order for two agents).
+ * The tools of the order workspaces: queue counters, assignment to agents, the focus mode queue
+ * (one order at a time, never the same order for two agents), team figures and the message templates.
+ * Every outcome goes through the existing reasons (PUT orders/{id} → order_comment); nothing here
+ * changes a status.
  */
 class OrderWorkspaceController extends Controller
 {
@@ -30,7 +33,7 @@ class OrderWorkspaceController extends Controller
     /** How long a focus-mode claim keeps an order away from the other agents. */
     private const CLAIM_MINUTES = 10;
 
-    /** A customer who did not answer is not called again before this many hours in focus mode. */
+    /** A customer who did not answer is not offered again in focus mode before this many hours. */
     private const RETRY_AFTER_HOURS = 2;
 
     /** GET orders/queues/counts?workspace=confirmation&assigned_to[]=me — one count per queue, same filters as the list. */
@@ -76,79 +79,6 @@ class OrderWorkspaceController extends Controller
             ->values();
 
         return response()->json(['statut' => 1, 'data' => $agents]);
-    }
-
-    /** GET orders/{id}/calls — newest first. */
-    public function calls($id)
-    {
-        $order = $this->findOrder($id);
-        if (! $order) {
-            return response()->json(['statut' => 0, 'message' => 'Order not found.'], 404);
-        }
-
-        $calls = $order->calls()->with('employee.user')->orderByDesc('called_at')->orderByDesc('id')->get()
-            ->map(fn (OrderCall $call) => self::callPayload($call));
-
-        return response()->json(['statut' => 1, 'data' => $calls]);
-    }
-
-    /**
-     * POST orders/{id}/calls {result, note?, callback_at?, call_duration?}. Sets or clears the callback, and
-     * gives an unassigned order to the agent who called.
-     */
-    public function logCall(Request $request, $id)
-    {
-        $validator = Validator::make($request->all(), [
-            'result' => ['required', Rule::in(OrderCall::RESULTS)],
-            'note' => 'nullable|string|max:1000',
-            'callback_at' => 'required_if:result,callback|nullable|date|after:now',
-            'call_duration' => 'nullable|integer|min:0|max:86400',
-        ]);
-        if ($validator->fails()) {
-            return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
-        }
-
-        $order = $this->findOrder($id);
-        if (! $order) {
-            return response()->json(['statut' => 0, 'message' => 'Order not found.'], 404);
-        }
-
-        $agent = getAccountUser();
-        $call = DB::transaction(function () use ($order, $agent, $request) {
-            // the row lock keeps two calls logged at the same moment from getting the same number
-            $order = Order::whereKey($order->id)->lockForUpdate()->first();
-
-            $call = $order->calls()->create([
-                'employee_id' => $agent->id,
-                'called_at' => now(),
-                'call_number' => min(255, $order->calls()->count() + 1),
-                'result' => $request['result'],
-                'note' => $request['note'],
-                'call_duration' => $request['call_duration'],
-            ]);
-
-            // stored in the app timezone, whatever offset the client sent
-            $order->callback_at = $request['result'] === 'callback'
-                ? Carbon::parse($request['callback_at'])->setTimezone(config('app.timezone'))
-                : null;
-            if ($order->assigned_to === null) {
-                $order->assigned_to = $agent->id;
-                $order->assigned_at = now();
-            }
-            $order->save();
-
-            return $call;
-        });
-
-        $order->refresh()->load('assignee.user', 'latestCall');
-
-        return response()->json([
-            'statut' => 1,
-            'data' => [
-                'call' => self::callPayload($call->load('employee.user')),
-                'order' => ['id' => $order->id] + OrderController::workspaceFields($order),
-            ],
-        ]);
     }
 
     /** POST orders/assign {ids, account_user_id|null} — null takes the orders back from their agent. */
@@ -233,9 +163,9 @@ class OrderWorkspaceController extends Controller
 
     /**
      * POST orders/queue/next {release_id?, skip?} — the next order to confirm, claimed for this agent:
-     * callbacks that are due first (oldest first), then new orders (newest first), then the customers who
-     * did not answer (fewest calls first, not called in the last hours). Orders of other agents and orders
-     * another agent has open are never returned.
+     * "Reporté" callbacks that are due (oldest first), then pending orders (newest first), then the orders
+     * abandoned for "no answer" (fewest unanswered calls first, none in the last hours). Orders of other
+     * agents and orders another agent has open are never returned.
      */
     public function next(Request $request)
     {
@@ -253,13 +183,15 @@ class OrderWorkspaceController extends Controller
             $this->releaseClaim($agent, (int) $request['release_id']);
         }
         $skip = array_map('intval', $request['skip'] ?? []);
+        $noAnswer = implode(',', OrderReasons::noAnswer());
 
         $candidates = [
-            'confirmation.callbacks_due' => fn ($q) => $q->orderBy('orders.callback_at'),
+            'confirmation.callbacks_due' => fn ($q) => $q->orderByRaw('orders.callback_at IS NULL, orders.callback_at'),
             'confirmation.new' => fn ($q) => $q->orderByDesc('orders.created_at'),
             'confirmation.no_answer' => fn ($q) => $q
-                ->whereDoesntHave('calls', fn ($c) => $c->where('called_at', '>', now()->subHours(self::RETRY_AFTER_HOURS)))
-                ->withCount('calls')->orderBy('calls_count')->orderByDesc('orders.created_at'),
+                ->whereRaw("NOT EXISTS (SELECT 1 FROM order_comment oc WHERE oc.order_id = orders.id AND oc.deleted_at IS NULL
+                    AND oc.comment_id IN ($noAnswer) AND oc.created_at > ?)", [now()->subHours(self::RETRY_AFTER_HOURS)])
+                ->orderByRaw(OrderReasons::attemptsSql())->orderByDesc('orders.created_at'),
         ];
 
         $claimed = DB::transaction(function () use ($candidates, $agent, $skip) {
@@ -300,12 +232,176 @@ class OrderWorkspaceController extends Controller
         return response()->json(['statut' => 1, 'data' => ['released' => $released > 0]]);
     }
 
-    // ------------------------------------------------------------------
-
-    private function findOrder($id): ?Order
+    /**
+     * GET orders/agents/stats?start_date=&end_date= — what each agent did in the period, read from the
+     * history the reasons write (order_comment): confirmations, unanswered calls, postponements,
+     * abandons, cancellations, and what became of the orders they confirmed.
+     */
+    public function agentStats(Request $request)
     {
-        return Order::where('orders.account_id', getAccountUser()->account_id)->find($id);
+        $validator = Validator::make($request->query(), [
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
+        }
+
+        $accountId = getAccountUser()->account_id;
+        $start = Carbon::parse($request->query('start_date', now()->subDays(6)->toDateString()))->startOfDay();
+        $end = Carbon::parse($request->query('end_date', now()->toDateString()))->endOfDay();
+        $noAnswer = implode(',', OrderReasons::noAnswer());
+
+        // one row per reason an agent applied in the period, on this account's orders
+        $reasons = fn () => DB::table('order_comment as oc')
+            ->join('comments as c', 'c.id', '=', 'oc.comment_id')
+            ->join('orders as o', 'o.id', '=', 'oc.order_id')
+            ->where('o.account_id', $accountId)->whereNull('o.deleted_at')
+            ->where('oc.type', 'comment')->whereNull('oc.deleted_at')
+            ->where('c.statut', 1)
+            ->whereNotNull('oc.account_user_id')
+            ->whereBetween('oc.created_at', [$start, $end]);
+
+        $rows = $reasons()
+            ->groupBy('oc.account_user_id')
+            ->selectRaw("oc.account_user_id as agent_id,
+                COUNT(*) as actions,
+                COUNT(DISTINCT oc.order_id) as orders,
+                COUNT(DISTINCT CASE WHEN oc.order_status_id = ? THEN oc.order_id END) as confirmed,
+                SUM(oc.comment_id IN ($noAnswer)) as no_answer,
+                SUM(c.postponed = 1) as postponed,
+                COUNT(DISTINCT CASE WHEN oc.order_status_id = ? AND oc.comment_id NOT IN ($noAnswer) THEN oc.order_id END) as abandoned,
+                COUNT(DISTINCT CASE WHEN oc.order_status_id = ? THEN oc.order_id END) as cancelled,
+                COUNT(DISTINCT CASE WHEN oc.order_status_id IN (?, ?, ?) THEN oc.order_id END) as decided",
+                [OrderStatus::CONFIRMED, OrderStatus::ABANDONED, OrderStatus::CANCELLED,
+                    OrderStatus::CONFIRMED, OrderStatus::ABANDONED, OrderStatus::CANCELLED])
+            ->get()->keyBy('agent_id');
+
+        // what became of the orders each agent confirmed in the period
+        $outcomes = DB::query()->fromSub(
+            $reasons()->where('oc.order_status_id', OrderStatus::CONFIRMED)
+                ->select('oc.account_user_id', 'oc.order_id')->distinct(),
+            'confirmed'
+        )
+            ->join('orders as o', 'o.id', '=', 'confirmed.order_id')
+            ->groupBy('confirmed.account_user_id')
+            ->selectRaw('confirmed.account_user_id as agent_id,
+                SUM(o.order_status_id IN (?, ?)) as delivered,
+                SUM(o.order_status_id IN (?, ?)) as returned', [
+                OrderStatus::DELIVERED, OrderStatus::PAID, OrderStatus::RETURNED, OrderStatus::IN_TROUBLE,
+            ])
+            ->get()->keyBy('agent_id');
+
+        $loads = $this->openLoads($accountId);
+        $callbacks = Order::where('orders.account_id', $accountId)->whereNotNull('orders.assigned_to')
+            ->where('orders.callback_at', '<=', now())->whereIn('orders.order_status_id', OrderQueues::CALLBACK_STATUSES)
+            ->groupBy('orders.assigned_to')->selectRaw('orders.assigned_to, COUNT(*) as due')->pluck('due', 'assigned_to');
+
+        $agentIds = collect($rows->keys())->merge(array_keys($loads))->unique()->values();
+        $agents = AccountUser::whereIn('id', $agentIds)->where('account_id', $accountId)->with('user')->get()->keyBy('id');
+
+        $rate = fn ($part, $whole) => $whole > 0 ? round($part / $whole * 100, 1) : null;
+        $list = $agentIds->map(function ($agentId) use ($rows, $outcomes, $loads, $callbacks, $agents, $rate) {
+            $row = $rows[$agentId] ?? null;
+            $outcome = $outcomes[$agentId] ?? null;
+            $delivered = (int) ($outcome->delivered ?? 0);
+            $returned = (int) ($outcome->returned ?? 0);
+
+            return [
+                'agent' => OrderController::agentSummary($agents[$agentId] ?? null) ?? ['id' => (int) $agentId, 'name' => "#$agentId"],
+                'actions' => (int) ($row->actions ?? 0),
+                'orders' => (int) ($row->orders ?? 0),
+                'confirmed' => (int) ($row->confirmed ?? 0),
+                'no_answer' => (int) ($row->no_answer ?? 0),
+                'postponed' => (int) ($row->postponed ?? 0),
+                'abandoned' => (int) ($row->abandoned ?? 0),
+                'cancelled' => (int) ($row->cancelled ?? 0),
+                'confirmation_rate' => $rate((int) ($row->confirmed ?? 0), (int) ($row->decided ?? 0)),
+                'delivered' => $delivered,
+                'returned' => $returned,
+                'delivery_rate' => $rate($delivered, $delivered + $returned),
+                'open_orders' => (int) ($loads[$agentId] ?? 0),
+                'callbacks_due' => (int) ($callbacks[$agentId] ?? 0),
+            ];
+        })->sortByDesc('actions')->values();
+
+        // time from a new order to the first reason applied on it, for the orders created in the period
+        $firstResponse = DB::query()->fromSub(
+            DB::table('order_comment as oc')->join('comments as c', 'c.id', '=', 'oc.comment_id')
+                ->join('orders as o', 'o.id', '=', 'oc.order_id')
+                ->where('o.account_id', $accountId)->whereNull('o.deleted_at')->whereBetween('o.created_at', [$start, $end])
+                ->where('oc.type', 'comment')->whereNull('oc.deleted_at')->where('c.statut', 1)
+                ->groupBy('oc.order_id', 'o.created_at')
+                ->selectRaw('o.created_at, MIN(oc.created_at) as first_at'),
+            'first'
+        )->selectRaw('AVG(TIMESTAMPDIFF(MINUTE, first.created_at, first.first_at)) as minutes')->value('minutes');
+
+        $sum = fn ($key) => $list->sum($key);
+
+        return response()->json([
+            'statut' => 1,
+            'data' => [
+                'range' => ['start' => $start->toDateString(), 'end' => $end->toDateString()],
+                'totals' => [
+                    'orders_created' => Order::where('orders.account_id', $accountId)->whereBetween('orders.created_at', [$start, $end])->count(),
+                    'actions' => $sum('actions'),
+                    'confirmed' => $sum('confirmed'),
+                    'no_answer' => $sum('no_answer'),
+                    'postponed' => $sum('postponed'),
+                    'abandoned' => $sum('abandoned'),
+                    'cancelled' => $sum('cancelled'),
+                    'confirmation_rate' => $rate($sum('confirmed'), $rows->sum('decided')),
+                    'delivery_rate' => $rate($sum('delivered'), $sum('delivered') + $sum('returned')),
+                    'first_response_minutes' => $firstResponse !== null ? (int) round((float) $firstResponse) : null,
+                ],
+                'agents' => $list,
+            ],
+        ]);
     }
+
+    /** GET orders/message-templates — the account's WhatsApp messages (empty: the screens use their defaults). */
+    public function templates()
+    {
+        $templates = MessageTemplate::where('account_id', getAccountUser()->account_id)
+            ->orderBy('stage')->orderBy('position')->orderBy('id')
+            ->get(['id', 'stage', 'title', 'language', 'body', 'position']);
+
+        return response()->json(['statut' => 1, 'data' => $templates]);
+    }
+
+    /** PUT orders/message-templates {templates: [...]} — replaces the whole set; an empty list goes back to the defaults. */
+    public function saveTemplates(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'templates' => 'present|array|max:60',
+            'templates.*.stage' => ['required', Rule::in(MessageTemplate::STAGES)],
+            'templates.*.title' => 'required|string|max:80',
+            'templates.*.language' => ['required', Rule::in(MessageTemplate::LANGUAGES)],
+            'templates.*.body' => 'required|string|max:1000',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
+        }
+
+        $accountId = getAccountUser()->account_id;
+        DB::transaction(function () use ($request, $accountId) {
+            MessageTemplate::where('account_id', $accountId)->delete();
+            foreach (array_values($request['templates']) as $position => $template) {
+                MessageTemplate::create([
+                    'account_id' => $accountId,
+                    'stage' => $template['stage'],
+                    'title' => trim($template['title']),
+                    'language' => $template['language'],
+                    'body' => trim($template['body']),
+                    'position' => $position,
+                ]);
+            }
+        });
+
+        return $this->templates();
+    }
+
+    // ------------------------------------------------------------------
 
     private function releaseClaim(AccountUser $agent, int $orderId): int
     {
@@ -340,19 +436,6 @@ class OrderWorkspaceController extends Controller
             '8-14' => (int) ($row->b8 ?? 0),
             '15-30' => (int) ($row->b15 ?? 0),
             '30+' => (int) ($row->b30 ?? 0),
-        ];
-    }
-
-    private static function callPayload(OrderCall $call): array
-    {
-        return [
-            'id' => $call->id,
-            'called_at' => $call->called_at,
-            'call_number' => (int) $call->call_number,
-            'result' => $call->result,
-            'note' => $call->note,
-            'call_duration' => $call->call_duration,
-            'agent' => OrderController::agentSummary($call->employee),
         ];
     }
 }

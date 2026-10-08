@@ -260,17 +260,6 @@ class Order extends Model
         return $this->hasManyThrough(ReviewAnswer::class, Review::class);
     }
 
-    /** Calls made to the customer about this order (confirmation and follow-up). */
-    public function calls()
-    {
-        return $this->hasMany(OrderCall::class);
-    }
-
-    public function latestCall()
-    {
-        return $this->hasOne(OrderCall::class)->latestOfMany('called_at');
-    }
-
     /** The agent responsible for the order. */
     public function assignee()
     {

@@ -265,15 +265,17 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('salaries', SalaryController::class);
     Route::resource('bonuses', BonusController::class);
     Route::get('orders/counts', [OrderController::class, 'counts']);
-    // order workspaces: queue counters, call log, assignment, focus mode (declared before the resource)
+    // order workspaces: queue counters, assignment, focus mode, team figures, WhatsApp messages
+    // (declared before the resource: PUT orders/message-templates must not reach PUT orders/{order})
     Route::get('orders/queues/counts', [OrderWorkspaceController::class, 'queueCounts']);
     Route::get('orders/agents', [OrderWorkspaceController::class, 'agents']);
+    Route::get('orders/agents/stats', [OrderWorkspaceController::class, 'agentStats']);
     Route::post('orders/assign', [OrderWorkspaceController::class, 'assign']);
     Route::post('orders/assign/auto', [OrderWorkspaceController::class, 'autoAssign']);
     Route::post('orders/queue/next', [OrderWorkspaceController::class, 'next']);
     Route::post('orders/{id}/release', [OrderWorkspaceController::class, 'release']);
-    Route::get('orders/{id}/calls', [OrderWorkspaceController::class, 'calls']);
-    Route::post('orders/{id}/calls', [OrderWorkspaceController::class, 'logCall']);
+    Route::get('orders/message-templates', [OrderWorkspaceController::class, 'templates']);
+    Route::put('orders/message-templates', [OrderWorkspaceController::class, 'saveTemplates']);
     // no GET orders/{id}: the details screen reads orders/{id}/edit
     Route::resource('orders', OrderController::class)->except(['show']);
     Route::post('orders/{id}/sync-sheet', [OrderController::class, 'syncSheet']);

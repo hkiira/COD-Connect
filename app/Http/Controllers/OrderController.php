@@ -10,6 +10,7 @@ use App\Support\Orders\DuplicateOrderGuard;
 use App\Support\Orders\OrderAge;
 use App\Support\Orders\OrderListFilters;
 use App\Support\Orders\OrderQueues;
+use App\Support\Orders\OrderReasons;
 use App\Models\Source;
 use App\Models\CustomerType;
 use App\Models\City;
@@ -68,7 +69,7 @@ class OrderController extends Controller
                     $q->where('type', 'stars');
                 });
             }
-        ], 'answer_value')->withCount('calls');
+        ], 'answer_value');
 
         if ($queue !== null) {
             OrderQueues::apply($ordersQuery, $queue, OrderListFilters::ageOptions($request));
@@ -112,7 +113,6 @@ class OrderController extends Controller
                 'brandSource.source.images',
                 'assignee.user',
                 'claimer.user',
-                'latestCall',
                 'afraOperation',
                 ...self::orderPvaPaths('activeOrderPvas'),
                 ...self::orderPvaPaths('inactiveOrderPvas'),
@@ -126,12 +126,13 @@ class OrderController extends Controller
         }
         $scores = calculateTotalOrderScores($orders->pluck('id')->all());
 
-        // days in the current status, for the page only (one query, not a subquery per filtered row)
-        $ages = $orders->isEmpty() ? [] : Order::whereIn('orders.id', $orders->pluck('id'))
-            ->selectRaw('orders.id, ' . OrderAge::daysSql() . ' as days')
-            ->pluck('days', 'id')->all();
+        // days in the current status and unanswered calls (from the history), for the page only:
+        // one query, not a subquery per filtered row
+        $history = $orders->isEmpty() ? collect() : Order::whereIn('orders.id', $orders->pluck('id'))
+            ->selectRaw('orders.id, ' . OrderAge::daysSql() . ' as days, ' . OrderReasons::attemptsSql() . ' as attempts')
+            ->get()->keyBy('id');
 
-        $datas = $orders->map(function ($data) use ($scores, $ages) {
+        $datas = $orders->map(function ($data) use ($scores, $history) {
             $orderData = $data->only('id', 'code', 'shipping_code', 'note', 'order_id', 'type', 'created_at', 'updated_at', 'pickup_id', 'shipment_id');
             $orderData['reference'] = $data->code;
 
@@ -257,9 +258,10 @@ class OrderController extends Controller
             $orderData['source'] = $sourceArr;
             $orderData['review_score'] = isset($data->review_score) ? (float) round($data->review_score, 2) : null;
 
-            // workspace fields: owner, callback, calls, focus-mode claim, time in status, carrier status
+            // workspace fields: owner, callback, focus-mode claim, carrier status, time in status, unanswered calls
             $orderData = array_merge($orderData, self::workspaceFields($data));
-            $orderData['status_age_days'] = isset($ages[$data->id]) ? (int) $ages[$data->id] : null;
+            $orderData['status_age_days'] = isset($history[$data->id]) ? (int) $history[$data->id]->days : null;
+            $orderData['attempts'] = isset($history[$data->id]) ? (int) $history[$data->id]->attempts : 0;
 
             // Format reviews
             $orderData['reviews'] = [];
@@ -400,7 +402,7 @@ class OrderController extends Controller
         ];
     }
 
-    /** What the order workspaces show on an order: owner, callback, calls, focus-mode claim, carrier status. */
+    /** What the order workspaces show on an order: owner, callback ("Reporté" date), focus-mode claim, carrier status. */
     public static function workspaceFields(Order $order): array
     {
         $claimed = $order->claimed_by && $order->claimed_until && $order->claimed_until->isFuture();
@@ -409,8 +411,6 @@ class OrderController extends Controller
             'assignee' => self::agentSummary($order->assignee),
             'assigned_at' => $order->assigned_at,
             'callback_at' => $order->callback_at,
-            'calls_count' => (int) ($order->calls_count ?? $order->calls()->count()),
-            'last_call' => $order->latestCall?->only('id', 'result', 'called_at', 'note'),
             'claim' => $claimed ? ['agent' => self::agentSummary($order->claimer), 'until' => $order->claimed_until] : null,
             'carrier_status' => $order->afraOperation?->remote_status
                 ? ['status' => $order->afraOperation->remote_status, 'at' => $order->afraOperation->remote_status_at]
@@ -1109,19 +1109,10 @@ class OrderController extends Controller
             $data['orderInfo']['afra_status_at'] = $afraOperation?->remote_status_at;
             $data['orderInfo']['is_afra'] = (bool) $afraOperation || AfraShippingService::isAfraOrder($order);
 
-            // workspace fields and the call log, newest first
-            $order->load('assignee.user', 'claimer.user', 'latestCall', 'afraOperation');
+            // workspace fields; unanswered calls are counted from the history (the "no answer" reasons)
+            $order->load('assignee.user', 'claimer.user', 'afraOperation');
             $data['orderInfo'] = array_merge($data['orderInfo'], self::workspaceFields($order));
-            $data['orderInfo']['calls'] = $order->calls()->with('employee.user')->orderByDesc('called_at')->orderByDesc('id')->limit(50)->get()
-                ->map(fn ($call) => [
-                    'id' => $call->id,
-                    'called_at' => $call->called_at,
-                    'call_number' => (int) $call->call_number,
-                    'result' => $call->result,
-                    'note' => $call->note,
-                    'call_duration' => $call->call_duration,
-                    'agent' => self::agentSummary($call->employee),
-                ]);
+            $data['orderInfo']['attempts'] = (int) Order::whereKey($order->id)->selectRaw(OrderReasons::attemptsSql() . ' as attempts')->value('attempts');
 
             if ($order->shipment) {
                 $data['orderInfo']['shipment'] = $order->shipment->only('id', 'code', 'title');

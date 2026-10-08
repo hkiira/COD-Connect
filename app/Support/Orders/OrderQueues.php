@@ -7,22 +7,26 @@ use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The work queues of the order workspaces (confirmation, tracking, recovery). A queue is a filter on the
- * orders query: the list and the tab counters both go through apply(), so a badge always matches its rows.
+ * orders query built from the order statuses and the reasons already in use (order_comment): the list and
+ * the tab counters both go through apply(), so a badge always matches its rows.
  * Tracking and recovery queues follow the logistics exceptions rules (shipped = on a pickup).
  */
 final class OrderQueues
 {
     /** Queues of each workspace, in tab order. */
     public const WORKSPACES = [
-        'confirmation' => ['new', 'callbacks_due', 'scheduled', 'no_answer', 'out_of_stock', 'abandoned_recent'],
+        'confirmation' => ['new', 'callbacks_due', 'scheduled', 'no_answer', 'out_of_stock', 'abandoned_other'],
         'tracking'     => ['to_ship', 'in_delivery', 'in_trouble', 'stuck', 'no_tracking'],
         'recovery'     => ['unpaid', 'returns_pending', 'paid'],
     ];
 
-    /** An abandoned order is still worth a call back for this many days. */
+    /** An abandoned order is still worth a call back this many days after it was abandoned. */
     public const ABANDONED_RECENT_DAYS = 7;
 
-    /** Statuses a callback can be set in: the customer has not confirmed yet. */
+    /**
+     * Statuses a "Reporté" callback lives in: the confirmation "Reporté" moves the order to status 3,
+     * which it shares with the out-of-stock reasons.
+     */
     public const CALLBACK_STATUSES = [OrderStatus::PENDING, OrderStatus::OUT_OF_STOCK];
 
     public static function exists(?string $key): bool
@@ -50,22 +54,30 @@ final class OrderQueues
     public static function apply(Builder $query, string $key, array $options = []): Builder
     {
         $now = now();
+        $recent = OrderAge::daysSql() . ' <= ' . self::ABANDONED_RECENT_DAYS;
 
         match ($key) {
             'confirmation.new' => $query->where('orders.order_status_id', OrderStatus::PENDING)
-                ->whereNull('orders.callback_at')
-                ->whereDoesntHave('calls'),
+                ->whereNull('orders.callback_at'),
+            // the date of a "Reporté" has come; a "Reporté" saved before its date was kept is due as well
             'confirmation.callbacks_due' => $query->whereIn('orders.order_status_id', self::CALLBACK_STATUSES)
-                ->where('orders.callback_at', '<=', $now),
+                ->where(fn ($q) => $q->where('orders.callback_at', '<=', $now)
+                    ->orWhere(fn ($legacy) => $legacy->where('orders.order_status_id', OrderStatus::OUT_OF_STOCK)
+                        ->whereNull('orders.callback_at')
+                        ->whereRaw(OrderReasons::lastIsPostponedSql()))),
             'confirmation.scheduled' => $query->whereIn('orders.order_status_id', self::CALLBACK_STATUSES)
                 ->where('orders.callback_at', '>', $now),
-            'confirmation.no_answer' => $query->where('orders.order_status_id', OrderStatus::PENDING)
-                ->whereNull('orders.callback_at')
-                ->whereHas('calls'),
+            // abandoned because the customer did not answer ("Client ne répond pas"): call them again
+            'confirmation.no_answer' => $query->where('orders.order_status_id', OrderStatus::ABANDONED)
+                ->whereRaw(OrderReasons::lastIsNoAnswerSql())
+                ->whereRaw($recent),
+            // status 3 because of an out-of-stock reason, not a "Reporté"
             'confirmation.out_of_stock' => $query->where('orders.order_status_id', OrderStatus::OUT_OF_STOCK)
-                ->whereNull('orders.callback_at'),
-            'confirmation.abandoned_recent' => $query->where('orders.order_status_id', OrderStatus::ABANDONED)
-                ->where('orders.created_at', '>=', $now->copy()->subDays(self::ABANDONED_RECENT_DAYS)),
+                ->whereNull('orders.callback_at')
+                ->whereRaw('NOT ' . OrderReasons::lastIsPostponedSql()),
+            'confirmation.abandoned_other' => $query->where('orders.order_status_id', OrderStatus::ABANDONED)
+                ->whereRaw('NOT ' . OrderReasons::lastIsNoAnswerSql())
+                ->whereRaw($recent),
 
             'tracking.to_ship' => $query->whereIn('orders.order_status_id', [OrderStatus::CONFIRMED, OrderStatus::IN_PREPARATION]),
             'tracking.in_delivery' => $query->where('orders.order_status_id', OrderStatus::IN_DELIVERY),
