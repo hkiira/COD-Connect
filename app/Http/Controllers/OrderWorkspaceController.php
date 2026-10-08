@@ -298,7 +298,9 @@ class OrderWorkspaceController extends Controller
             ->groupBy('orders.assigned_to')->selectRaw('orders.assigned_to, COUNT(*) as due')->pluck('due', 'assigned_to');
 
         $agentIds = collect($rows->keys())->merge(array_keys($loads))->unique()->values();
-        $agents = AccountUser::whereIn('id', $agentIds)->where('account_id', $accountId)->with('user')->get()->keyBy('id');
+        // no account filter on the names: an agent of a linked account can work this account's orders,
+        // and only agents who acted on (or own) this account's orders are listed
+        $agents = AccountUser::whereIn('id', $agentIds)->with('user')->get()->keyBy('id');
 
         $rate = fn ($part, $whole) => $whole > 0 ? round($part / $whole * 100, 1) : null;
         $list = $agentIds->map(function ($agentId) use ($rows, $outcomes, $loads, $callbacks, $agents, $rate) {
