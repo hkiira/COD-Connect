@@ -114,4 +114,23 @@ class PickupDispatchTest extends TestCase
         );
         $this->assertSame(2, DB::table('orders')->whereIn('id', $this->ownOrderIds)->whereNotNull('pickup_id')->count());
     }
+
+    public function test_the_orders_ready_for_a_pickup_load_when_a_history_row_has_no_agent(): void
+    {
+        $order = $this->ownOrderIds[0];
+        DB::table('orders')->where('id', $order)->update(['order_status_id' => 4]);
+        // a history row written by an agent that no longer exists (the live data has such rows)
+        DB::statement('SET FOREIGN_KEY_CHECKS=0');
+        DB::table('order_comment')->insert([
+            'order_id' => $order, 'comment_id' => DB::table('comments')->value('id'), 'title' => 'TEST orphan',
+            'order_status_id' => 4, 'account_user_id' => (int) DB::table('account_user')->max('id') + 1000, 'type' => 'comment',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::statement('SET FOREIGN_KEY_CHECKS=1');
+
+        $rows = $this->getJson('/api/pickups/create?orders[inactive][pagination][per_page]=100')
+            ->assertOk()->assertJsonPath('statut', 1)->json('data.orders.inactive.data');
+
+        $this->assertTrue(collect($rows)->pluck('id')->contains($order));
+    }
 }

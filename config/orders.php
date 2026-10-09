@@ -14,6 +14,20 @@ return [
     'duplicate_window_minutes' => env('ORDER_DUPLICATE_WINDOW_MINUTES', 5),
 
     /*
+    | Reasons (comments.id) that record a call nobody answered: "Client ne répond pas" (confirmation,
+    | moves the order to Abandoned), "Ne répond pas" and "Client injoignable" (in delivery). The workspaces
+    | count them as attempts and list the abandoned orders to call again.
+    */
+    'no_answer_comments' => array_map('intval', explode(',', env('ORDER_NO_ANSWER_COMMENTS', '42,30,31'))),
+
+    /*
+    | Hidden reasons (comments.statut = 0, under "Livrée") the return / exchange endpoint writes as history
+    | notes on the original order, the return and the exchange: "Partie Retour" and "Demande d'échange".
+    */
+    'return_comment' => (int) env('ORDER_RETURN_COMMENT', 27),
+    'exchange_comment' => (int) env('ORDER_EXCHANGE_COMMENT', 26),
+
+    /*
     | Allowed changes: from => [to, ...]. Built from the transitions observed in order_comment in 2026
     | (every edge seen at least ~20 times). Staying on the same status is always allowed.
     */

@@ -183,6 +183,24 @@ class WooCommerceStatusTest extends TestCase
         Http::assertSent(fn ($request) => $request->method() === 'PUT' && $request['status'] === 'completed');
     }
 
+    public function test_a_push_that_failed_every_attempt_is_announced_once_in_the_bell(): void
+    {
+        config(['cache.default' => 'array']);
+        \Illuminate\Support\Facades\Notification::fake();
+
+        $job = new PushWooCommerceOrderStatus($this->linkId);
+        $job->failed(new WooCommerceException('Store unreachable'));
+        $job->failed(new WooCommerceException('Store unreachable'));
+
+        $accountId = DB::table('woocommerce_order_links as l')->join('woocommerce_stores as s', 's.id', '=', 'l.store_id')
+            ->where('l.id', $this->linkId)->value('s.account_id');
+        $recipient = \App\Models\AccountUser::where('account_id', $accountId)->where('statut', 1)->firstOrFail();
+        $sent = \Illuminate\Support\Facades\Notification::sent($recipient, \App\Notifications\AppAlert::class);
+
+        $this->assertCount(1, $sent);
+        $this->assertSame('WooCommerce order #9901: status not updated', $sent->first()->toArray($recipient)['title']);
+    }
+
     public function test_a_manual_push_can_force_any_status_and_a_missing_link_is_a_404(): void
     {
         $this->freshHttp([self::BASE . '/orders/9901' => Http::response(['id' => 9901, 'status' => 'on-hold'])]);

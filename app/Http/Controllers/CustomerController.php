@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Customer;
+use App\Support\Orders\ReturnRules;
 use App\Models\Address;
 use App\Models\Phone;
 use Illuminate\Http\Request;
@@ -241,11 +242,23 @@ class CustomerController extends Controller
             ->orderBy('created_at', 'desc')
             ->paginate(10);
 
-        $formattedOrders = $ordersPaginator->getCollection()->map(function ($order) {
-            $orderTotal = 0;
+        // pieces of the page's sales already on a return: one query for the page
+        $returned = ReturnRules::returnedQuantities($ordersPaginator->getCollection()
+            ->filter(fn ($order) => ReturnRules::isReturnable($order))
+            ->flatMap(fn ($order) => $order->orderPvas->pluck('id'))
+            ->all());
 
-            $products = $order->orderPvas->map(function ($orderPva) use (&$orderTotal) {
+        $formattedOrders = $ordersPaginator->getCollection()->map(function ($order) use ($returned) {
+            $orderTotal = 0;
+            $returnable = ReturnRules::isReturnable($order);
+            $inactive = fn ($orderPva) => in_array((int) $orderPva->order_status_id, ReturnRules::INACTIVE_LINE_STATUSES, true);
+            // the lines of the order as the order list shows them (an abandoned order keeps its removed lines)
+            $lines = (int) $order->order_status_id === 2 ? $order->orderPvas->filter($inactive) : $order->orderPvas->reject($inactive);
+            $unitValues = ReturnRules::unitValuesOf($order->orderPvas->reject($inactive), (float) $order->discount);
+
+            $products = $lines->map(function ($orderPva) use (&$orderTotal, $returnable, $returned, $unitValues) {
                 $orderTotal += $orderPva->price * $orderPva->quantity;
+                $alreadyReturned = $returned[$orderPva->id] ?? 0;
                 $pva = $orderPva->productVariationAttribute;
 
                 if (!$pva)
@@ -257,10 +270,14 @@ class CustomerController extends Controller
 
                 return [
                     'order_pva_id' => $orderPva->id,
+                    'product_id' => $pva->product->id,
                     'product' => $pva->product->title . " " . implode('-', $attributesText),
                     'reference' => $pva->product->reference,
                     'quantity' => $orderPva->quantity,
                     'price' => $orderPva->price,
+                    'returned_quantity' => $alreadyReturned,
+                    'returnable_quantity' => $returnable ? max(0, (int) $orderPva->quantity - $alreadyReturned) : 0,
+                    'refund_unit_price' => $unitValues[$orderPva->id] ?? (float) $orderPva->price,
                     'images' => $pva->product->images,
                     'attributes' => $pva->variationAttribute->childVariationAttributes->map(function ($child) {
                         return [
@@ -277,7 +294,11 @@ class CustomerController extends Controller
                 'code' => $order->code,
                 'type' => $order->type,
                 'status' => $order->orderStatus ? $order->orderStatus->title : null,
-                'total' => $orderTotal,
+                'status_id' => (int) $order->order_status_id,
+                // what the customer pays, as on the order list
+                'total' => max(0, $orderTotal + (float) $order->carrier_price - (float) $order->discount),
+                // a sale the customer has with pieces that can still come back
+                'returnable' => $products->sum('returnable_quantity') > 0,
                 'date' => $order->created_at->toIso8601String(),
                 'products' => $products,
                 'brand' => $order->brandSource && $order->brandSource->brand ? $order->brandSource->brand->title : null,

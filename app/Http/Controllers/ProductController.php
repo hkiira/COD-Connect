@@ -175,8 +175,10 @@ class ProductController extends Controller
         ]);
 
         if ($search !== null && $search !== '') {
-            $productsQuery->where(function ($query) use ($columns, $search) {
-                foreach ($columns as $column) {
+            // $columns also names the keys of the answer (price, images, depot_attributes...): search the real columns only
+            $searchable = array_values(array_intersect($columns, \Illuminate\Support\Facades\Schema::getColumnListing('products')));
+            $productsQuery->where(function ($query) use ($searchable, $search) {
+                foreach ($searchable as $column) {
                     $query->orWhere($column, 'like', "%{$search}%");
                 }
             });
