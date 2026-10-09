@@ -378,6 +378,131 @@ class OrderController extends Controller
         return $result;
     }
 
+    public function customerTrust(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'phones' => 'required|array',
+            'phones.*' => 'string'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'statut' => 0,
+                'message' => 'Validation error',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $phones = collect($request->input('phones', []))
+            ->filter(function ($phone) {
+                return is_string($phone) && trim($phone) !== '';
+            })
+            ->map(function ($phone) {
+                return trim($phone);
+            })
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($phones)) {
+            return response()->json([
+                'statut' => 1,
+                'data' => [
+                    'total_orders' => 0,
+                    'unique_orders' => 0,
+                    'delivered' => 0,
+                    'returned' => 0,
+                    'delivery_rate' => null
+                ]
+            ]);
+        }
+
+        // Extract last 8 digits from each phone number (ignoring all non-digit characters)
+        $phoneLast8Map = [];
+        foreach ($phones as $phone) {
+            $digitsOnly = preg_replace('/\D/', '', $phone);
+            $last8 = substr($digitsOnly, -8);
+            if (strlen($last8) === 8) {
+                $phoneLast8Map[$last8] = $phone;
+            }
+        }
+
+        if (empty($phoneLast8Map)) {
+            return response()->json([
+                'statut' => 1,
+                'data' => [
+                    'total_orders' => 0,
+                    'unique_orders' => 0,
+                    'delivered' => 0,
+                    'returned' => 0,
+                    'delivery_rate' => null
+                ]
+            ]);
+        }
+
+        $phoneIds = Phone::where(function ($query) use ($phoneLast8Map) {
+            foreach (array_keys($phoneLast8Map) as $last8) {
+                $pattern = '%' . implode('%', str_split($last8)) . '%';
+                $query->orWhere('title', 'like', $pattern);
+            }
+        })->pluck('id');
+
+        if ($phoneIds->isEmpty()) {
+            return response()->json([
+                'statut' => 1,
+                'data' => [
+                    'total_orders' => 0,
+                    'unique_orders' => 0,
+                    'delivered' => 0,
+                    'returned' => 0,
+                    'delivery_rate' => null
+                ]
+            ]);
+        }
+
+        $orders = Order::where('account_id', getAccountUser()->account_id)
+            ->where(function ($q) use ($phoneIds) {
+                $q->whereHas('phones', function ($q2) use ($phoneIds) {
+                    $q2->whereIn('phones.id', $phoneIds);
+                })
+                ->orWhereHas('customer.phones', function ($q2) use ($phoneIds) {
+                    $q2->whereIn('phones.id', $phoneIds);
+                });
+            })
+            ->with('activePvas:id')
+            ->get(['id', 'code', 'order_status_id', 'type']);
+
+        $filteredOrders = $orders->filter(function ($order) {
+            return $order->type !== 'return';
+        });
+
+        $totalOrders = $filteredOrders->count();
+        
+        $uniqueOrders = $filteredOrders->unique(function ($order) {
+            $productIds = $order->activePvas->pluck('id')->sort()->implode(',');
+            return $productIds ?: $order->id; // fallback to ID if no products
+        })->count();
+
+        $delivered = $filteredOrders->whereIn('order_status_id', [7, 10])->count();
+        $returned = $filteredOrders->where('order_status_id', 11)->count();
+        
+        $deliveryRate = null;
+        if (($delivered + $returned) > 0) {
+            $deliveryRate = round($delivered / ($delivered + $returned), 4);
+        }
+
+        return response()->json([
+            'statut' => 1,
+            'data' => [
+                'total_orders' => $totalOrders,
+                'unique_orders' => $uniqueOrders,
+                'delivered' => $delivered,
+                'returned' => $returned,
+                'delivery_rate' => $deliveryRate
+            ]
+        ]);
+    }
+
     /** Relations the list reads for every order line, loaded once per page. */
     private static function orderPvaPaths(string $relation): array
     {

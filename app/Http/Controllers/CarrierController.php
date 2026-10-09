@@ -453,4 +453,32 @@ class CarrierController extends Controller
             'carrier' => $carrier_b,
         ]);
     }
+    public function availableForCity($cityId)
+    {
+        $carriers = Carrier::where('account_id', getAccountUser()->account_id)
+            ->where('statut', 1)
+            ->whereHas('activeCities', function ($q) use ($cityId) {
+                $q->where('cities.id', $cityId);
+            })
+            ->with(['activeCities' => function ($q) use ($cityId) {
+                $q->where('cities.id', $cityId);
+            }])
+            ->get();
+
+        $data = $carriers->map(function ($carrier) {
+            $pivot = $carrier->activeCities->first()->pivot;
+            return [
+                'id' => $carrier->id,
+                'title' => $carrier->title,
+                'price' => (float)$pivot->price,
+                'return_price' => (float)$pivot->return,
+                'delivery_time' => (int)$pivot->delivery_time
+            ];
+        })->sortBy('price')->values();
+
+        return response()->json([
+            'statut' => 1,
+            'data' => $data
+        ]);
+    }
 }
