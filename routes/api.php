@@ -258,6 +258,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::apiResource('customers', CustomerController::class);
     Route::resource('payment_types', PaymentTypeController::class);
     Route::resource('payment_methods', PaymentMethodController::class);
+    Route::get('carriers/available/{cityId}', [CarrierController::class, 'availableForCity']);
     Route::resource('carriers', CarrierController::class);
     Route::resource('account_carriers', AccountCarrierController::class);
     Route::resource('commission_types', CommissionTypeController::class);
@@ -277,6 +278,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('orders/message-templates', [OrderWorkspaceController::class, 'templates']);
     Route::put('orders/message-templates', [OrderWorkspaceController::class, 'saveTemplates']);
     // no GET orders/{id}: the details screen reads orders/{id}/edit
+    Route::post('orders/customer-trust', [OrderController::class, 'customerTrust']);
     Route::resource('orders', OrderController::class)->except(['show']);
     Route::post('orders/{id}/sync-sheet', [OrderController::class, 'syncSheet']);
     Route::post('orders/count-by-phones', [OrderController::class, 'countByPhones']);
