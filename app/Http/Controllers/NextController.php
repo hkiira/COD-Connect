@@ -148,6 +148,7 @@ class NextController extends Controller
         foreach ($productsPayload as &$p) {
             unset($p['default_price']);
         }
+        unset($p);
 
         // Build standard order creation parameters
         $orderPayload = [
