@@ -141,13 +141,13 @@ class ShipmentController extends Controller
                     $query->where('code', 'like', "%$search%")
                         ->orWhere('shipping_code', 'like', "%$search%")
                         ->orWhereHas('customer', function ($q2) use ($search) {
-                            $q2->where('name', 'like', "%$search%") ;
-                        })
-                        ->orWhereHas('phones', function ($q3) use ($search) {
-                            $q3->where('title', 'like', "%$search%") ;
-                        })
-                        ->orWhereHas('addresses', function ($q4) use ($search) {
-                            $q4->where('title', 'like', "%$search%") ;
+                            $q2->where('name', 'like', "%$search%")
+                                ->orWhereHas('phones', function ($q3) use ($search) {
+                                    $q3->where('title', 'like', "%$search%");
+                                })
+                                ->orWhereHas('addresses', function ($q4) use ($search) {
+                                    $q4->where('title', 'like', "%$search%");
+                                });
                         });
                 });
             }
@@ -532,13 +532,13 @@ class ShipmentController extends Controller
                     $query->where('code', 'like', "%$search%")
                         ->orWhere('shipping_code', 'like', "%$search%")
                         ->orWhereHas('customer', function ($q2) use ($search) {
-                            $q2->where('name', 'like', "%$search%") ;
-                        })
-                        ->orWhereHas('phones', function ($q3) use ($search) {
-                            $q3->where('title', 'like', "%$search%") ;
-                        })
-                        ->orWhereHas('addresses', function ($q4) use ($search) {
-                            $q4->where('title', 'like', "%$search%") ;
+                            $q2->where('name', 'like', "%$search%")
+                                ->orWhereHas('phones', function ($q3) use ($search) {
+                                    $q3->where('title', 'like', "%$search%");
+                                })
+                                ->orWhereHas('addresses', function ($q4) use ($search) {
+                                    $q4->where('title', 'like', "%$search%");
+                                });
                         });
                 });
             }
@@ -650,14 +650,15 @@ class ShipmentController extends Controller
             if (!empty($requestOrders['search']) && is_string($requestOrders['search'])) {
                 $search = $requestOrders['search'];
                 $ordersQuery = $ordersQuery->where(function ($query) use ($search) {
-                    $query->where('code', 'like', "%$search%")->orWhere('shipping_code', 'like', "%$search%")
-                        ->orWhereHas('customer', function ($q) use ($search) {
-                            $q->where('name', 'like', "%$search%")
-                                ->orWhereHas('phones', function ($q2) use ($search) {
-                                    $q2->where('title', 'like', "%$search%") ;
+                    $query->where('code', 'like', "%$search%")
+                        ->orWhere('shipping_code', 'like', "%$search%")
+                        ->orWhereHas('customer', function ($q2) use ($search) {
+                            $q2->where('name', 'like', "%$search%")
+                                ->orWhereHas('phones', function ($q3) use ($search) {
+                                    $q3->where('title', 'like', "%$search%");
                                 })
-                                ->orWhereHas('addresses', function ($q3) use ($search) {
-                                    $q3->where('title', 'like', "%$search%") ;
+                                ->orWhereHas('addresses', function ($q4) use ($search) {
+                                    $q4->where('title', 'like', "%$search%");
                                 });
                         });
                 });
@@ -766,14 +767,15 @@ class ShipmentController extends Controller
             if (!empty($requestOrders['search']) && is_string($requestOrders['search'])) {
                 $search = $requestOrders['search'];
                 $ordersQuery = $ordersQuery->where(function ($query) use ($search) {
-                    $query->where('code', 'like', "%$search%")->orWhere('shipping_code', 'like', "%$search%")
-                        ->orWhereHas('customer', function ($q) use ($search) {
-                            $q->where('name', 'like', "%$search%")
-                                ->orWhereHas('phones', function ($q2) use ($search) {
-                                    $q2->where('title', 'like', "%$search%") ;
+                    $query->where('code', 'like', "%$search%")
+                        ->orWhere('shipping_code', 'like', "%$search%")
+                        ->orWhereHas('customer', function ($q2) use ($search) {
+                            $q2->where('name', 'like', "%$search%")
+                                ->orWhereHas('phones', function ($q3) use ($search) {
+                                    $q3->where('title', 'like', "%$search%");
                                 })
-                                ->orWhereHas('addresses', function ($q3) use ($search) {
-                                    $q3->where('title', 'like', "%$search%") ;
+                                ->orWhereHas('addresses', function ($q4) use ($search) {
+                                    $q4->where('title', 'like', "%$search%");
                                 });
                         });
                 });
