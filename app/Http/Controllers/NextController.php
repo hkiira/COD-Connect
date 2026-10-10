@@ -906,7 +906,7 @@ class NextController extends Controller
                         'quantity' => $p['qty'],
                         'price' => $p['price'],
                         'initial_price' => $p['default_price'],
-                        'realprice' => $p['pva']->product->orderPvas->first()->price ?? 0,
+                        'realprice' => optional($p['pva']->product?->orderPvas)->first()?->price ?? 0,
                         'discount' => 0,
                         'order_status_id' => $order->order_status_id,
                         'account_user_id' => getAccountUser()->id ?? $accountId,
