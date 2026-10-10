@@ -108,7 +108,8 @@ class PickupController extends Controller
                     });
                     return $activePva->pivot->quantity . " x " . $activePva->product->title . ' : ' . implode(", ", $variations->toArray());
                 }),
-                "total" => $total . ' DH ',
+                "total" => ($total - $order->discount) . ' DH',
+                "discount" => $order->discount,
                 'qr_code' => "{$order->code}.png" // QR code for the tracking number
             ];
         }
@@ -166,9 +167,10 @@ class PickupController extends Controller
                     });
                     return $activePva->pivot->quantity . " x " . $activePva->product->title . ' : ' . implode(", ", $variations->toArray());
                 }),
-                "total" => $total . ' DH ',
+                "total" => ($total - $order->discount) . ' DH ',
+                "discount" => $order->discount,
             ];
-            $pickUpTotal += $total;
+            $pickUpTotal += ($total - $order->discount);
         }
         $datas['shippedBy'] = ($pickup->carrier_id) ? $pickup->carrier->title : $pickup->accountUser->user->firstname . " " . $pickup->accountUser->user->lastname;
         $datas['account'] = $pickup->accountUser->account->name;
