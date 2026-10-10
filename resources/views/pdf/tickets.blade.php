@@ -85,6 +85,9 @@
                 <div class="section-left">
                     <h3>Total:</h3>
                     <h2>{{ $data['total'] }}</h2>
+                    @if ($data['discount'] > 0)
+                        <h3 style="color: red;">-{{ $data['discount'] }} DH</h3>
+                    @endif
                 </div>
                 <div class="section-right" style="text-align: right;">
                     <h3>{{ date('d/m/Y') }}</h3>

@@ -136,7 +136,12 @@
                                 <b>NB: {{ $data['comment'] }}</b>
                             @endif
                         </td>
-                        <td class="{{ $islast }}" style="text-align: center;"> {{ $data['total'] }} </td>
+                        <td class="{{ $islast }}" style="text-align: center;"> 
+                            {{ $data['total'] }}
+                            @if ($data['discount'] > 0)
+                                <br><span style="color: red; font-size: smaller;">-{{ $data['discount'] }} DH</span>
+                            @endif
+                        </td>
                         <td class="{{ $islast }}" style="text-align: center;"> {{ $data['code'] }} </td>
                     </tr>
                 @endforeach
