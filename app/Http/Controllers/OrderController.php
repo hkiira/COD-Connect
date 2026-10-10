@@ -210,7 +210,7 @@ class OrderController extends Controller
                 $orderData['customer'] = ['id' => null, 'name' => null, 'first_name' => '', 'last_name' => '', 'images' => [], 'phones' => [], 'address' => []];
             }
             $totalOrder = 0;
-            $orderData['products'] = ($data->order_status_id == 2 ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
+            $orderData['products'] = (in_array($data->order_status_id, [2, 3]) ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
                 $totalOrder += $actfOrderPva->price * $actfOrderPva->quantity;
                 $attributes = $actfOrderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
                     return $child->attribute->code;
@@ -1641,7 +1641,7 @@ class OrderController extends Controller
 
             $order->update($order_only->all());
             if ($comment !== null) {
-                $order->activePvas()->update(['order_status_id' => $comment['statut']]);
+                $order->orderPvas()->where('order_status_id', $previousStatus)->update(['order_status_id' => $comment['statut']]);
             }
 
             // Note: The legacy logic that created "PR" or "CH" specific orders has been removed
@@ -1969,8 +1969,9 @@ class OrderController extends Controller
                     if ($delivered) {
                         self::update(new Request([['id' => $original->id, 'comment' => ['id' => $delivered->id, 'title' => 'Livrée (retour / échange à la porte)']]]), 1);
                     } else {
+                        $oldStatus = $original->order_status_id;
                         $original->update(['order_status_id' => \App\Support\Orders\OrderStatus::DELIVERED]);
-                        $original->activePvas()->update(['order_status_id' => \App\Support\Orders\OrderStatus::DELIVERED]);
+                        $original->orderPvas()->where('order_status_id', $oldStatus)->update(['order_status_id' => \App\Support\Orders\OrderStatus::DELIVERED]);
                     }
                     $original->refresh();
                 }
