@@ -22,7 +22,8 @@ class AfraDeliveryController extends Controller
         $rows = Order::with(['customer.activePhones', 'customer.activeAddresses.city', 'activePvas.product', 'activePvas.variationAttribute.childVariationAttributes.attribute'])
             ->where('pickup_id', $id)->where('account_id', getAccountUser()->account_id)
             ->orderByDesc('id')->get()->map(function ($order) {
-                $products = $order->activePvas->map(fn ($pva) => AfraShippingService::productName($pva).' × '.$pva->pivot->quantity)->implode("\n");
+                $products = $order->activePvas->filter(fn ($pva) => (int) $pva->pivot->quantity > 0)
+                    ->map(fn ($pva) => AfraShippingService::productName($pva).' × '.$pva->pivot->quantity)->implode("\n");
 
                 return [
                     $order->code,

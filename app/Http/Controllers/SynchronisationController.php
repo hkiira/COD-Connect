@@ -103,7 +103,7 @@ class SynchronisationController extends Controller
                     'city' => $order->customer->addresses->first()->city->title,
                     'address' => $order->customer->addresses->first()->title,
                     'fromstock' => '0',
-                    'product' => implode("\n", $order->activePvas->map(function ($activePva) {
+                    'product' => implode("\n", $order->activePvas->filter(fn ($pva) => (int) $pva->pivot->quantity > 0)->map(function ($activePva) {
                         $variations = $activePva->variationAttribute->childVariationAttributes->map(function ($childVa) {
                             return $childVa->attribute->title;
                         });
