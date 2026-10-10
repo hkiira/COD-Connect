@@ -843,8 +843,9 @@ class AfraShippingService
         ]);
 
         if ($statusId !== (int) $order->order_status_id) {
+            $oldStatus = $order->order_status_id;
             $order->update(['order_status_id' => $statusId]);
-            $order->activeOrderPvas()->update(['order_status_id' => $statusId]);
+            $order->orderPvas()->where('order_status_id', $oldStatus)->update(['order_status_id' => $statusId]);
         }
     }
 

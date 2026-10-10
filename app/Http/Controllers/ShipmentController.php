@@ -581,7 +581,7 @@ class ShipmentController extends Controller
                     return $address->only('id', 'title', 'city');
                 });
                 $totalOrder = 0;
-                $orderData['products'] = ($data->order_status_id == 2 ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
+                $orderData['products'] = (in_array($data->order_status_id, [2, 3]) ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
                     $totalOrder += $actfOrderPva->price * $actfOrderPva->quantity;
                     $attributes = $actfOrderPva->ProductVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
                         return $child->attribute->code;
