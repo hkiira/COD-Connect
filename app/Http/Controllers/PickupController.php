@@ -96,7 +96,7 @@ class PickupController extends Controller
                 "sender_mail" => $order->brandSource->brand->email,
                 "sender_phone" => $order->brandSource->brand,
                 "customer" => $order->customer->name,
-                "address" => $order->customer->addresses->map(function ($address) {
+                "address" => $order->customer->addresses->sortByDesc('id')->values()->map(function ($address) {
                     return $address->title." - ".$address->city->title;
             })->first(),
                 "phones" => $order->phones->map(function ($phone) {
@@ -155,7 +155,7 @@ class PickupController extends Controller
                 "code" => $order->code,
                 "comment" => $order->note,
                 "customer" => $order->customer->name,
-                "address" => $order->addresses->first()->title . "-" . $order->city->title,
+                "address" => $order->addresses->sortByDesc('id')->first()->title . "-" . $order->city->title,
                 "city" => $order->city->title,
                 "phones" => $order->phones->map(function ($phone) {
                     return $phone->title;
@@ -238,7 +238,7 @@ class PickupController extends Controller
             $orderData['customer']['phones'] = $data->phones->map(function ($phone) {
                 return $phone->only('id', 'title');
             });
-            $orderData['customer']['address'] = $data->addresses->map(function ($address) {
+            $orderData['customer']['address'] = $data->addresses->sortByDesc('id')->values()->map(function ($address) {
                 return $address->only('id', 'title', 'city');
             });
             $total = 0;
@@ -484,7 +484,7 @@ class PickupController extends Controller
                 $orderData['customer']['phones'] = $order->phones->map(function ($phone) {
                     return $phone->only('id', 'title');
                 });
-                $orderData['customer']['address'] = $order->addresses->map(function ($address) {
+                $orderData['customer']['address'] = $order->addresses->sortByDesc('id')->values()->map(function ($address) {
                     return $address->only('id', 'title', 'city');
                 });
                 $total = 0;
@@ -545,7 +545,7 @@ class PickupController extends Controller
                 $orderData['customer']['phones'] = $data->phones->map(function ($phone) {
                     return $phone->only('id', 'title');
                 });
-                $orderData['customer']['address'] = $data->addresses->map(function ($address) {
+                $orderData['customer']['address'] = $data->addresses->sortByDesc('id')->values()->map(function ($address) {
                     return $address->only('id', 'title', 'city');
                 });
                 $total = 0;
@@ -614,7 +614,7 @@ class PickupController extends Controller
                 $orderData['customer']['phones'] = $data->phones->map(function ($phone) {
                     return $phone->only('id', 'title');
                 });
-                $orderData['customer']['address'] = $data->addresses->map(function ($address) {
+                $orderData['customer']['address'] = $data->addresses->sortByDesc('id')->values()->map(function ($address) {
                     return $address->only('id', 'title', 'city');
                 });
                 $total = 0;
@@ -682,7 +682,7 @@ class PickupController extends Controller
                 $orderData['customer']['phones'] = $data->phones->map(function ($phone) {
                     return $phone->only('id', 'title');
                 });
-                $orderData['customer']['address'] = $data->addresses->map(function ($address) {
+                $orderData['customer']['address'] = $data->addresses->sortByDesc('id')->values()->map(function ($address) {
                     return $address->only('id', 'title', 'city');
                 });
                 $total = 0;

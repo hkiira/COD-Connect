@@ -183,10 +183,10 @@ class AfraShippingService
     public function payload(Order $order): array
     {
         $order->loadMissing(['customer.activePhones', 'customer.activeAddresses', 'activePhones', 'activeAddresses', 'activePvas.product', 'activePvas.variationAttribute.childVariationAttributes.attribute']);
-        $address = $order->activeAddresses->first() ?: $order->customer?->activeAddresses->first();
-        $phone = $order->activePhones->first() ?: $order->customer?->activePhones->first();
+        $address = $order->activeAddresses->sortByDesc('id')->first() ?: $order->customer?->activeAddresses->sortByDesc('id')->first();
+        $phone = $order->activePhones->sortByDesc('id')->first() ?: $order->customer?->activePhones->sortByDesc('id')->first();
 
-        $cityId = $order->city_id ?: $address?->city_id;
+        $cityId = $address?->city_id ?: $order->city_id;
         $afraCityId = DefaultCarrier::where('carrier_id', AfraShippingClient::carrierId())->where('city_id', $cityId)
             ->whereNull('deleted_at')->value('city_id_carrier');
         if (!$afraCityId) {
