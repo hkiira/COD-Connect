@@ -118,7 +118,9 @@ class Order extends Model
 
     public function activeOrderPvas()
     {
-        return $this->hasMany(OrderPva::class)->whereNotIn('order_status_id', [2, 3]);
+        return $this->hasMany(OrderPva::class)
+            ->whereNotIn('order_status_id', [2, 3])
+            ->where('quantity', '>', 0);
     }
     public function inactiveOrderPvas()
     {
@@ -207,6 +209,7 @@ class Order extends Model
         return $this->belongsToMany(ProductVariationAttribute::class, 'order_pva')
             ->withPivot('id', 'order_status_id', 'price', 'quantity', 'realprice', 'initial_price', 'discount')
             ->wherePivotNotIn('order_status_id', [2, 3])
+            ->wherePivot('quantity', '>', 0)
             ->wherePivotNull('deleted_at');
     }
 
