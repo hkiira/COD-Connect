@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\ProductVariationAttribute;
+use App\Models\WooCommerce\OrderLink;
 use App\Models\WooCommerce\Store;
 use App\Models\WooCommerce\SyncLog;
 use App\Models\WooCommerce\VariationLink;
 use App\Services\WooCommerce\OrderService;
+use App\Services\WooCommerce\WooCommerceClient;
 use App\Services\WooCommerce\WooCommerceException;
 use App\Support\Orders\OrderOwnership;
 use App\Support\WooCommerce\StoreResolver;
@@ -76,6 +78,52 @@ class WooCommerceOrderController extends Controller
         ]);
 
         return $this->runImport(StoreResolver::resolve($id), $request);
+    }
+
+    public function updateWcStatus(Request $request, $id): JsonResponse
+    {
+        $request->validate([
+            'wc_order_ids' => 'required|array|min:1|max:50',
+            'wc_order_ids.*' => 'integer|min:1',
+            'status' => 'required|string|max:40',
+        ]);
+
+        $store = StoreResolver::resolve($id);
+        $client = WooCommerceClient::fromStore($store);
+        $status = (string) $request->input('status');
+
+        $results = [];
+        foreach ($request->input('wc_order_ids') as $wcOrderId) {
+            try {
+                $client->updateOrderStatus((int) $wcOrderId, $status);
+
+                OrderLink::where('store_id', $store->id)
+                    ->where('wc_order_id', $wcOrderId)
+                    ->update(['last_wc_status' => $status]);
+
+                SyncLog::record($store, 'order', 'status_update', 'success', "Statut WooCommerce changé à '{$status}'", [
+                    'wc_order_id' => (int) $wcOrderId,
+                    'status' => $status,
+                ]);
+
+                $results[] = ['wc_order_id' => (int) $wcOrderId, 'success' => true];
+            } catch (\Throwable $e) {
+                SyncLog::record($store, 'order', 'status_update', 'failed', "Échec mise à jour statut WooCommerce: " . $e->getMessage(), [
+                    'wc_order_id' => (int) $wcOrderId,
+                    'error' => $e->getMessage(),
+                ]);
+
+                $results[] = ['wc_order_id' => (int) $wcOrderId, 'success' => false, 'error' => $e->getMessage()];
+            }
+        }
+
+        $succeeded = collect($results)->where('success', true)->count();
+
+        return response()->json([
+            'statut' => $succeeded > 0 ? 1 : 0,
+            'message' => "{$succeeded} sur " . count($results) . " commande(s) mise(s) à jour avec succès vers '{$status}'.",
+            'results' => $results,
+        ]);
     }
 
     // ---- routes that predate multi-store -----------------------------------

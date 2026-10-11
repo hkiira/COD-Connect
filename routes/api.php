@@ -335,6 +335,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('wc/stores/{id}/logs', [\App\Http\Controllers\WooCommerceLogController::class, 'index']);
     Route::post('wc/stores/{id}/logs/{logId}/retry', [\App\Http\Controllers\WooCommerceLogController::class, 'retry']);
     Route::post('wc/stores/{id}/orders/import', [\App\Http\Controllers\WooCommerceOrderController::class, 'importForStore']);
+    Route::post('wc/stores/{id}/orders/update-wc-status', [\App\Http\Controllers\WooCommerceOrderController::class, 'updateWcStatus']);
     Route::get('wc/stores/{id}/orders/{wcOrderId}', [\App\Http\Controllers\WooCommerceOrderController::class, 'showForStore']);
     // WooCommerce Order Management (new dedicated controller)
     Route::get('wc-orders', [\App\Http\Controllers\WooCommerceOrderController::class, 'getOrdersByStatus']);

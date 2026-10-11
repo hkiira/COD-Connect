@@ -54,6 +54,8 @@ class OrderService
                         ->map(fn ($childVa) => ['id' => $childVa->attribute_id, 'title' => $childVa->attribute->title ?? null]) ?? [],
                 ] : null;
 
+                $imageUrl = $this->resolveItemImage($item, $pva);
+
                 return [
                     'wc_product_id' => $item['product_id'],
                     'wc_variation_id' => $item['variation_id'],
@@ -61,7 +63,10 @@ class OrderService
                     'sku' => $item['sku'],
                     'quantity' => $item['quantity'],
                     'price' => $item['price'],
+                    'image_url' => $imageUrl,
+                    'wc_product_url' => $this->wcProductUrl((int) ($item['product_id'] ?? 0)),
                     'system_product' => $systemProduct,
+                    'system_product_id' => $systemProduct['id'] ?? null,
                     'is_matched' => $systemProduct !== null,
                 ];
             });
@@ -202,10 +207,13 @@ class OrderService
                 'product_id' => $item['product_id'],
                 'wc_product_id' => $item['product_id'],
                 'wc_variation_id' => (int) ($item['variation_id'] ?: $item['product_id']),
+                'wc_product_url' => $this->wcProductUrl((int) ($item['product_id'] ?? 0)),
                 'is_matched' => $pva !== null,
                 'system_pva_id' => $pva?->id,
+                'system_product_id' => $pva?->product?->id,
                 'product_title' => $item['name'],
                 'product_reference' => $item['sku'],
+                'image_url' => $this->resolveItemImage($item, $pva),
                 'price' => $item['price'],
                 'quantity' => $item['quantity'],
                 'discount' => 0,
@@ -253,11 +261,26 @@ class OrderService
             $pva = $orderPva->productVariationAttribute;
             $product = $pva->product;
 
+            $img = $pva->principalImage?->first() ?? $product->principalImage?->first();
+            $imageUrl = null;
+            if ($img) {
+                $imageUrl = ! empty($img->photo_dir) && ! empty($img->photo)
+                    ? asset(rtrim($img->photo_dir, '/') . '/' . ltrim($img->photo, '/'))
+                    : asset('storage/' . ltrim($img->photo, '/'));
+            }
+
+            $link = VariationLink::where('store_id', $this->store->id)->where('product_variation_attribute_id', $pva->id)->first();
+            $wcProductId = $link?->wc_product_id;
+
             return [
                 'order_pva_id' => $orderPva->id,
                 'product_id' => $product->id,
+                'system_product_id' => $product->id,
+                'wc_product_id' => $wcProductId,
+                'wc_product_url' => $this->wcProductUrl($wcProductId),
                 'product_title' => $product->title,
                 'product_reference' => $product->reference,
+                'image_url' => $imageUrl,
                 'price' => $orderPva->price,
                 'quantity' => $orderPva->quantity,
                 'discount' => $orderPva->discount,
@@ -406,5 +429,37 @@ class OrderService
         $first = collect((array) $errors)->flatten()->first();
 
         return is_string($first) ? $first : 'validation error';
+    }
+
+    private function resolveItemImage(array $item, $pva = null): ?string
+    {
+        if (! empty($item['image']['src'])) {
+            return (string) $item['image']['src'];
+        }
+
+        if ($pva) {
+            $img = $pva->principalImage?->first() ?? $pva->product?->principalImage?->first();
+            if ($img) {
+                if (! empty($img->photo_dir) && ! empty($img->photo)) {
+                    return asset(rtrim($img->photo_dir, '/') . '/' . ltrim($img->photo, '/'));
+                }
+                if (! empty($img->photo)) {
+                    return asset('storage/' . ltrim($img->photo, '/'));
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function wcProductUrl(?int $wcProductId): ?string
+    {
+        if (! $wcProductId) {
+            return null;
+        }
+
+        $siteUrl = preg_replace('#/wp-json(/wc/v\d+)?/?$#i', '', (string) $this->store->base_url);
+
+        return $siteUrl ? rtrim($siteUrl, '/') . '/?p=' . $wcProductId : null;
     }
 }
