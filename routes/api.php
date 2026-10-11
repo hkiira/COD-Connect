@@ -102,6 +102,7 @@ use App\Http\Controllers\{
     MouvementController,
     AnalyticsController,
     AsapDeliveryWebhookController,
+    WooCommerceWebhookController,
     NextController
 };
 use App\Http\Controllers\API\RegisterController;
@@ -126,6 +127,8 @@ Route::post('register_new_account', [RegisterController::class, 'register_new_ac
 Route::post('login', [RegisterController::class, 'login'])->middleware('throttle:login')->name('login');
 Route::get('filterselect/wp-cities', [FilterController::class, 'cities']);
 Route::get('webhooks/asap-delivery', [AsapDeliveryWebhookController::class, 'handle'])->middleware('asap.webhook');
+Route::post('wc/stores/discover', [WooCommerceWebhookController::class, 'discover']);
+Route::post('wc/stores/{id}/webhook', [WooCommerceWebhookController::class, 'handle']);
 // Route::resource('PhoneTypes', PhoneTypesController::class);
 
 Route::middleware(['VerifyDomain', 'auth.optional'])->group(function () {
