@@ -74,6 +74,7 @@ class WooCommerceOrderController extends Controller
             'orders.*.brand_source_id' => 'nullable|integer',
             'orders.*.payment_type_id' => 'nullable|integer',
             'orders.*.payment_method_id' => 'nullable|integer',
+            'orders.*.city_id' => 'nullable|integer',
             'wc_update_status' => 'nullable|string|max:40',
         ]);
 
@@ -147,6 +148,7 @@ class WooCommerceOrderController extends Controller
             'orders.*.brand_source_id' => 'nullable|integer',
             'orders.*.payment_type_id' => 'nullable|integer',
             'orders.*.payment_method_id' => 'nullable|integer',
+            'orders.*.city_id' => 'nullable|integer',
             'wc_update_status' => 'nullable|string|max:40',
         ]);
 

@@ -176,6 +176,7 @@ class OrderService
                 'payment_method' => $raw['payment_method_title'] ?? null,
                 'customer_note' => $raw['customer_note'] ?? null,
                 'shipping_total' => $raw['shipping_total'] ?? 0,
+                'meta_data' => $raw['meta_data'] ?? [],
             ];
         } catch (WooCommerceException $e) {
             if (! $link) {
@@ -198,6 +199,7 @@ class OrderService
     {
         $billing = $wc['billing'] ?? [];
         $name = trim(($billing['first_name'] ?? '') . ' ' . ($billing['last_name'] ?? ''));
+        $city = $this->resolveCity($wc);
 
         $products = collect($wc['line_items'])->map(function ($item) {
             $pva = $this->resolver->resolve((int) $item['product_id'], (int) $item['variation_id']);
@@ -240,14 +242,14 @@ class OrderService
             'payment_method' => ['id' => null, 'title' => $wc['payment_method'] ?: 'N/A'],
             'brand' => null,
             'source' => null,
-            'city' => ['id' => null, 'title' => $billing['city'] ?? ''],
+            'city' => ['id' => $city?->id, 'title' => $city?->title ?? ($billing['city'] ?? '')],
             'pickup' => null,
             'shipment' => null,
             'customer' => [
                 'id' => null,
                 'name' => $name ?: 'Unknown',
                 'phones' => [['id' => null, 'title' => $billing['phone'] ?? '', 'types' => []]],
-                'addresses' => [['id' => null, 'title' => $billing['address_1'] ?? '', 'city' => ['id' => null, 'title' => $billing['city'] ?? '']]],
+                'addresses' => [['id' => null, 'title' => $billing['address_1'] ?? '', 'city' => ['id' => $city?->id, 'title' => $city?->title ?? ($billing['city'] ?? '')]]],
             ],
             'products' => $products,
             'woocommerce' => $wc,
@@ -338,7 +340,7 @@ class OrderService
         }
 
         $billing = $wcOrder['billing'] ?? [];
-        $city = City::find($billing['city'] ?? null);
+        $city = $this->resolveCity($wcOrder, $input);
         $warnings = $city ? [] : ['The billing city is not a CodConnect city: city ' . self::FALLBACK_CITY_ID . ' was used.'];
 
         $products = [];
@@ -461,5 +463,111 @@ class OrderService
         $siteUrl = preg_replace('#/wp-json(/wc/v\d+)?/?$#i', '', (string) $this->store->base_url);
 
         return $siteUrl ? rtrim($siteUrl, '/') . '/?p=' . $wcProductId : null;
+    }
+
+    public function resolveCity(array $wcOrder, array $input = []): ?City
+    {
+        // 1. Explicitly provided city_id in import payload
+        if (! empty($input['city_id']) && is_numeric($input['city_id'])) {
+            $city = City::find((int) $input['city_id']);
+            if ($city) {
+                return $city;
+            }
+        }
+
+        // 2. City ID stored in WooCommerce order meta_data (used by Moroccan checkout plugins)
+        $meta = collect($wcOrder['meta_data'] ?? [])->pluck('value', 'key');
+        $metaCityId = $meta['city_id'] ?? $meta['_billing_city_id'] ?? $meta['_shipping_city_id'] ?? null;
+        if ($metaCityId && is_numeric($metaCityId)) {
+            $city = City::find((int) $metaCityId);
+            if ($city) {
+                return $city;
+            }
+        }
+
+        // 3. Numeric ID directly in billing or shipping city
+        $billing = $wcOrder['billing'] ?? [];
+        if (! empty($billing['city']) && is_numeric($billing['city'])) {
+            $city = City::find((int) $billing['city']);
+            if ($city) {
+                return $city;
+            }
+        }
+
+        $shipping = $wcOrder['shipping'] ?? [];
+        if (! empty($shipping['city']) && is_numeric($shipping['city'])) {
+            $city = City::find((int) $shipping['city']);
+            if ($city) {
+                return $city;
+            }
+        }
+
+        // 4. Match by city name/title
+        $candidates = array_filter([
+            $meta['city_title'] ?? null,
+            $meta['_billing_city_title'] ?? null,
+            $meta['_shipping_city_title'] ?? null,
+            $billing['city'] ?? null,
+            $shipping['city'] ?? null,
+            $billing['state'] ?? null,
+            $shipping['state'] ?? null,
+        ]);
+
+        foreach ($candidates as $candidate) {
+            $matched = $this->matchCityByText((string) $candidate);
+            if ($matched) {
+                return $matched;
+            }
+        }
+
+        return null;
+    }
+
+    private function matchCityByText(string $raw): ?City
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return null;
+        }
+
+        // Direct exact match
+        $city = City::where('title', $raw)->first();
+        if ($city) {
+            return $city;
+        }
+
+        // Split composite strings e.g. "Taroudant - تارودانت" or "Assays ( agadir )"
+        $parts = preg_split('/[\-\/\(\)]+/', $raw);
+        foreach ($parts as $part) {
+            $part = trim($part);
+            if ($part === '' || mb_strlen($part) < 2) {
+                continue;
+            }
+
+            $city = City::where('title', $part)->first();
+            if ($city) {
+                return $city;
+            }
+
+            $city = City::where('title', 'like', $part)->first();
+            if ($city) {
+                return $city;
+            }
+        }
+
+        // Accent-insensitive / regex match for legacy corrupted titles (e.g. K??nitra, F??s)
+        $cleanInput = preg_replace('/[^a-z0-9]/', '', strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $raw)));
+        if (strlen($cleanInput) >= 3) {
+            $cities = City::all(['id', 'title']);
+            foreach ($cities as $c) {
+                $cleanTitle = preg_replace('/[^a-z0-9\?]/', '', strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $c->title)));
+                $regex = '/^' . preg_replace('/\?+/', '[a-z]*', $cleanTitle) . '$/i';
+                if (@preg_match($regex, $cleanInput)) {
+                    return $c;
+                }
+            }
+        }
+
+        return null;
     }
 }
