@@ -4,6 +4,7 @@ namespace App\Support\Orders;
 
 use App\Models\Order;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The filters of GET /api/orders, shared with the workspace counters so a tab badge counts the same
@@ -56,15 +57,10 @@ final class OrderListFilters
 
         // code, tracking number, customer name, phone or address
         if (! empty($request['search']) && is_string($request['search'])) {
-            $search = $request['search'];
-            $query->where(function ($query) use ($search) {
-                $query->where('code', 'like', "%$search%")->orWhere('shipping_code', 'like', "%$search%")
-                    ->orWhereHas('customer', function ($q) use ($search) {
-                        $q->where('name', 'like', "%$search%")
-                            ->orWhereHas('phones', fn ($q2) => $q2->where('title', 'like', "%$search%"))
-                            ->orWhereHas('addresses', fn ($q3) => $q3->where('title', 'like', "%$search%"));
-                    });
-            });
+            $search = trim($request['search']);
+            if ($search !== '') {
+                self::applySearch($query, $search);
+            }
         }
 
         if (! empty($request['startDate'])) {
@@ -118,5 +114,83 @@ final class OrderListFilters
             'min_age_days' => $int($request['min_age_days'] ?? null),
             'max_age_days' => $int($request['max_age_days'] ?? null),
         ];
+    }
+
+    /** Optimized order search across code, shipping_code, customer name, phone, and address. */
+    public static function applySearch(Builder $query, string $search): void
+    {
+        $hasLetters = (bool) preg_match('/[a-zA-Z\x{0600}-\x{06FF}]/u', $search);
+        $hasDigits = (bool) preg_match('/[0-9]/', $search);
+        $cleanDigits = preg_replace('/[^0-9]/', '', $search);
+        $isPurePhone = ! $hasLetters && strlen($cleanDigits) >= 7;
+
+        $customerIds = [];
+
+        // 1. Customer names: match unless search is purely a 7+ digit phone number
+        if (! $isPurePhone) {
+            $nameIds = DB::table('customers')
+                ->where('name', 'like', "%$search%")
+                ->whereNull('deleted_at')
+                ->pluck('id')
+                ->toArray();
+            if (! empty($nameIds)) {
+                $customerIds = array_merge($customerIds, $nameIds);
+            }
+        }
+
+        // 2. Phones: match if search contains digits and no letters
+        if ($hasDigits && ! $hasLetters) {
+            $phoneQuery = DB::table('phones')
+                ->join('phoneables', function ($join) {
+                    $join->on('phones.id', '=', 'phoneables.phone_id')
+                        ->where('phoneables.phoneable_type', '=', 'App\\Models\\Customer');
+                })
+                ->whereNull('phones.deleted_at')
+                ->where(function ($q) use ($search, $cleanDigits) {
+                    $q->where('phones.title', 'like', "%$search%");
+                    if ($cleanDigits !== $search && strlen($cleanDigits) >= 6) {
+                        $q->orWhere('phones.title', 'like', "%$cleanDigits%");
+                    }
+                    if (str_starts_with($cleanDigits, '212') && strlen($cleanDigits) >= 11) {
+                        $local = '0' . substr($cleanDigits, 3);
+                        $q->orWhere('phones.title', 'like', "%$local%");
+                    } elseif (str_starts_with($cleanDigits, '0') && strlen($cleanDigits) >= 10) {
+                        $withoutZero = substr($cleanDigits, 1);
+                        $q->orWhere('phones.title', 'like', "%$withoutZero%");
+                    }
+                });
+
+            $phoneCustomerIds = $phoneQuery->pluck('phoneables.phoneable_id')->toArray();
+            if (! empty($phoneCustomerIds)) {
+                $customerIds = array_merge($customerIds, $phoneCustomerIds);
+            }
+        }
+
+        // 3. Addresses: match unless search is purely a 7+ digit phone number
+        if (! $isPurePhone) {
+            $addrIds = DB::table('addresses')
+                ->join('addressables', function ($join) {
+                    $join->on('addresses.id', '=', 'addressables.address_id')
+                        ->where('addressables.addressable_type', '=', 'App\\Models\\Customer');
+                })
+                ->where('addresses.title', 'like', "%$search%")
+                ->whereNull('addresses.deleted_at')
+                ->pluck('addressables.addressable_id')
+                ->toArray();
+            if (! empty($addrIds)) {
+                $customerIds = array_merge($customerIds, $addrIds);
+            }
+        }
+
+        $customerIds = array_values(array_unique($customerIds));
+
+        $query->where(function ($q) use ($search, $customerIds) {
+            $q->where('orders.code', 'like', "%$search%")
+              ->orWhere('orders.shipping_code', 'like', "%$search%");
+
+            if (! empty($customerIds)) {
+                $q->orWhereIn('orders.customer_id', $customerIds);
+            }
+        });
     }
 }

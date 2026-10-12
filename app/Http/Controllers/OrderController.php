@@ -66,13 +66,7 @@ class OrderController extends Controller
         }
 
         // filters shared with the workspace counters (OrderWorkspaceController::queueCounts)
-        $ordersQuery = OrderListFilters::query($request)->withAvg([
-            'reviewAnswers as review_score' => function ($query) {
-                $query->whereHas('question', function ($q) {
-                    $q->where('type', 'stars');
-                });
-            }
-        ], 'answer_value');
+        $ordersQuery = OrderListFilters::query($request);
 
         if ($queue !== null) {
             OrderQueues::apply($ordersQuery, $queue, OrderListFilters::ageOptions($request));
@@ -94,6 +88,13 @@ class OrderController extends Controller
 
         $total = $ordersQuery->count();
         $orders = $ordersQuery
+            ->withAvg([
+                'reviewAnswers as review_score' => function ($query) {
+                    $query->whereHas('question', function ($q) {
+                        $q->where('type', 'stars');
+                    });
+                }
+            ], 'answer_value')
             ->with([
                 'parentOrder.orderStatus',
                 'parentOrder.pickup',
@@ -1306,8 +1307,19 @@ class OrderController extends Controller
             $orderDataProducts = [];
             // what each line can still give back (return / exchange dialog)
             $returnLines = ReturnRules::lines($orderProducts);
-            $orderProducts->activeOrderPvas->map(function ($orderPva) use (&$orderDataProducts, $returnLines) {
+            $orderPvasList = in_array((int) $orderProducts->order_status_id, [2, 3], true)
+                ? ($orderProducts->inactiveOrderPvas->isNotEmpty()
+                    ? ($orderProducts->activeOrderPvas->isNotEmpty()
+                        ? $orderProducts->inactiveOrderPvas->concat($orderProducts->activeOrderPvas)
+                        : $orderProducts->inactiveOrderPvas)
+                    : ($orderProducts->activeOrderPvas->isNotEmpty() ? $orderProducts->activeOrderPvas : $orderProducts->orderPvas))
+                : $orderProducts->activeOrderPvas;
+
+            $orderPvasList->map(function ($orderPva) use (&$orderDataProducts, $returnLines) {
                 // Créer un tableau avec les données de base du produit
+                if (!$orderPva->productVariationAttribute || !$orderPva->productVariationAttribute->product) {
+                    return;
+                }
 
                 if (!isset($orderDataProducts[$orderPva->id]))
                     $orderDataProducts[$orderPva->id] = [
@@ -1316,28 +1328,28 @@ class OrderController extends Controller
                         "reference" => $orderPva->productVariationAttribute->product->reference,
                         "created_at" => $orderPva->created_at,
                         "principalImage" => $orderPva->productVariationAttribute->product->principalImage,
-                        "productType" => $orderPva->productVariationAttribute->product->productType->only(['id', 'title']),
+                        "productType" => $orderPva->productVariationAttribute->product->productType ? $orderPva->productVariationAttribute->product->productType->only(['id', 'title']) : null,
                     ];
                 $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id] = [
                     "id" => $orderPva->id,
                     "price" => $orderPva->price,
                     "discount" => $orderPva->discount,
                     "quantity" => $orderPva->quantity,
-                    "order_status_id" => $orderPva->orderStatus->only('id', 'title'),
+                    "order_status_id" => $orderPva->orderStatus ? $orderPva->orderStatus->only('id', 'title') : null,
                     "returned_quantity" => $returnLines[$orderPva->id]['returned_quantity'] ?? 0,
                     "returnable_quantity" => $returnLines[$orderPva->id]['returnable_quantity'] ?? 0,
                     "refund_unit_price" => $returnLines[$orderPva->id]['refund_unit_price'] ?? (float) $orderPva->price,
                 ];
                 $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['offers'] = FilterController::filterselect(new Request(), 'offers', $orderPva->id)['data'];
                 $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedOffer'] = null;
-                if ($orderPva->offer_variation_id)
+                if ($orderPva->offer_variation_id && $orderPva->offerableVariation && $orderPva->offerableVariation->childOfferableVariations->first())
                     $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedOffer'] = [
                         "id" => $orderPva->offerableVariation->childOfferableVariations->first()->offerable->offer->id,
                         "title" => $orderPva->offerableVariation->childOfferableVariations->first()->offerable->offer->title,
                     ];
                 $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedAttributes'] = $orderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
                     // Vérifier si l'attribut a un type
-                    if ($childVariationAttribute->attribute->typeAttribute) {
+                    if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute) {
                         // Retourner les données formatées pour chaque attribut de variation
                         return [
                             "id" => $childVariationAttribute->id,
@@ -1350,7 +1362,7 @@ class OrderController extends Controller
                 $orderDataProducts[$orderPva->id]['attributes'] = $orderPva->productVariationAttribute->product->productVariationAttributes->flatMap(function ($productVariationAttribute) {
                     return $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
                         // Vérifier si l'attribut a un type
-                        if ($childVariationAttribute->attribute->typeAttribute) {
+                        if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute) {
                             // Retourner les données formatées pour chaque attribut de variation
                             return [
                                 "id" => $childVariationAttribute->attribute->id,
