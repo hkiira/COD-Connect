@@ -118,6 +118,7 @@ class OrderController extends Controller
                 'assignee.user',
                 'claimer.user',
                 'afraOperation',
+                'woocommerceOrderLink.store',
                 ...self::orderPvaPaths('activeOrderPvas'),
                 ...self::orderPvaPaths('inactiveOrderPvas'),
             ])
@@ -281,6 +282,7 @@ class OrderController extends Controller
                     ];
                 });
             }
+            $orderData['woocommerce'] = self::formatWooCommerce($data);
             return $orderData;
         });
 
@@ -1240,9 +1242,10 @@ class OrderController extends Controller
             $data['orderInfo']['is_afra'] = (bool) $afraOperation || AfraShippingService::isAfraOrder($order);
 
             // workspace fields; unanswered calls are counted from the history (the "no answer" reasons)
-            $order->load('assignee.user', 'claimer.user', 'afraOperation');
+            $order->load('assignee.user', 'claimer.user', 'afraOperation', 'woocommerceOrderLink.store');
             $data['orderInfo'] = array_merge($data['orderInfo'], self::workspaceFields($order));
             $data['orderInfo']['attempts'] = (int) Order::whereKey($order->id)->selectRaw(OrderReasons::attemptsSql() . ' as attempts')->value('attempts');
+            $data['orderInfo']['woocommerce'] = self::formatWooCommerce($order);
 
             if ($order->shipment) {
                 $data['orderInfo']['shipment'] = $order->shipment->only('id', 'code', 'title');
@@ -1677,10 +1680,11 @@ class OrderController extends Controller
                 );
                 foreach ($ownProducts as $pvaData) {
                     $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
-                    $initial_price = Product::find($productVariationAttribute->product_id)->price->first()->price;
+                    $product = Product::find($productVariationAttribute->product_id);
+                    $initial_price = $product?->price?->first()?->price ?? 0;
                     $productPrice = isset($pvaData['price']) ? $pvaData['price'] : $initial_price;
                     $discount = isset($pvaData['discount']) ? $pvaData['discount'] : 0;
-                    $realPrice = (Product::find($productVariationAttribute->product_id)->orderPvas) ? Product::find($productVariationAttribute->product_id)->orderPvas->first()->price : 0;
+                    $realPrice = $product?->orderPvas?->first()?->price ?? 0;
                     $productVariationAttribute->orders()->attach(
                         $order->id,
                         [
@@ -2271,5 +2275,42 @@ class OrderController extends Controller
                 'message' => 'Google Sheets sync failed: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    public static function formatWooCommerce(Order $order): ?array
+    {
+        $link = $order->relationLoaded('woocommerceOrderLink')
+            ? $order->woocommerceOrderLink
+            : $order->woocommerceOrderLink()->with('store')->first();
+
+        $wcOrderId = $link?->wc_order_id ?? (is_numeric($order->meta) ? (int) $order->meta : null);
+
+        if (! $wcOrderId) {
+            return null;
+        }
+
+        $store = $link?->store;
+        if (! $store && $order->account_id) {
+            $store = \App\Models\WooCommerce\Store::where('account_id', $order->account_id)->first();
+        }
+
+        $siteUrl = null;
+        $editUrl = null;
+        if ($store && ! empty($store->base_url)) {
+            $siteUrl = preg_replace('#/wp-json.*$#i', '', rtrim((string) $store->base_url, '/'));
+            $editUrl = "{$siteUrl}/wp-admin/post.php?post={$wcOrderId}&action=edit";
+        }
+
+        return [
+            'wc_order_id' => $wcOrderId,
+            'store_id' => $store?->id,
+            'store_name' => $store?->name ?? 'WooCommerce',
+            'store_url' => $siteUrl,
+            'edit_url' => $editUrl,
+            'last_wc_status' => $link?->last_wc_status,
+            'last_pushed_status' => $link?->last_pushed_status,
+            'last_pushed_at' => $link?->last_pushed_at?->toIso8601String(),
+            'imported_at' => $link?->imported_at?->toIso8601String(),
+        ];
     }
 }
