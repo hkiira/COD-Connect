@@ -279,4 +279,9 @@ class Order extends Model
     {
         return $this->hasOne(AfraOrderOperation::class);
     }
+
+    public function woocommerceOrderLink()
+    {
+        return $this->hasOne(\App\Models\WooCommerce\OrderLink::class, 'order_id');
+    }
 }
