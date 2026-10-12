@@ -1680,10 +1680,11 @@ class OrderController extends Controller
                 );
                 foreach ($ownProducts as $pvaData) {
                     $productVariationAttribute = ProductVariationAttribute::find($pvaData['id']);
-                    $initial_price = Product::find($productVariationAttribute->product_id)->price->first()->price;
+                    $product = Product::find($productVariationAttribute->product_id);
+                    $initial_price = $product?->price?->first()?->price ?? 0;
                     $productPrice = isset($pvaData['price']) ? $pvaData['price'] : $initial_price;
                     $discount = isset($pvaData['discount']) ? $pvaData['discount'] : 0;
-                    $realPrice = (Product::find($productVariationAttribute->product_id)->orderPvas) ? Product::find($productVariationAttribute->product_id)->orderPvas->first()->price : 0;
+                    $realPrice = $product?->orderPvas?->first()?->price ?? 0;
                     $productVariationAttribute->orders()->attach(
                         $order->id,
                         [

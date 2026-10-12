@@ -879,22 +879,23 @@ class NextController extends Controller
                 $finalPrice = floatval($finalPrice);
                 if ($totalDefaultPrice > 0) {
                     $scale = $finalPrice / $totalDefaultPrice;
-                    foreach ($productsTemp as &$p) {
-                        $p['price'] = round($p['default_price'] * $scale, 2);
+                    foreach ($productsTemp as $idx => $p) {
+                        $productsTemp[$idx]['price'] = round($p['default_price'] * $scale, 2);
                     }
                 } else {
                     $pricePerUnit = $totalQuantity > 0 ? round($finalPrice / $totalQuantity, 2) : 0;
-                    foreach ($productsTemp as &$p) {
-                        $p['price'] = $pricePerUnit;
+                    foreach ($productsTemp as $idx => $p) {
+                        $productsTemp[$idx]['price'] = $pricePerUnit;
                     }
                 }
             } else {
-                foreach ($productsTemp as &$p) {
-                    $p['price'] = isset($p['item']['price']) ? floatval($p['item']['price']) : $p['default_price'];
+                foreach ($productsTemp as $idx => $p) {
+                    $productsTemp[$idx]['price'] = isset($p['item']['price']) ? floatval($p['item']['price']) : $p['default_price'];
                 }
             }
 
             // We will manually sync products to ensure complete replacement.
+            $order->loadMissing('orderPvas');
             $syncData = [];
             foreach ($productsTemp as $p) {
                 $pvaId = $p['pva']->id;
@@ -902,11 +903,13 @@ class NextController extends Controller
                 if (isset($syncData[$pvaId])) {
                     $syncData[$pvaId]['quantity'] += $p['qty'];
                 } else {
+                    $existingOrderPva = $order->orderPvas?->where('product_variation_attribute_id', $pvaId)->first();
+
                     $syncData[$pvaId] = [
                         'quantity' => $p['qty'],
                         'price' => $p['price'],
                         'initial_price' => $p['default_price'],
-                        'realprice' => optional($p['pva']->product?->orderPvas)->first()?->price ?? 0,
+                        'realprice' => $existingOrderPva?->realprice ?? 0,
                         'discount' => 0,
                         'order_status_id' => $order->order_status_id,
                         'account_user_id' => getAccountUser()->id ?? $accountId,
@@ -942,16 +945,16 @@ class NextController extends Controller
                 $order->load(['orderStatus', 'activePvas.product', 'activePvas.variationAttribute.childVariationAttributes.attribute']);
 
                 $finalProducts = $order->activePvas->map(function ($pva) {
-                    $attributes = $pva->variationAttribute?->childVariationAttributes?->map(function ($child) {
+                    $attributes = $pva->variationAttribute?->childVariationAttributes?->filter(fn ($child) => !empty($child->attribute))->map(function ($child) {
                         return [
                             'id' => $child->attribute->id,
                             'title' => $child->attribute->title
                         ];
-                    })->toArray() ?? [];
+                    })->values()->toArray() ?? [];
 
                     return [
                         'id' => $pva->product_id,
-                        'name' => $pva->product->title,
+                        'name' => $pva->product?->title ?? '',
                         'quantity' => $pva->pivot->quantity,
                         'price' => floatval($pva->pivot->price),
                         'attributes' => $attributes
