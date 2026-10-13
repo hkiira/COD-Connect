@@ -551,7 +551,8 @@ class OperationsOverviewService
             ->orderByDesc('pickups.created_at')->limit(5)
             ->selectRaw('pickups.id, pickups.code, pickups.statut, pickups.created_at, carriers.title as carrier,
                 warehouses.title as warehouse,
-                (SELECT COUNT(*) FROM orders o WHERE o.pickup_id = pickups.id AND o.deleted_at IS NULL) as orders_count')
+                (SELECT COUNT(*) FROM orders o WHERE o.pickup_id = pickups.id AND o.deleted_at IS NULL) as orders_count,
+                (SELECT COUNT(*) FROM orders o WHERE o.pickup_id = pickups.id AND o.deleted_at IS NULL AND o.shipping_code IS NOT NULL AND o.shipping_code != "") as synced_count')
             ->get()
             ->map(fn ($p) => [
                 'id'           => $p->id,
@@ -559,6 +560,7 @@ class OperationsOverviewService
                 'carrier'      => $p->carrier ?? 'N/A',
                 'warehouse'    => $p->warehouse,
                 'orders_count' => (int) $p->orders_count,
+                'synced_count' => (int) ($p->synced_count ?? 0),
                 'status'       => self::PICKUP_STATUSES[$p->statut] ?? 'unknown',
                 'created_at'   => Carbon::parse($p->created_at)->toDateString(),
             ]);

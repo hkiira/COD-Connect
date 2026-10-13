@@ -392,20 +392,42 @@ class AfraShippingController extends Controller
 
     public function reconcilePayment(Request $request, AfraOperationsService $operations)
     {
-        $data = $request->validate(['text' => 'required|string|max:500000']);
+        $data = $request->validate([
+            'text'                  => 'nullable|string|max:1000000',
+            'items'                 => 'nullable|array',
+            'items.*.shipping_code' => 'required_with:items|string',
+            'items.*.total'         => 'nullable|numeric',
+            'items.*.livraison'     => 'nullable|numeric',
+            'items.*.status'        => 'nullable|string',
+            'items.*.phone'         => 'nullable|string',
+            'pdf_total'             => 'nullable|numeric',
+            'pdf_livraison_total'   => 'nullable|numeric',
+            'invoice_number'        => 'nullable|string',
+            'invoice_date'          => 'nullable|string',
+        ]);
 
-        return $this->attempt(fn () => $operations->reconcilePayment($this->accountId(), $data['text']));
+        return $this->attempt(fn () => $operations->reconcilePayment(
+            $this->accountId(),
+            $data['text'] ?? '',
+            $data['items'] ?? [],
+            isset($data['pdf_total']) ? (float) $data['pdf_total'] : null,
+            isset($data['pdf_livraison_total']) ? (float) $data['pdf_livraison_total'] : null,
+            $data['invoice_number'] ?? null,
+            $data['invoice_date'] ?? null
+        ));
     }
 
     public function createPayment(Request $request, AfraOperationsService $operations)
     {
         $data = $request->validate([
-            'warehouse_id' => 'required|integer',
-            'lines'        => 'required|array|min:1',
-            'lines.*.id'   => 'required|integer',
-            'lines.*.fee'  => 'required|numeric|min:0',
-            'received'     => 'required|numeric|min:0',
-            'title'        => 'nullable|string|max:255',
+            'warehouse_id'         => 'required|integer',
+            'lines'                => 'required|array|min:1',
+            'lines.*.id'           => 'required|integer',
+            'lines.*.fee'          => 'required|numeric|min:0',
+            'lines.*.update_price' => 'nullable|boolean',
+            'lines.*.new_price'    => 'nullable|numeric',
+            'received'             => 'required|numeric|min:0',
+            'title'                => 'nullable|string|max:255',
         ]);
 
         return $this->attempt(fn () => $operations->createPayment(

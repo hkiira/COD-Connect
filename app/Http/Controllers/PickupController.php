@@ -57,7 +57,11 @@ class PickupController extends Controller
             $total = 0;
             $shipping = 0;
             $analytics = ['canceled' => 0, 'delivred' => 0, 'shipped' => 0];
-            $pickup->orders->map(function ($order) use (&$total, &$shipping, &$analytics) {
+            $syncedCount = 0;
+            $pickup->orders->map(function ($order) use (&$total, &$shipping, &$analytics, &$syncedCount) {
+                if (!empty($order->shipping_code)) {
+                    $syncedCount++;
+                }
                 $analytics['canceled'] += (in_array($order->order_status_id, [5, 6])) ? 1 : 0;
                 $analytics['delivred'] += (in_array($order->order_status_id, [7, 10])) ? 1 : 0;
                 $analytics['shipped'] += (in_array($order->order_status_id, [8, 9, 11])) ? 1 : 0;
@@ -66,10 +70,14 @@ class PickupController extends Controller
                     $total += ($orderPva->quantity * $orderPva->price);
                 });
             });
+            $ordersCount = $pickup->orders->count();
             $pickupData['carrier'] = $pickup->carrier;
             $pickupData['warehouse'] = ($pickup->warehouse) ? $pickup->warehouse->only('id', 'title') : "null";
             $pickupData['collector'] = ($pickup->collector_id) ? $pickup->collector->only('id', 'name') : null;
-            $pickupData['count'] = $pickup->orders->count();
+            $pickupData['count'] = $ordersCount;
+            $pickupData['orders_count'] = $ordersCount;
+            $pickupData['synced_count'] = $syncedCount;
+            $pickupData['unsynced_count'] = max(0, $ordersCount - $syncedCount);
             $pickupData['total'] = $total;
             $pickupData['shipping'] = $shipping; 
             $pickupData['analytics'] = $analytics;
