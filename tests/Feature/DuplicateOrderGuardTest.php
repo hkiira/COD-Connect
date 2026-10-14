@@ -145,5 +145,9 @@ class DuplicateOrderGuardTest extends TestCase
         // another quantity is another order
         $more = $this->createPayload(['0' => ['products' => [['quantity' => 2]]]]);
         $this->postJson('/api/orders', $more)->assertOk()->assertJsonPath('statut', 1);
+
+        // forcing creation bypasses duplicate refusal
+        $forced = $this->createPayload(['0' => ['force_create' => 1, 'customer' => ['phones' => [['title' => '0600099911']]]]]);
+        $this->postJson('/api/orders', $forced)->assertOk()->assertJsonPath('statut', 1);
     }
 }

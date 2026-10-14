@@ -11,6 +11,10 @@ class Product extends Model
     use SoftDeletes;
     protected $dates = ['deleted_at'];
 
+    public const STATUS_INACTIVE = 0;
+    public const STATUS_ACTIVE = 1;
+    public const STATUS_DRAFT = 2;
+
     protected $fillable = [
         'reference',
         'code',

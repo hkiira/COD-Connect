@@ -386,7 +386,7 @@ class CustomerController extends Controller
             ->whereHas('pickup', fn ($q) => $q->where('carrier_id', \App\Services\AfraShippingClient::carrierId()))->get();
         $before = $afraOrders->mapWithKeys(fn ($order) => [$order->id => $afraService->fingerprint($order)]);
 
-        DB::transaction(function () use ($data, $customer) {
+        DB::transaction(function () use ($data, $customer, $isOrder) {
             $item = $data[0];
             $customer->update(\Illuminate\Support\Arr::only($item, ['name', 'email', 'customer_type_id', 'note']));
 
@@ -401,15 +401,25 @@ class CustomerController extends Controller
                             $phoneIds[] = $phone->id;
                         }
                     } else {
-                        $newPhone = $customer->phones()->create([
-                            'title' => $phoneData['title'],
-                            'account_id' => $customer->account_id,
-                        ]);
-                        $phoneIds[] = $newPhone->id;
+                        $existingPhone = $customer->phones()
+                            ->where('title', $phoneData['title'])
+                            ->first();
+
+                        if ($existingPhone) {
+                            $phoneIds[] = $existingPhone->id;
+                        } else {
+                            $newPhone = $customer->phones()->create([
+                                'title' => $phoneData['title'],
+                                'account_id' => $customer->account_id,
+                            ]);
+                            $phoneIds[] = $newPhone->id;
+                        }
                     }
                 }
-                // Remove any phones not in the request
-                $customer->phones()->whereNotIn('phones.id', $phoneIds)->delete();
+                // Remove any phones not in the request only when directly editing customer, never when placing an order
+                if (!$isOrder) {
+                    $customer->phones()->whereNotIn('phones.id', $phoneIds)->delete();
+                }
             }
 
             // Sync Addresses
@@ -423,12 +433,25 @@ class CustomerController extends Controller
                             $addressIds[] = $address->id;
                         }
                     } else {
-                        $newAddress = $customer->addresses()->create($addressData);
-                        $addressIds[] = $newAddress->id;
+                        $title = trim($addressData['title'] ?? '');
+                        $cityId = $addressData['city_id'] ?? null;
+                        $existingAddress = $customer->addresses()
+                            ->where('title', $title)
+                            ->when($cityId !== null, fn ($query) => $query->where('city_id', $cityId))
+                            ->first();
+
+                        if ($existingAddress) {
+                            $addressIds[] = $existingAddress->id;
+                        } else {
+                            $newAddress = $customer->addresses()->create($addressData);
+                            $addressIds[] = $newAddress->id;
+                        }
                     }
                 }
-                // Remove addresses not in the request
-                $customer->addresses()->whereNotIn('addresses.id', $addressIds)->delete();
+                // Remove addresses not in the request only when directly editing customer, never when placing an order
+                if (!$isOrder) {
+                    $customer->addresses()->whereNotIn('addresses.id', $addressIds)->delete();
+                }
             }
         });
 

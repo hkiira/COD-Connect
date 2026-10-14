@@ -14,6 +14,9 @@ use App\Models\Pickup;
 use App\Models\Carrier;
 use App\Models\Collector;
 use App\Support\Orders\OrderOwnership;
+use App\Support\Orders\OrderStatus;
+use App\Models\OrderComment;
+use App\Models\WarehousePva;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -497,13 +500,28 @@ class PickupController extends Controller
                 $orderData['customer']['address'] = $order->addresses->sortByDesc('id')->values()->map(function ($address) {
                     return $address->only('id', 'title', 'city');
                 });
+                $warehouse = Warehouse::find($pickup->warehouse_id);
+                $fromWarehouseParent = $warehouse ? $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first() : null;
+                $from_warehouse = $fromWarehouseParent ? $fromWarehouseParent->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first() : null;
+                $from_warehouse_id = $from_warehouse ? $from_warehouse->id : null;
+
                 $total = 0;
-                $orderData['products'] = $order->productVariationAttributes->map(function ($pva) use (&$total) {
+                $hasOutOfStock = false;
+                $orderData['products'] = $order->productVariationAttributes->map(function ($pva) use (&$total, &$hasOutOfStock, $from_warehouse_id) {
                     $total += $pva->pivot->price * $pva->pivot->quantity;
+                    $currentStock = $from_warehouse_id
+                        ? (float) (WarehousePva::where(['warehouse_id' => $from_warehouse_id, 'product_variation_attribute_id' => $pva->id])->value('quantity') ?? 0)
+                        : (float) (WarehousePva::where('product_variation_attribute_id', $pva->id)->sum('quantity') ?? 0);
+                    $isDeficit = $pva->pivot->quantity > $currentStock;
+                    if ($isDeficit) {
+                        $hasOutOfStock = true;
+                    }
                     $productInfo = [
                         'id' => $pva->id,
                         'price' => $pva->pivot->price,
                         'quantity' => $pva->pivot->quantity,
+                        'stock' => $currentStock,
+                        'is_out_of_stock' => $isDeficit,
                         'images' => $pva->product->images,
                         'productType' => $pva->product->productType,
                         'product' => $pva->product->title,
@@ -518,6 +536,7 @@ class PickupController extends Controller
                     ];
                     return $productInfo;
                 });
+                $orderData['has_out_of_stock'] = $hasOutOfStock;
                 $orderData['total'] = $total;
                 $orderData['discount'] = $order->discount;
                 $orderData['brand'] = $order->brandSource->brand->only('id', 'title', 'images');
@@ -696,12 +715,22 @@ class PickupController extends Controller
                     return $address->only('id', 'title', 'city');
                 });
                 $total = 0;
-                $orderData['products'] = $data->productVariationAttributes->map(function ($pva) use (&$total) {
+                $hasOutOfStock = false;
+                $orderData['products'] = $data->productVariationAttributes->map(function ($pva) use (&$total, &$hasOutOfStock, $from_warehouse_id) {
                     $total += $pva->pivot->price * $pva->pivot->quantity;
+                    $currentStock = $from_warehouse_id
+                        ? (float) (WarehousePva::where(['warehouse_id' => $from_warehouse_id, 'product_variation_attribute_id' => $pva->id])->value('quantity') ?? 0)
+                        : (float) (WarehousePva::where('product_variation_attribute_id', $pva->id)->sum('quantity') ?? 0);
+                    $isDeficit = $pva->pivot->quantity > $currentStock;
+                    if ($isDeficit) {
+                        $hasOutOfStock = true;
+                    }
                     $productInfo = [
                         'id' => $pva->id,
                         'price' => $pva->pivot->price,
                         'quantity' => $pva->pivot->quantity,
+                        'stock' => $currentStock,
+                        'is_out_of_stock' => $isDeficit,
                         'images' => $pva->product->images,
                         'productType' => $pva->product->productType,
                         'product' => $pva->product->title,
@@ -716,6 +745,7 @@ class PickupController extends Controller
                     ];
                     return $productInfo;
                 });
+                $orderData['has_out_of_stock'] = $hasOutOfStock;
                 $orderData['total'] = $total;
                 $orderData['discount'] = $data->discount;
                 $orderData['brand'] = $data->brandSource->brand->only('id', 'title', 'images');

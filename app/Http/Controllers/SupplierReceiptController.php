@@ -252,7 +252,14 @@ class SupplierReceiptController extends Controller
             $supplierReceipt = SupplierReceipt::create($supplierReceipt_only->all());
             if (isset($request['productVariationAttributes'])) {
                 foreach ($request['productVariationAttributes'] as $pvaData) {
-                    $pva = SupplierPva::where(['supplier_id' => $supplierReceipt->supplier_id, 'product_variation_attribute_id' => $pvaData['id']])->first();
+                    $pva = SupplierPva::firstOrCreate(
+                        ['supplier_id' => $supplierReceipt->supplier_id, 'product_variation_attribute_id' => $pvaData['id']],
+                        [
+                            'price' => $pvaData['price'] ?? 0,
+                            'statut' => 1,
+                            'account_id' => getAccountUser()->account_id,
+                        ]
+                    );
                     SupplierOrderPva::create([
                         'product_variation_attribute_id' => $pva->product_variation_attribute_id,
                         'supplier_receipt_id' => $supplierReceipt->id,
@@ -265,6 +272,15 @@ class SupplierReceiptController extends Controller
                     ]);
                 }
                 if ($supplierReceipt->statut == 1) {
+                    // Activate draft products that were received
+                    $pvaIds = collect($request['productVariationAttributes'])->pluck('id')->filter()->all();
+                    if (!empty($pvaIds)) {
+                        $productIds = ProductVariationAttribute::whereIn('id', $pvaIds)->pluck('product_id')->unique()->all();
+                        Product::whereIn('id', $productIds)
+                            ->where('statut', Product::STATUS_DRAFT)
+                            ->update(['statut' => Product::STATUS_ACTIVE, 'updated_at' => now()]);
+                    }
+
                     $receiptData = [
                         'to_warehouse' => $warehouse->id,
                         'statut' => 1,
@@ -585,22 +601,37 @@ class SupplierReceiptController extends Controller
                             $this->validateReceipt($isExist, $pvaData, $supplierReceipt);
                         }
                     } else {
-                        //verifier si le produit exist dans les les produits du fournisseur
-                        $pva = SupplierPva::where(['supplier_id' => $supplierReceipt->supplier_id, 'product_variation_attribute_id' => $pvaData['id'], 'statut' => 1])->first();
-                        if ($pva) {
-                            $newSop = SupplierOrderPva::create([
-                                'product_variation_attribute_id' => $pva->product_variation_attribute_id,
-                                'supplier_receipt_id' => $supplierReceipt->id,
-                                'quantity' => $pvaData["quantity"],
-                                'price' => (isset($pvaData['price'])) ? $pvaData['price'] : $pva->price,
-                                'account_user_id' => getAccountUser()->id,
-                                'created_at' => now(),
-                                'updated_at' => now()
-                            ]);
-                            if ($request['validate'] == 1) {
-                                $this->validateReceipt($newSop, $pvaData, $supplierReceipt);
-                            }
+                        // Verifier ou lier si le produit existe dans les produits du fournisseur
+                        $pva = SupplierPva::firstOrCreate(
+                            ['supplier_id' => $supplierReceipt->supplier_id, 'product_variation_attribute_id' => $pvaData['id']],
+                            [
+                                'price' => $pvaData['price'] ?? 0,
+                                'statut' => 1,
+                                'account_id' => getAccountUser()->account_id,
+                            ]
+                        );
+                        $newSop = SupplierOrderPva::create([
+                            'product_variation_attribute_id' => $pva->product_variation_attribute_id,
+                            'supplier_receipt_id' => $supplierReceipt->id,
+                            'quantity' => $pvaData["quantity"],
+                            'price' => (isset($pvaData['price'])) ? $pvaData['price'] : $pva->price,
+                            'account_user_id' => getAccountUser()->id,
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ]);
+                        if ($request['validate'] == 1) {
+                            $this->validateReceipt($newSop, $pvaData, $supplierReceipt);
                         }
+                    }
+                }
+
+                if (!empty($request['validate']) && $request['validate'] == 1) {
+                    $pvaIds = collect($request['productVariationAttributes'])->pluck('id')->filter()->all();
+                    if (!empty($pvaIds)) {
+                        $productIds = ProductVariationAttribute::whereIn('id', $pvaIds)->pluck('product_id')->unique()->all();
+                        Product::whereIn('id', $productIds)
+                            ->where('statut', Product::STATUS_DRAFT)
+                            ->update(['statut' => Product::STATUS_ACTIVE, 'updated_at' => now()]);
                     }
                 }
             }

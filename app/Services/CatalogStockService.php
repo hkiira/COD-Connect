@@ -29,10 +29,11 @@ class CatalogStockService
      *
      * @return array{summary: array<string,int>, items: array<int,array<string,mixed>>}
      */
-    public function alerts(int $accountId, int $limit = 200): array
+    public function alerts(int $accountId, int $limit = 200, ?int $windowDays = null, ?int $targetCoverDays = null): array
     {
         $defaultThreshold = (int) config('inventory.default_low_stock_threshold', 10);
-        $window = max(1, (int) config('inventory.velocity_window_days', 30));
+        $window = max(1, $windowDays ?? (int) config('inventory.velocity_window_days', 30));
+        $coverDays = max(1, $targetCoverDays ?? $window);
         $statuses = implode(',', self::DEMAND_STATUSES);
         $label = self::VARIATION_LABEL_SQL;
 
@@ -47,14 +48,20 @@ class CatalogStockService
                 COALESCE(NULLIF(p.low_stock_threshold, 0), ?) as threshold,
                 COALESCE(SUM(w.quantity), 0) as stock,
                 $label as variation,
+                (SELECT s.id FROM suppliers s JOIN supplier_pva sp ON sp.supplier_id = s.id WHERE sp.product_variation_attribute_id = pva.id AND sp.statut = 1 ORDER BY sp.id DESC LIMIT 1) as supplier_id,
+                (SELECT s.title FROM suppliers s JOIN supplier_pva sp ON sp.supplier_id = s.id WHERE sp.product_variation_attribute_id = pva.id AND sp.statut = 1 ORDER BY sp.id DESC LIMIT 1) as supplier_name,
+                (SELECT sp.price FROM supplier_pva sp WHERE sp.product_variation_attribute_id = pva.id AND sp.statut = 1 ORDER BY sp.id DESC LIMIT 1) as supplier_price,
                 (SELECT COALESCE(SUM(op.quantity), 0) FROM order_pva op JOIN orders o ON o.id = op.order_id
                     WHERE op.product_variation_attribute_id = pva.id AND op.deleted_at IS NULL AND o.deleted_at IS NULL
                     AND o.account_id = ? AND o.order_status_id IN ($statuses)
-                    AND o.created_at >= DATE_SUB(NOW(), INTERVAL $window DAY)) as sold", [$defaultThreshold, $accountId])
+                    AND o.created_at >= DATE_SUB(NOW(), INTERVAL $window DAY)) as sold,
+                (SELECT COALESCE(SUM(op.quantity), 0) FROM order_pva op JOIN orders o ON o.id = op.order_id
+                    WHERE op.product_variation_attribute_id = pva.id AND op.deleted_at IS NULL AND o.deleted_at IS NULL
+                    AND o.account_id = ? AND o.order_status_id IN (5, 6, 9)) as in_delivery", [$defaultThreshold, $accountId, $accountId])
             ->havingRaw('stock <= threshold')
             ->get();
 
-        $items = $rows->map(function ($r) use ($window) {
+        $items = $rows->map(function ($r) use ($window, $coverDays) {
             $velocity = round($r->sold / $window, 2);
             $stock = (float) $r->stock;
 
@@ -65,10 +72,14 @@ class CatalogStockService
                 'product_title'    => $r->product_title,
                 'variation'        => $r->variation,
                 'stock'            => $stock,
+                'in_delivery'      => (float) $r->in_delivery,
                 'threshold'        => (int) $r->threshold,
                 'daily_velocity'   => $velocity,
                 'days_of_cover'    => $velocity > 0 && $stock > 0 ? round($stock / $velocity, 1) : null,
-                'suggested_reorder' => (int) max(0, ceil($velocity * $window - max($stock, 0))),
+                'suggested_reorder' => (int) max(0, ceil($velocity * $coverDays - max($stock, 0))),
+                'supplier_id'      => $r->supplier_id ? (int) $r->supplier_id : null,
+                'supplier_name'    => $r->supplier_name,
+                'supplier_price'   => $r->supplier_price !== null ? (float) $r->supplier_price : null,
                 'level'            => $stock < 0 ? 'negative' : ($stock == 0 ? 'out' : 'low'),
             ];
         });
@@ -83,6 +94,8 @@ class CatalogStockService
                 'low'      => $items->where('level', 'low')->count(),
             ],
             'items' => $sorted->take($limit)->all(),
+            'window_days' => $window,
+            'cover_days' => $coverDays,
         ];
     }
 
@@ -108,10 +121,14 @@ class CatalogStockService
             ->orderBy('w.quantity')->limit($limit)
             ->selectRaw("w.id as warehouse_pva_id, w.warehouse_id, wh.title as warehouse, pva.id as pva_id, p.id as product_id,
                 p.title as product_title, w.quantity as stock, $label as variation,
-                (SELECT COALESCE(SUM(mp.stock_applied_quantity), 0) FROM mouvement_pva mp
-                    WHERE mp.product_variation_attribute_id = pva.id AND mp.stock_to_warehouse_id = w.warehouse_id AND mp.deleted_at IS NULL) as entries,
-                (SELECT COALESCE(SUM(mp.stock_applied_quantity), 0) FROM mouvement_pva mp
-                    WHERE mp.product_variation_attribute_id = pva.id AND mp.stock_from_warehouse_id = w.warehouse_id AND mp.deleted_at IS NULL) as exits,
+                (SELECT COALESCE(SUM(mp.quantity), 0) FROM mouvement_pva mp
+                    JOIN mouvements m ON m.id = mp.mouvement_id
+                    WHERE mp.product_variation_attribute_id = pva.id AND m.to_warehouse = w.warehouse_id
+                    AND mp.deleted_at IS NULL AND m.deleted_at IS NULL) as entries,
+                (SELECT COALESCE(SUM(mp.quantity), 0) FROM mouvement_pva mp
+                    JOIN mouvements m ON m.id = mp.mouvement_id
+                    WHERE mp.product_variation_attribute_id = pva.id AND m.from_warehouse = w.warehouse_id
+                    AND mp.deleted_at IS NULL AND m.deleted_at IS NULL) as exits,
                 (SELECT COALESCE(SUM(op.quantity), 0) FROM order_pva op JOIN orders o ON o.id = op.order_id
                     WHERE op.product_variation_attribute_id = pva.id AND o.account_id = ? AND o.order_status_id = 11
                     AND op.deleted_at IS NULL AND o.deleted_at IS NULL) as returned_units", [$accountId])
