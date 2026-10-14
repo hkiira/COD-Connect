@@ -248,6 +248,9 @@ class ReturnController extends Controller
                     InventoryController::store(new Request($inventoryAfter));
                 }
                 foreach ($request['productVariationAttributes'] as $pvaData) {
+                    $damagedQty = isset($pvaData['damaged_quantity']) ? (float)$pvaData['damaged_quantity'] : 0;
+                    $usableQty = max(0, (float)$pvaData['quantity'] - $damagedQty);
+
                     $newSop = MouvementPva::create([
                         'product_variation_attribute_id' => $pvaData['id'],
                         'mouvement_id' => $return->id,
@@ -258,8 +261,10 @@ class ReturnController extends Controller
                         'sop_type_id' => 1,
                         'updated_at' => now()
                     ]);
-                    if ($return->statut == 1) {
-                        WarehouseController::mouve($newSop, $return);
+                    if ($return->statut == 1 && $usableQty > 0) {
+                        $restockMouvement = clone $newSop;
+                        $restockMouvement->quantity = $usableQty;
+                        WarehouseController::mouve($restockMouvement, $return);
                     }
                     $orders = [];
                     foreach ($pvaData['orders'] as $order) {
@@ -391,17 +396,21 @@ class ReturnController extends Controller
                     $returnProduct->delete();
                 });
                 foreach ($request['productVariationAttributes'] as $pvaData) {
+                    $damagedQty = isset($pvaData['damaged_quantity']) ? (float)$pvaData['damaged_quantity'] : 0;
+                    $usableQty = max(0, (float)$pvaData['quantity'] - $damagedQty);
+
                     $isExist = MouvementPva::where(['product_variation_attribute_id' => $pvaData['id'], 'mouvement_id' => $return->id, 'statut' => 1])->first();
                     if ($isExist) {
                         $isExist->update([
                             'quantity' => (isset($pvaData['quantity'])) ? $pvaData['quantity'] : $isExist->quantity,
                             'price' => (isset($pvaData['price'])) ? $pvaData['price'] : $isExist->price,
                         ]);
-                        if (isset($request['validate']) && $request['validate'] == 1) {
-                            WarehouseController::mouve($isExist, $return);
+                        if (isset($request['validate']) && $request['validate'] == 1 && $usableQty > 0) {
+                            $restockLine = clone $isExist;
+                            $restockLine->quantity = $usableQty;
+                            WarehouseController::mouve($restockLine, $return);
                         }
                     } else {
-
                         $newSop = MouvementPva::create([
                             'product_variation_attribute_id' => $pvaData['id'],
                             'mouvement_id' => $return->id,
@@ -411,8 +420,10 @@ class ReturnController extends Controller
                             'created_at' => now(),
                             'updated_at' => now()
                         ]);
-                        if (isset($request['validate']) && $request['validate'] == 1) {
-                            WarehouseController::mouve($newSop, $return);
+                        if (isset($request['validate']) && $request['validate'] == 1 && $usableQty > 0) {
+                            $restockLine = clone $newSop;
+                            $restockLine->quantity = $usableQty;
+                            WarehouseController::mouve($restockLine, $return);
                         }
                     }
                 }

@@ -2,6 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\SupplierOrder;
+use App\Models\SupplierOrderPva;
+use App\Models\Warehouse;
+use App\Http\Controllers\DefaultCodeController;
 use App\Services\CatalogImportExportService;
 use App\Services\CatalogStockService;
 use Illuminate\Http\JsonResponse;
@@ -28,9 +32,60 @@ class CatalogToolsController extends Controller
 
     // region stock
 
-    public function stockAlerts(): JsonResponse
+    public function stockAlerts(Request $request): JsonResponse
     {
-        return response()->json(['status' => 'success', 'data' => $this->stock->alerts($this->accountId())]);
+        $window = $request->filled('window') ? (int) $request->input('window') : null;
+        $coverDays = $request->filled('cover_days') ? (int) $request->input('cover_days') : null;
+        $limit = (int) $request->input('limit', 200);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $this->stock->alerts($this->accountId(), $limit, $window, $coverDays),
+        ]);
+    }
+
+    public function generateSupplierOrder(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'supplier_id' => ['required', 'integer'],
+            'warehouse_id' => ['nullable', 'integer'],
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.pva_id' => ['required', 'integer'],
+            'items.*.quantity' => ['required', 'numeric', 'min:1'],
+            'items.*.price' => ['nullable', 'numeric'],
+        ]);
+
+        $accountId = $this->accountId();
+        $accountUserId = getAccountUser()->id;
+        $warehouseId = $data['warehouse_id'] ?? Warehouse::where(['account_id' => $accountId, 'warehouse_type_id' => 1, 'statut' => 1])->value('id');
+
+        $order = SupplierOrder::create([
+            'code' => DefaultCodeController::getAccountCode('SupplierOrder', $accountId),
+            'supplier_id' => $data['supplier_id'],
+            'account_user_id' => $accountUserId,
+            'warehouse_id' => $warehouseId,
+            'statut' => 1,
+        ]);
+
+        foreach ($data['items'] as $item) {
+            SupplierOrderPva::create([
+                'supplier_order_id' => $order->id,
+                'product_variation_attribute_id' => $item['pva_id'],
+                'quantity' => $item['quantity'],
+                'price' => $item['price'] ?? 0,
+                'sop_type_id' => 1,
+                'statut' => 1,
+                'account_user_id' => $accountUserId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $order->load('supplier'),
+            'message' => 'Supplier order generated successfully',
+        ]);
     }
 
     public function stockReconciliation(): JsonResponse

@@ -861,6 +861,10 @@ class OrderController extends Controller
             // Create all orders in a single transaction to keep data consistent.
             $orderIds = DB::transaction(function () use ($ordersPayload, $resolvedPvas, $isImport, $accountUser, $accountId, $generateOrderCode, $duplicateGuard) {
                 return $ordersPayload->map(function ($request, $index) use ($resolvedPvas, $isImport, $accountUser, $accountId, $generateOrderCode, $duplicateGuard) {
+                    $forceCreate = !empty($request['force_create']) || !empty($request['force'])
+                        || ($request['force_create'] ?? null) === '1' || ($request['force_create'] ?? null) === 'true'
+                        || ($request['force_create'] ?? null) === true;
+
                     // Duplicate guard (non-import creation only): same phone, same products and quantities
                     // within a few minutes. It runs before the customer is created or updated (an update can rewrite the
                     // phone title). The lock makes the check and the insert one step for concurrent requests.
@@ -874,9 +878,11 @@ class OrderController extends Controller
                             // kept until the transaction ends, so a concurrent request sees our order
                             $duplicateGuard->releaseAfterTransaction();
 
-                            $duplicate = $duplicateGuard->findDuplicate($accountId, $phoneTitles, $resolvedPvas[$index] ?? [], (int) config('orders.duplicate_window_minutes', 5));
-                            if ($duplicate) {
-                                throw new \Exception('Duplicate order detected for phone number(s): ' . implode(', ', $phoneTitles) . ' (order ' . $duplicate->code . ')');
+                            if (!$forceCreate) {
+                                $duplicate = $duplicateGuard->findDuplicate($accountId, $phoneTitles, $resolvedPvas[$index] ?? [], (int) config('orders.duplicate_window_minutes', 5));
+                                if ($duplicate) {
+                                    throw new \Exception('Duplicate order detected for phone number(s): ' . implode(', ', $phoneTitles) . ' (order ' . $duplicate->code . ')');
+                                }
                             }
                         }
                     }
@@ -892,6 +898,7 @@ class OrderController extends Controller
                                 $message = isset($payload[1]) ? json_encode($payload[1]) : 'Customer update failed.';
                                 throw new \Exception($message);
                             }
+                            $customer->load('addresses', 'phones');
                         }
                     } elseif (isset($request['customer']['phones'])) {
                         $request['customer']['customer_type_id'] = $request['customer']['customer_type_id'] ?? 1;
@@ -927,6 +934,7 @@ class OrderController extends Controller
                                 $message = isset($payload[1]) ? json_encode($payload[1]) : 'Customer update failed.';
                                 throw new \Exception($message);
                             }
+                            $customer->load('addresses', 'phones');
                         } else {
                             $customerData = new Request([$request['customer']]);
                             $customerResult = CustomerController::store($customerData, 1);
@@ -939,6 +947,7 @@ class OrderController extends Controller
                             }
 
                             $customer = $customerResult->first();
+                            $customer?->load('addresses', 'phones');
                         }
                     }
 
@@ -991,7 +1000,17 @@ class OrderController extends Controller
 
                         // Attach customer addresses to the order and set city from matched address.
                         foreach (($request['customer']['addresses'] ?? []) as $addressData) {
-                            $customerAddress = $customer->addresses->where('title', $addressData['title'] ?? null)->first();
+                            $targetTitle = trim($addressData['title'] ?? '');
+                            $customerAddress = $customer->addresses->first(function ($addr) use ($targetTitle, $addressData) {
+                                if (trim($addr->title) !== $targetTitle) {
+                                    return false;
+                                }
+                                if (isset($addressData['city_id']) && $addr->city_id != $addressData['city_id']) {
+                                    return false;
+                                }
+                                return true;
+                            }) ?? $customer->addresses->where('title', $addressData['title'] ?? null)->first();
+
                             if ($customerAddress) {
                                 $order->update(['city_id' => $customerAddress->city_id]);
                                 $order->addresses()->syncWithoutDetaching([$customerAddress->id => ['statut' => 1, 'created_at' => now(), 'updated_at' => now()]]);

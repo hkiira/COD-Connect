@@ -103,7 +103,8 @@ use App\Http\Controllers\{
     AnalyticsController,
     AsapDeliveryWebhookController,
     WooCommerceWebhookController,
-    NextController
+    NextController,
+    ProductAnalyticsController
 };
 use App\Http\Controllers\API\RegisterController;
 use App\Models\ExpenseType;
@@ -230,6 +231,8 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('offers/create', [OfferController::class, 'createData']);
     Route::resource('offers', OfferController::class)->except(['create']);
     Route::post('products/{id}/variation-images', [ProductController::class, 'updateVariationImages']);
+    Route::get('products/{id}/movements', [ProductAnalyticsController::class, 'movements']);
+    Route::get('products/{id}/performance', [ProductAnalyticsController::class, 'performance']);
     Route::resource('products', ProductController::class);
     Route::resource('variation_attributes', VariationAttributesController::class);
     Route::resource('pvas', PVAController::class);
@@ -365,6 +368,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
         Route::get('stock-alerts', [CatalogToolsController::class, 'stockAlerts']);
         Route::get('stock-reconciliation', [CatalogToolsController::class, 'stockReconciliation']);
         Route::post('stock-adjust', [CatalogToolsController::class, 'stockAdjust']);
+        Route::post('generate-supplier-order', [CatalogToolsController::class, 'generateSupplierOrder']);
         Route::get('export', [CatalogToolsController::class, 'export']);
         Route::post('import', [CatalogToolsController::class, 'import']);
         Route::post('bulk-update', [CatalogToolsController::class, 'bulkUpdate']);

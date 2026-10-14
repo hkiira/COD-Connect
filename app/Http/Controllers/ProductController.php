@@ -146,9 +146,22 @@ class ProductController extends Controller
         }
         $request['inAccountUser'] = ['account_user_id', $account];
         if (isset($request['status']) && $request['status'] !== 'all') {
-            $request['statut'] = $request['status'];
+            $mapped = match ($request['status']) {
+                'active', '1', 1 => 1,
+                'inactive', '0', 0 => 0,
+                'draft', '2', 2 => 2,
+                default => $request['status'],
+            };
+            $request['statut'] = $mapped;
         } elseif (isset($request['statut']) && $request['statut'] === 'all') {
             unset($request['statut']);
+        } elseif (isset($request['statut'])) {
+            $request['statut'] = match ($request['statut']) {
+                'active', '1', 1 => 1,
+                'inactive', '0', 0 => 0,
+                'draft', '2', 2 => 2,
+                default => $request['statut'],
+            };
         }
 
         $search = $request['search'] ?? null;
