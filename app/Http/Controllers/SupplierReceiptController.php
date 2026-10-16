@@ -16,6 +16,10 @@ use App\Models\Supplier;
 use App\Models\ProductVariationAttribute;
 use App\Models\ProductSupplier;
 use App\Models\SupplierOrderProduct;
+use App\Models\Mouvement;
+use App\Models\MouvementPva;
+use App\Models\WarehousePva;
+use App\Models\Product;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 
@@ -62,16 +66,28 @@ class SupplierReceiptController extends Controller
             $productData['supplier']['images'] = $supplierReceipt->supplier->images;
             $productData['warehouse'] = $supplierReceipt->warehouse;
             $productData['productVariations'] = $supplierReceipt->productVariationAttributes->map(function ($productVariationAttribute) use (&$total, &$quantity) {
+                $product = $productVariationAttribute->product;
+                $firstImage = $product && $product->images ? $product->images->sortByDesc('created_at')->first() : null;
+                $imagePath = $firstImage ? ($firstImage->photo_dir . $firstImage->photo) : null;
                 $pvaData["id"] = $productVariationAttribute->id;
-                $pvaData["product"] = $productVariationAttribute->product->reference;
+                $pvaData["product_id"] = $product ? $product->id : null;
+                $pvaData["product"] = $product ? $product->reference : '';
+                $pvaData["product_title"] = $product ? $product->title : '';
+                $pvaData["title"] = $product ? $product->title : '';
+                $pvaData["sku"] = $product ? $product->reference : '';
+                $pvaData["images"] = $product && $product->images ? $product->images : [];
+                $pvaData["image"] = $imagePath;
+                $pvaData["thumbnail_url"] = $imagePath;
                 $pvaData["quantity"] = $productVariationAttribute->pivot->quantity;
                 $pvaData["price"] = $productVariationAttribute->pivot->price;
                 $total += $productVariationAttribute->pivot->quantity * $productVariationAttribute->pivot->price;
                 $quantity += $productVariationAttribute->pivot->quantity;
-                $pvaData['variations'] = $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
-                    if ($childVariationAttribute->attribute->typeAttribute)
-                        return ["id" => $childVariationAttribute->id, "type" => $childVariationAttribute->attribute->typeAttribute->title, "value" => $childVariationAttribute->attribute->title];
-                })->values();
+                $pvaData['variations'] = ($productVariationAttribute->variationAttribute && $productVariationAttribute->variationAttribute->childVariationAttributes)
+                    ? $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
+                        if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute)
+                            return ["id" => $childVariationAttribute->id, "type" => $childVariationAttribute->attribute->typeAttribute->title, "value" => $childVariationAttribute->attribute->title];
+                    })->filter()->values()
+                    : [];
                 return $pvaData;
             });
             $productData['total'] = $total;
@@ -271,24 +287,7 @@ class SupplierReceiptController extends Controller
                         'updated_at' => now()
                     ]);
                 }
-                if ($supplierReceipt->statut == 1) {
-                    // Activate draft products that were received
-                    $pvaIds = collect($request['productVariationAttributes'])->pluck('id')->filter()->all();
-                    if (!empty($pvaIds)) {
-                        $productIds = ProductVariationAttribute::whereIn('id', $pvaIds)->pluck('product_id')->unique()->all();
-                        Product::whereIn('id', $productIds)
-                            ->where('statut', Product::STATUS_DRAFT)
-                            ->update(['statut' => Product::STATUS_ACTIVE, 'updated_at' => now()]);
-                    }
-
-                    $receiptData = [
-                        'to_warehouse' => $warehouse->id,
-                        'statut' => 1,
-                        'productVariationAttributes' => $request['productVariationAttributes']
-                    ];
-                    $receipt = ReceiptController::store(new Request($receiptData));
-                    $supplierReceipt->update(['mouvement_id' => $receipt->id]);
-                }
+                self::syncStockForReceipt($supplierReceipt, $request['productVariationAttributes'], $warehouse ? $warehouse->id : null);
             }
 
             $supplierReceipt = SupplierReceipt::find($supplierReceipt->id);
@@ -324,6 +323,7 @@ class SupplierReceiptController extends Controller
                 $pvaData = [
                     "id" => $productVariationAttribute->id,
                     "price" => $productVariationAttribute->pivot->price,
+                    "quantity" => $productVariationAttribute->pivot->quantity,
                     "title" => $productVariationAttribute->product->title,
                     "created_at" => $productVariationAttribute->product->created_at,
                     "statut" => $productVariationAttribute->product->statut,
@@ -348,7 +348,7 @@ class SupplierReceiptController extends Controller
             });
             $pvas = [];
             foreach ($productDatas as $key => $productData) {
-                $pvas[$productData['product_id']][] = ["id" => $productData["id"], "price" => $productData["price"], "variations" => $productData["variations"]];
+                $pvas[$productData['product_id']][] = ["id" => $productData["id"], "price" => $productData["price"], "quantity" => $productData["quantity"], "variations" => $productData["variations"]];
             }
             $products = [];
             foreach ($productDatas as $key => $productData) {
@@ -512,6 +512,108 @@ class SupplierReceiptController extends Controller
         }
         // WarehouseController::receipt($supplierReceipt->warehouse_id,$pvaData);
     }
+
+    public static function syncStockForReceipt(SupplierReceipt $supplierReceipt, array $incomingLines, ?int $targetRayonWarehouseId = null)
+    {
+        if (!$targetRayonWarehouseId) {
+            $account = getAccountUser()->account_id;
+            $parentWarehouse = Warehouse::where(['warehouse_type_id' => 1, 'account_id' => $account, 'id' => $supplierReceipt->warehouse_id])->first()?->childWarehouses->first();
+            $targetRayon = $parentWarehouse ? Warehouse::where(['warehouse_type_id' => 3, 'warehouse_id' => $parentWarehouse->id, 'account_id' => $account])->first() : null;
+            $targetRayonWarehouseId = $targetRayon ? $targetRayon->id : $supplierReceipt->warehouse_id;
+        }
+
+        // 1. If an active movement exists, roll back old quantities from WarehousePva
+        if ($supplierReceipt->mouvement_id) {
+            $existingMovement = Mouvement::find($supplierReceipt->mouvement_id);
+            if ($existingMovement && $existingMovement->to_warehouse && $existingMovement->statut == 1) {
+                $prevLines = MouvementPva::where('mouvement_id', $existingMovement->id)->get();
+                foreach ($prevLines as $prevLine) {
+                    $whPva = WarehousePva::where([
+                        'warehouse_id' => $existingMovement->to_warehouse,
+                        'product_variation_attribute_id' => $prevLine->product_variation_attribute_id,
+                    ])->first();
+                    if ($whPva) {
+                        $whPva->update(['quantity' => $whPva->quantity - $prevLine->quantity]);
+                    }
+                }
+            }
+        }
+
+        // 2. If receipt is NOT active (statut == 0), deactivate movement and stop
+        if ($supplierReceipt->statut == 0) {
+            if ($supplierReceipt->mouvement_id) {
+                Mouvement::where('id', $supplierReceipt->mouvement_id)->update(['statut' => 0]);
+            }
+            return;
+        }
+
+        // 3. If receipt is active (statut == 1 or 2):
+        // Activate any draft products received
+        $pvaIds = collect($incomingLines)->pluck('id')->filter()->all();
+        if (!empty($pvaIds)) {
+            $productIds = ProductVariationAttribute::whereIn('id', $pvaIds)->pluck('product_id')->unique()->all();
+            Product::whereIn('id', $productIds)
+                ->where('statut', Product::STATUS_DRAFT)
+                ->update(['statut' => Product::STATUS_ACTIVE, 'updated_at' => now()]);
+        }
+
+        // Ensure or create Mouvement (mouvement_type_id = 5: Receipt)
+        $movement = null;
+        if ($supplierReceipt->mouvement_id) {
+            $movement = Mouvement::find($supplierReceipt->mouvement_id);
+            if ($movement) {
+                $movement->update([
+                    'to_warehouse' => $targetRayonWarehouseId,
+                    'statut' => 1,
+                ]);
+                MouvementPva::where('mouvement_id', $movement->id)->delete();
+            }
+        }
+
+        if (!$movement) {
+            $account_id = getAccountUser()->account_id;
+            $movement = Mouvement::create([
+                'code' => DefaultCodeController::getAccountCode('Receipt', $account_id),
+                'mouvement_type_id' => 5,
+                'to_warehouse' => $targetRayonWarehouseId,
+                'statut' => 1,
+                'account_user_id' => getAccountUser()->id,
+            ]);
+            $supplierReceipt->update(['mouvement_id' => $movement->id]);
+        }
+
+        // 4. Create new MouvementPva lines and increment WarehousePva
+        foreach ($incomingLines as $line) {
+            $pvaId = $line['id'] ?? $line['product_variation_attribute_id'];
+            $qty = (float) $line['quantity'];
+            $price = (float) ($line['price'] ?? 0);
+
+            MouvementPva::create([
+                'product_variation_attribute_id' => $pvaId,
+                'mouvement_id' => $movement->id,
+                'quantity' => $qty,
+                'price' => $price,
+                'account_user_id' => getAccountUser()->id,
+                'created_at' => now(),
+                'updated_at' => now(),
+                'sop_type_id' => 1,
+                'statut' => 1,
+            ]);
+
+            $whPva = WarehousePva::firstOrCreate(
+                [
+                    'warehouse_id' => $targetRayonWarehouseId,
+                    'product_variation_attribute_id' => $pvaId,
+                ],
+                [
+                    'quantity' => 0,
+                    'statut' => 1,
+                ]
+            );
+            $whPva->update(['quantity' => $whPva->quantity + $qty]);
+        }
+    }
+
     public function update(Request $requests)
     {
         $validator = Validator::make($requests->except('_method'), [
@@ -554,7 +656,7 @@ class SupplierReceiptController extends Controller
                 'required', 'int',
                 function ($attribute, $value, $fail) {
                     $account = getAccountUser()->account_id;
-                    $phone = SupplierPva::where(['id' => $value, 'account_id' => $account])->first();
+                    $phone = ProductVariationAttribute::where(['id' => $value, 'account_id' => $account])->first();
                     if (!$phone) {
                         $fail("not exist");
                     }
@@ -578,7 +680,7 @@ class SupplierReceiptController extends Controller
             $supplierReceipt->update($supplierReceipt_only->all());
             if (isset($request['productVariationAttributes'])) {
                 //récupérer les ids produits de la commandes 
-                $supplierReceiptProducts = SupplierOrderPva::where('supplier_order_id', $request['id'])->get();
+                $supplierReceiptProducts = SupplierOrderPva::where('supplier_receipt_id', $supplierReceipt->id)->get();
                 $supplierReceiptProductIds = collect($request['productVariationAttributes'])->pluck('id')->toArray();
                 //récupérer les enregistrements a supprimée
                 $sopToDeletes = $supplierReceiptProducts->map(function ($supporderproduct) use ($supplierReceiptProductIds) {
@@ -634,6 +736,8 @@ class SupplierReceiptController extends Controller
                             ->update(['statut' => Product::STATUS_ACTIVE, 'updated_at' => now()]);
                     }
                 }
+
+                self::syncStockForReceipt($supplierReceipt, $request['productVariationAttributes'], null);
             }
 
             $supplierReceipt = SupplierReceipt::find($supplierReceipt->id);
