@@ -59,16 +59,29 @@ class SupplierOrderController extends Controller
             $productData['warehouse'] = $supplierOrder->warehouse;
             $total = 0;
             $productData['productVariations'] = $supplierOrder->supplierOrderPvas->map(function ($supplierOrderPva) use (&$total) {
-                $pvaData["id"] = $supplierOrderPva->productVariationAttribute->id;
-                $pvaData["product"] = $supplierOrderPva->productVariationAttribute->product->reference;
+                $pva = $supplierOrderPva->productVariationAttribute;
+                $product = $pva ? $pva->product : null;
+                $firstImage = $product && $product->images ? $product->images->sortByDesc('created_at')->first() : null;
+                $imagePath = $firstImage ? ($firstImage->photo_dir . $firstImage->photo) : null;
+                $pvaData["id"] = $pva ? $pva->id : $supplierOrderPva->id;
+                $pvaData["product_id"] = $product ? $product->id : null;
+                $pvaData["product"] = $product ? $product->reference : '';
+                $pvaData["product_title"] = $product ? $product->title : '';
+                $pvaData["title"] = $product ? $product->title : '';
+                $pvaData["sku"] = $product ? $product->reference : '';
+                $pvaData["images"] = $product && $product->images ? $product->images : [];
+                $pvaData["image"] = $imagePath;
+                $pvaData["thumbnail_url"] = $imagePath;
                 $pvaData["quantity"] = $supplierOrderPva->quantity;
                 $pvaData["arrived"] = ($supplierOrderPva->supplier_receipt_id == null) ? 0 : $supplierOrderPva->quantity;
                 $pvaData["price"] = $supplierOrderPva->price;
                 $total += $supplierOrderPva->quantity * $supplierOrderPva->price;
-                $pvaData['variations'] = $supplierOrderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
-                    if ($childVariationAttribute->attribute->typeAttribute)
-                        return ["id" => $childVariationAttribute->id, "type" => $childVariationAttribute->attribute->typeAttribute->title, "value" => $childVariationAttribute->attribute->title];
-                })->values();
+                $pvaData['variations'] = ($pva && $pva->variationAttribute && $pva->variationAttribute->childVariationAttributes)
+                    ? $pva->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
+                        if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute)
+                            return ["id" => $childVariationAttribute->id, "type" => $childVariationAttribute->attribute->typeAttribute->title, "value" => $childVariationAttribute->attribute->title];
+                    })->filter()->values()
+                    : [];
                 return $pvaData;
             });
             $productData['total'] = $total;

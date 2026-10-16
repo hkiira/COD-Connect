@@ -67,6 +67,13 @@ echo "==> Database migrations"
 
 [[ -e public/storage ]] || "$PHP_BIN" artisan storage:link
 
+echo "==> Ensuring storage directories and permissions"
+mkdir -p storage/framework/{cache/data,sessions,views} storage/logs bootstrap/cache
+chmod -R 775 storage bootstrap/cache
+if id -u www >/dev/null 2>&1; then
+    chown -R www:www storage bootstrap/cache 2>/dev/null || true
+fi
+
 echo "==> Caches and queue workers"
 "$PHP_BIN" artisan optimize
 "$PHP_BIN" artisan queue:restart

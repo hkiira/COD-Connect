@@ -57,7 +57,11 @@ class CatalogToolsController extends Controller
 
         $accountId = $this->accountId();
         $accountUserId = getAccountUser()->id;
-        $warehouseId = $data['warehouse_id'] ?? Warehouse::where(['account_id' => $accountId, 'warehouse_type_id' => 1, 'statut' => 1])->value('id');
+        $warehouseId = $data['warehouse_id'] ?? null;
+        if ($warehouseId && !Warehouse::where(['id' => $warehouseId, 'account_id' => $accountId])->exists()) {
+            $warehouseId = null;
+        }
+        $warehouseId = $warehouseId ?? Warehouse::where(['account_id' => $accountId, 'warehouse_type_id' => 1, 'statut' => 1])->value('id');
 
         $order = SupplierOrder::create([
             'code' => DefaultCodeController::getAccountCode('SupplierOrder', $accountId),
