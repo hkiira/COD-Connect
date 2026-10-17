@@ -26,6 +26,8 @@ use App\Models\ProductVariationAttribute;
 use App\Models\OrderPva;
 use App\Models\Offer;
 use App\Models\Warehouse;
+use App\Models\WarehousePva;
+use App\Models\SupplierOrderPva;
 use Illuminate\Http\Request;
 use App\Models\Supplier;
 use App\Models\Brand;
@@ -137,7 +139,16 @@ class OrderController extends Controller
             ->selectRaw('orders.id, ' . OrderAge::daysSql() . ' as days, ' . OrderReasons::attemptsSql() . ' as attempts')
             ->get()->keyBy('id');
 
-        $datas = $orders->map(function ($data) use ($scores, $history) {
+        $allPvaIds = $orders->flatMap(function ($order) {
+            $pvas = in_array((int) $order->order_status_id, [2, 3], true)
+                ? ($order->inactiveOrderPvas->isNotEmpty() ? $order->inactiveOrderPvas : $order->activeOrderPvas)
+                : $order->activeOrderPvas;
+            return $pvas->pluck('product_variation_attribute_id');
+        })->filter()->unique()->values()->all();
+
+        $pagePvaStocks = self::pvaStockAndTrouble($allPvaIds);
+
+        $datas = $orders->map(function ($data) use ($scores, $history, $pagePvaStocks) {
             $orderData = $data->only('id', 'code', 'shipping_code', 'note', 'order_id', 'type', 'created_at', 'updated_at', 'pickup_id', 'shipment_id');
             $orderData['reference'] = $data->code;
 
@@ -212,16 +223,32 @@ class OrderController extends Controller
                 $orderData['customer'] = ['id' => null, 'name' => null, 'first_name' => '', 'last_name' => '', 'images' => [], 'phones' => [], 'address' => []];
             }
             $totalOrder = 0;
-            $orderData['products'] = (in_array($data->order_status_id, [2, 3]) ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder) {
+            $orderData['products'] = (in_array($data->order_status_id, [2, 3]) ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder, $pagePvaStocks) {
                 $totalOrder += $actfOrderPva->price * $actfOrderPva->quantity;
+                $pvaId = $actfOrderPva->product_variation_attribute_id;
+                $pvaStockInfo = $pagePvaStocks[$pvaId] ?? [
+                    'available_stock' => 0,
+                    'real_stock' => 0,
+                    'souffrance_quantity' => 0,
+                    'souffrance' => 0,
+                    'arriving_stock' => 0,
+                    'incoming_stock' => 0,
+                ];
                 $attributes = $actfOrderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
                     return $child->attribute->code;
                 })->toArray();
                 $productInfo = [
                     'id' => $actfOrderPva->productVariationAttribute->product->id,
                     'order_pva' => $actfOrderPva->id,
+                    'product_variation_attribute_id' => $pvaId,
                     'price' => $actfOrderPva->price,
                     'quantity' => $actfOrderPva->quantity,
+                    'available_stock' => $pvaStockInfo['available_stock'],
+                    'real_stock' => $pvaStockInfo['real_stock'],
+                    'souffrance_quantity' => $pvaStockInfo['souffrance_quantity'],
+                    'souffrance' => $pvaStockInfo['souffrance'],
+                    'arriving_stock' => $pvaStockInfo['arriving_stock'],
+                    'incoming_stock' => $pvaStockInfo['incoming_stock'],
                     'images' => $actfOrderPva->productVariationAttribute->product->images->sortByDesc('created_at')->values(),
                     'productType' => $actfOrderPva->productVariationAttribute->product->productType,
                     'product' => $actfOrderPva->productVariationAttribute->product->title . " " . implode('-', $attributes),
@@ -514,6 +541,102 @@ class OrderController extends Controller
             "{$relation}.productVariationAttribute.product.images",
             "{$relation}.productVariationAttribute.product.productType",
         ];
+    }
+
+    /**
+     * Compute available stock and en souffrance quantity for an array of PVA IDs.
+     *
+     * @param array<int> $pvaIds
+     * @param int|null $accountId
+     * @return array<int, array{available_stock: int, real_stock: int, souffrance_quantity: int, souffrance: int}>
+     */
+    public static function pvaStockAndTrouble(array $pvaIds, ?int $accountId = null): array
+    {
+        if (empty($pvaIds)) {
+            return [];
+        }
+
+        $pvaIds = array_values(array_unique(array_filter(array_map('intval', $pvaIds))));
+        if (empty($pvaIds)) {
+            return [];
+        }
+
+        // 1. Physical stock in active warehouses (statut = 1)
+        $warehouseStocks = WarehousePva::whereIn('product_variation_attribute_id', $pvaIds)
+            ->where('statut', 1)
+            ->groupBy('product_variation_attribute_id')
+            ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as real_stock')
+            ->pluck('real_stock', 'product_variation_attribute_id');
+
+        // 2. Pending orders reserving stock before delivery (statuses 1: Pending, 4: Confirmed, 5: In preparation)
+        $pendingQuery = OrderPva::whereIn('product_variation_attribute_id', $pvaIds)
+            ->whereNull('deleted_at')
+            ->where(function ($q) {
+                $q->whereIn('order_status_id', [1, 4, 5])
+                  ->orWhereHas('order', function ($oq) {
+                      $oq->whereIn('order_status_id', [1, 4, 5]);
+                  });
+            });
+        if ($accountId) {
+            $pendingQuery->whereHas('order', fn ($oq) => $oq->where('account_id', $accountId));
+        }
+        $pendingStocks = $pendingQuery->groupBy('product_variation_attribute_id')
+            ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as pending_qty')
+            ->pluck('pending_qty', 'product_variation_attribute_id');
+
+        // 3. En souffrance (trouble / delayed delivery: status 8 or 9)
+        $troubleQuery = OrderPva::whereIn('product_variation_attribute_id', $pvaIds)
+            ->whereNull('deleted_at')
+            ->where(function ($q) {
+                $q->whereIn('order_status_id', [8, 9])
+                  ->orWhereHas('order', function ($oq) {
+                      $oq->whereIn('order_status_id', [8, 9]);
+                  });
+            });
+        if ($accountId) {
+            $troubleQuery->whereHas('order', fn ($oq) => $oq->where('account_id', $accountId));
+        }
+        $troubleStocks = $troubleQuery->groupBy('product_variation_attribute_id')
+            ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as trouble_qty')
+            ->pluck('trouble_qty', 'product_variation_attribute_id');
+
+        // 4. En attente d'arrivage men les supplier orders (supplier_order_pva where supplier_receipt_id is null)
+        $arrivingQuery = SupplierOrderPva::whereIn('product_variation_attribute_id', $pvaIds)
+            ->whereNull('deleted_at')
+            ->whereNull('supplier_receipt_id')
+            ->whereHas('supplierOrder', function ($q) use ($accountId) {
+                $q->whereNull('deleted_at')->where('statut', '!=', 3);
+                if ($accountId) {
+                    $q->where(function ($sq) use ($accountId) {
+                        $sq->whereHas('supplier', fn ($sup) => $sup->where('account_id', $accountId))
+                           ->orWhereHas('warehouse', fn ($wh) => $wh->where('account_id', $accountId))
+                           ->orWhereHas('accountUser', fn ($au) => $au->where('account_id', $accountId));
+                    });
+                }
+            });
+        $arrivingStocks = $arrivingQuery->groupBy('product_variation_attribute_id')
+            ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as arriving_qty')
+            ->pluck('arriving_qty', 'product_variation_attribute_id');
+
+        $result = [];
+        foreach ($pvaIds as $id) {
+            $real = (int) ($warehouseStocks[$id] ?? 0);
+            $pending = (int) ($pendingStocks[$id] ?? 0);
+            $trouble = (int) ($troubleStocks[$id] ?? 0);
+            $arriving = (int) ($arrivingStocks[$id] ?? 0);
+            $available = $real - $pending;
+
+            $result[$id] = [
+                'available_stock' => $available,
+                'real_stock' => $real,
+                'souffrance_quantity' => $trouble,
+                'souffrance' => $trouble,
+                'arriving_stock' => $arriving,
+                'incoming_stock' => $arriving,
+            ];
+        }
+
+        return $result;
     }
 
     /** An agent (account_user) as the order screens show it. */
@@ -1337,11 +1460,24 @@ class OrderController extends Controller
                     : ($orderProducts->activeOrderPvas->isNotEmpty() ? $orderProducts->activeOrderPvas : $orderProducts->orderPvas))
                 : $orderProducts->activeOrderPvas;
 
-            $orderPvasList->map(function ($orderPva) use (&$orderDataProducts, $returnLines) {
+            $pvaIds = $orderPvasList->pluck('product_variation_attribute_id')->filter()->unique()->values()->all();
+            $pvaStocks = self::pvaStockAndTrouble($pvaIds, $orderProducts->account_id);
+
+            $orderPvasList->map(function ($orderPva) use (&$orderDataProducts, $returnLines, $pvaStocks) {
                 // Créer un tableau avec les données de base du produit
                 if (!$orderPva->productVariationAttribute || !$orderPva->productVariationAttribute->product) {
                     return;
                 }
+
+                $pvaId = $orderPva->product_variation_attribute_id;
+                $pvaStockInfo = $pvaStocks[$pvaId] ?? [
+                    'available_stock' => 0,
+                    'real_stock' => 0,
+                    'souffrance_quantity' => 0,
+                    'souffrance' => 0,
+                    'arriving_stock' => 0,
+                    'incoming_stock' => 0,
+                ];
 
                 if (!isset($orderDataProducts[$orderPva->id]))
                     $orderDataProducts[$orderPva->id] = [
@@ -1351,9 +1487,16 @@ class OrderController extends Controller
                         "created_at" => $orderPva->created_at,
                         "principalImage" => $orderPva->productVariationAttribute->product->principalImage,
                         "productType" => $orderPva->productVariationAttribute->product->productType ? $orderPva->productVariationAttribute->product->productType->only(['id', 'title']) : null,
+                        "available_stock" => $pvaStockInfo['available_stock'],
+                        "real_stock" => $pvaStockInfo['real_stock'],
+                        "souffrance_quantity" => $pvaStockInfo['souffrance_quantity'],
+                        "souffrance" => $pvaStockInfo['souffrance'],
+                        "arriving_stock" => $pvaStockInfo['arriving_stock'],
+                        "incoming_stock" => $pvaStockInfo['incoming_stock'],
                     ];
                 $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id] = [
                     "id" => $orderPva->id,
+                    "product_variation_attribute_id" => $pvaId,
                     "price" => $orderPva->price,
                     "discount" => $orderPva->discount,
                     "quantity" => $orderPva->quantity,
@@ -1361,6 +1504,12 @@ class OrderController extends Controller
                     "returned_quantity" => $returnLines[$orderPva->id]['returned_quantity'] ?? 0,
                     "returnable_quantity" => $returnLines[$orderPva->id]['returnable_quantity'] ?? 0,
                     "refund_unit_price" => $returnLines[$orderPva->id]['refund_unit_price'] ?? (float) $orderPva->price,
+                    "available_stock" => $pvaStockInfo['available_stock'],
+                    "real_stock" => $pvaStockInfo['real_stock'],
+                    "souffrance_quantity" => $pvaStockInfo['souffrance_quantity'],
+                    "souffrance" => $pvaStockInfo['souffrance'],
+                    "arriving_stock" => $pvaStockInfo['arriving_stock'],
+                    "incoming_stock" => $pvaStockInfo['incoming_stock'],
                 ];
                 $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['offers'] = FilterController::filterselect(new Request(), 'offers', $orderPva->id)['data'];
                 $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedOffer'] = null;
