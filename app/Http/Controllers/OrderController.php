@@ -147,8 +147,11 @@ class OrderController extends Controller
         })->filter()->unique()->values()->all();
 
         $pagePvaStocks = self::pvaStockAndTrouble($allPvaIds);
+        $pageCustomerMetrics = \App\Services\CustomerIdentityService::batchCustomerMetrics(
+            $orders->pluck('customer_id')->filter()->unique()->values()->all()
+        );
 
-        $datas = $orders->map(function ($data) use ($scores, $history, $pagePvaStocks) {
+        $datas = $orders->map(function ($data) use ($scores, $history, $pagePvaStocks, $pageCustomerMetrics) {
             $orderData = $data->only('id', 'code', 'shipping_code', 'note', 'order_id', 'type', 'created_at', 'updated_at', 'pickup_id', 'shipment_id');
             $orderData['reference'] = $data->code;
 
@@ -208,7 +211,27 @@ class OrderController extends Controller
                 return $data;
             });
             if ($data->customer) {
-                $orderData['customer'] = $data->customer->only('id', 'name');
+                $cm = $pageCustomerMetrics[$data->customer->id] ?? [
+                    'delivered_count' => 0,
+                    'returned_count' => 0,
+                    'pending_count' => 0,
+                    'total_orders' => 0,
+                    'lifetime_value' => 0.0,
+                    'delivery_rate' => null,
+                    'return_rate' => 0.0,
+                    'tier' => 'Regular',
+                    'trust_level' => 'new',
+                ];
+                $orderData['customer'] = $data->customer->only('id', 'name', 'note');
+                $orderData['customer']['is_blacklisted'] = (bool) $data->customer->is_blacklisted;
+                $orderData['customer']['tier'] = $cm['tier'];
+                $orderData['customer']['trust_level'] = $cm['trust_level'];
+                $orderData['customer']['delivered_count'] = $cm['delivered_count'];
+                $orderData['customer']['returned_count'] = $cm['returned_count'];
+                $orderData['customer']['pending_count'] = $cm['pending_count'];
+                $orderData['customer']['total_orders'] = $cm['total_orders'];
+                $orderData['customer']['lifetime_value'] = $cm['lifetime_value'];
+                $orderData['customer']['delivery_rate'] = $cm['delivery_rate'];
                 $names = explode(' ', $data->customer->name, 2);
                 $orderData['customer']['first_name'] = $names[0] ?? '';
                 $orderData['customer']['last_name'] = $names[1] ?? '';
@@ -220,7 +243,7 @@ class OrderController extends Controller
                     return $address->only('id', 'title', 'city');
                 });
             } else {
-                $orderData['customer'] = ['id' => null, 'name' => null, 'first_name' => '', 'last_name' => '', 'images' => [], 'phones' => [], 'address' => []];
+                $orderData['customer'] = ['id' => null, 'name' => null, 'note' => null, 'is_blacklisted' => false, 'tier' => 'Regular', 'trust_level' => 'new', 'delivered_count' => 0, 'returned_count' => 0, 'pending_count' => 0, 'total_orders' => 0, 'lifetime_value' => 0, 'delivery_rate' => null, 'first_name' => '', 'last_name' => '', 'images' => [], 'phones' => [], 'address' => []];
             }
             $totalOrder = 0;
             $orderData['products'] = (in_array($data->order_status_id, [2, 3]) ? $data->inactiveOrderPvas : $data->activeOrderPvas)->map(function ($actfOrderPva) use (&$totalOrder, $pagePvaStocks) {
@@ -1079,6 +1102,10 @@ class OrderController extends Controller
                         throw new \Exception('Customer is required to create order.');
                     }
 
+                    if ($isImport == 0 && (bool) ($customer->is_blacklisted ?? false) && empty($request['force_create'])) {
+                        throw new \Exception('BLACKLISTED_CUSTOMER: Ce client est sur liste noire. Veuillez confirmer explicitement la création de la commande.');
+                    }
+
                     // Fill required order ownership fields.
                     $request['account_id'] = $accountId;
                     $request['customer_id'] = $customer->id;
@@ -1101,7 +1128,7 @@ class OrderController extends Controller
                     // Persist the order row. A client-built order must not set fields the system owns
                     // (carrier links, billing, timestamps, sync flags); imports are trusted and keep them.
                     $orderData = $isImport == 0
-                        ? \Illuminate\Support\Arr::except($request, ['pickup_id', 'shipment_id', 'invoice_id', 'shipping_code', 'real_carrier_price', 'created_at', 'updated_at', 'sync', 'type'])
+                        ? \Illuminate\Support\Arr::except($request, ['pickup_id', 'shipment_id', 'invoice_id', 'shipping_code', 'real_carrier_price', 'created_at', 'updated_at', 'sync', 'type', 'force_create'])
                         : $request;
                     $order = Order::create($orderData);
 
@@ -1348,12 +1375,41 @@ class OrderController extends Controller
             });
 
             $orderCustomer = $order->customer;
+            $customerMetrics = $orderCustomer
+                ? (\App\Services\CustomerIdentityService::batchCustomerMetrics([$orderCustomer->id])[$orderCustomer->id] ?? null)
+                : null;
             $data['orderInfo']['customer'] = $orderCustomer
-                ? $orderCustomer->only('id', 'name', 'note')
-                : ['id' => null, 'name' => null, 'note' => null];
+                ? array_merge($orderCustomer->only('id', 'name', 'note'), [
+                    'is_blacklisted' => (bool) $orderCustomer->is_blacklisted,
+                    'tier' => $customerMetrics['tier'] ?? 'Regular',
+                    'trust_level' => $customerMetrics['trust_level'] ?? 'new',
+                    'delivered_count' => $customerMetrics['delivered_count'] ?? 0,
+                    'returned_count' => $customerMetrics['returned_count'] ?? 0,
+                    'pending_count' => $customerMetrics['pending_count'] ?? 0,
+                    'total_orders' => $customerMetrics['total_orders'] ?? 0,
+                    'lifetime_value' => $customerMetrics['lifetime_value'] ?? 0.0,
+                    'delivery_rate' => $customerMetrics['delivery_rate'] ?? null,
+                    'return_rate' => $customerMetrics['return_rate'] ?? 0.0,
+                ])
+                : [
+                    'id' => null,
+                    'name' => null,
+                    'note' => null,
+                    'is_blacklisted' => false,
+                    'tier' => 'Regular',
+                    'trust_level' => 'new',
+                    'delivered_count' => 0,
+                    'returned_count' => 0,
+                    'pending_count' => 0,
+                    'total_orders' => 0,
+                    'lifetime_value' => 0.0,
+                    'delivery_rate' => null,
+                    'return_rate' => 0.0,
+                ];
             $data['orderInfo']['customer']['addresses'] = $orderCustomer
                 ? $orderCustomer->addresses->map(function ($address) {
                     $addressData = $address->only('id', 'title');
+                    $addressData['city_id'] = $address->city_id;
                     $addressData['city'] = $address->city ? $address->city->only('id', 'title') : null;
                     return $addressData;
                 })

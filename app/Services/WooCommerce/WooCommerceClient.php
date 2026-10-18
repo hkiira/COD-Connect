@@ -122,4 +122,9 @@ class WooCommerceClient
     {
         return $this->paginated("products/{$productId}/variations", $query + ['per_page' => 100]);
     }
+
+    public function variation(int $productId, int $variationId): array
+    {
+        return $this->send('get', "products/{$productId}/variations/{$variationId}")->json();
+    }
 }

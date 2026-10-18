@@ -260,6 +260,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
 
     // CRM Customer Extensions
     Route::post('customers/merge', [CustomerController::class, 'merge']);
+    Route::post('customers/deduplicate', [CustomerController::class, 'deduplicate']);
     Route::post('customers/{id}/log-call', [CustomerController::class, 'logCall']);
     Route::post('customers/{id}/toggle-blacklist', [CustomerController::class, 'toggleBlacklist']);
     Route::get('customers/{id}/timeline', [CustomerController::class, 'timeline']);
@@ -334,6 +335,10 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::post('wc/stores/{id}/links', [\App\Http\Controllers\WooCommerceProductController::class, 'link']);
     Route::delete('wc/stores/{id}/links/{linkId}', [\App\Http\Controllers\WooCommerceProductController::class, 'unlink']);
     Route::post('wc/stores/{id}/auto-match', [\App\Http\Controllers\WooCommerceProductController::class, 'autoMatch']);
+    Route::get('wc/stores/{id}/sync-workspace/analyze', [\App\Http\Controllers\WooCommerceProductController::class, 'syncWorkspaceAnalyze']);
+    Route::post('wc/stores/{id}/generate-product', [\App\Http\Controllers\WooCommerceProductController::class, 'generateProduct']);
+    Route::post('wc/stores/{id}/generate-variation', [\App\Http\Controllers\WooCommerceProductController::class, 'generateVariation']);
+    Route::post('wc/stores/{id}/bulk-generate', [\App\Http\Controllers\WooCommerceProductController::class, 'bulkGenerate']);
     Route::get('wc/stores/{id}/orders', [\App\Http\Controllers\WooCommerceOrderController::class, 'listForStore']);
     Route::get('wc/stores/{id}/status-mappings', [\App\Http\Controllers\WooCommerceStatusController::class, 'index']);
     Route::put('wc/stores/{id}/status-mappings', [\App\Http\Controllers\WooCommerceStatusController::class, 'update']);
