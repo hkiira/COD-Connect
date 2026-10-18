@@ -60,8 +60,16 @@ class ProductInventoryResource extends JsonResource
 
             if ($pva->supplierOrderPvas) {
                 foreach ($pva->supplierOrderPvas as $supplierOrderPva) {
-                    if ($supplierOrderPva->supplierOrder && $supplierOrderPva->supplierOrder->statut == 1) {
-                        $orderedStock += $supplierOrderPva->quantity;
+                    if (
+                        $supplierOrderPva->supplier_receipt_id === null &&
+                        $supplierOrderPva->supplierOrder &&
+                        in_array((int) $supplierOrderPva->supplierOrder->statut, [1, 2], true)
+                    ) {
+                        $remaining = max(
+                            0,
+                            (int) $supplierOrderPva->quantity - (int) $supplierOrderPva->received_quantity - (int) $supplierOrderPva->cancelled_quantity
+                        );
+                        $orderedStock += $remaining;
                     }
                 }
             }

@@ -278,7 +278,7 @@ class ExitslipController extends Controller
                 function ($attribute, $value, $fail) {
                     // Ensure source warehouse belongs to the current account.
                     $account = getAccountUser()->account_id;
-                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->whereNot('warehouse_id', null)->first();
+                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->first();
                     if (!$warehouse) {
                         $fail("not exist");
                     }
@@ -293,9 +293,10 @@ class ExitslipController extends Controller
                     if (!$warehouseId) {
                         $fail("Warehouse ID not found");
                     }
+                    $resolvedWarehouseId = app(\App\Services\StockMovementService::class)->resolveOperationalWarehouseId((int) $warehouseId);
                     $lineIndex = explode('.', $attribute)[1] ?? null;
                     $quantity = (float) ($payload['productVariationAttributes'][$lineIndex]['quantity'] ?? 0);
-                    if ($message = \App\Support\StockGuard::insufficient((int) $warehouseId, (int) $value, $quantity)) {
+                    if ($message = \App\Support\StockGuard::insufficient($resolvedWarehouseId, (int) $value, $quantity)) {
                         $fail($message);
                     }
                 },
@@ -317,6 +318,7 @@ class ExitslipController extends Controller
         $account_id = getAccountUser()->account_id;
         $payload['code'] = DefaultCodeController::getAccountCode('Exitslip', $account_id);
         $payload['mouvement_type_id'] = 6;
+        $payload['from_warehouse'] = app(\App\Services\StockMovementService::class)->resolveOperationalWarehouseId((int) $payload['from_warehouse'], (int) $account_id);
 
         // Step 5: Create exitslip header record.
         $exitslipData = collect($payload)->only('code', 'mouvement_type_id', 'from_warehouse', 'to_warehouse', 'description', 'statut', 'account_user_id');
@@ -464,7 +466,7 @@ class ExitslipController extends Controller
                 function ($attribute, $value, $fail) {
                     // Ensure the source warehouse belongs to the current account.
                     $account = getAccountUser()->account_id;
-                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->whereNot('warehouse_id', null)->first();
+                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->first();
                     if (!$warehouse) {
                         $fail("not exist");
                     }
@@ -474,19 +476,11 @@ class ExitslipController extends Controller
                 'required',
                 'numeric',
                 function ($attribute, $value, $fail) use ($payloads) {
-                    // Ensure each PVA is available in the selected source warehouse.
                     $keys = explode('.', $attribute);
                     $firstIndex = $keys[0];
                     $warehouseId = $payloads[$firstIndex]['from_warehouse'] ?? null;
                     if (!$warehouseId) {
                         $fail("Warehouse ID not found");
-                    }
-                    $warehousePva = WarehousePva::where([
-                        'product_variation_attribute_id' => $value,
-                        'warehouse_id' => $warehouseId,
-                    ])->first();
-                    if (!$warehousePva) {
-                        $fail("Warehouse product not found");
                     }
                 },
             ],
@@ -504,6 +498,9 @@ class ExitslipController extends Controller
 
         // Step 4: Process each exitslip update request independently.
         $exitslips = collect($payloads)->map(function ($payload) {
+            if (!empty($payload['from_warehouse'])) {
+                $payload['from_warehouse'] = app(\App\Services\StockMovementService::class)->resolveOperationalWarehouseId((int) $payload['from_warehouse']);
+            }
             // Step 4.1: Update exitslip header fields first.
             $exitslipData = collect($payload)->only('id', 'to_warehouse', 'from_warehouse', 'description', 'statut');
             $exitslip = Mouvement::find($exitslipData['id']);
@@ -642,7 +639,9 @@ class ExitslipController extends Controller
     public function destroy($id)
     {
         $mouvement = Mouvement::find($id);
-        $mouvement->delete();
+        if ($mouvement) {
+            app(\App\Services\StockMovementService::class)->reverseAndDeleteMovement($mouvement);
+        }
         return response()->json([
             'statut' => 1,
             'data' => $mouvement,

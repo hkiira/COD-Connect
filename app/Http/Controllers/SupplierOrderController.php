@@ -3,120 +3,206 @@
 namespace App\Http\Controllers;
 
 use App\Models\ProductVariationAttribute;
+use App\Models\Supplier;
+use App\Models\SupplierOrder;
 use App\Models\SupplierOrderPva;
 use App\Models\SupplierPva;
 use App\Models\Warehouse;
+use App\Services\SupplierProcurementService;
 use Illuminate\Http\Request;
-use App\Models\Supplier;
-use App\Models\SupplierOrder;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
-use Barryvdh\DomPDF\Facade\Pdf as PDF;
 
 class SupplierOrderController extends Controller
 {
-
     public function index(Request $request)
     {
         $searchIds = [];
-        $request = collect($request->query())->toArray();
-        if (isset($request['suppliers']) && array_filter($request['suppliers'], function ($value) {
-            return $value !== null;
-        })) {
-            foreach ($request['suppliers'] as $supplierId) {
-                if (Supplier::find($supplierId))
-                    $searchIds = array_merge($searchIds, Supplier::find($supplierId)->supplierOrders->pluck('id')->unique()->toArray());
+        $requestData = collect($request->query())->toArray();
+
+        if (isset($requestData['suppliers']) && array_filter($requestData['suppliers'], fn ($value) => $value !== null)) {
+            foreach ($requestData['suppliers'] as $supplierId) {
+                $sup = Supplier::find($supplierId);
+                if ($sup) {
+                    $searchIds = array_merge($searchIds, $sup->supplierOrders->pluck('id')->unique()->toArray());
+                }
             }
-            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+            $requestData['whereArray'] = ['column' => 'id', 'values' => $searchIds];
         }
-        if (isset($request['warehouses']) && array_filter($request['warehouses'], function ($value) {
-            return $value !== null;
-        })) {
-            foreach ($request['warehouses'] as $warehouseId) {
-                if (Warehouse::find($warehouseId))
-                    $searchIds = array_merge($searchIds, Warehouse::find($warehouseId)->supplierOrders->pluck('id')->unique()->toArray());
+
+        if (isset($requestData['warehouses']) && array_filter($requestData['warehouses'], fn ($value) => $value !== null)) {
+            foreach ($requestData['warehouses'] as $warehouseId) {
+                $wh = Warehouse::find($warehouseId);
+                if ($wh) {
+                    $searchIds = array_merge($searchIds, $wh->supplierOrders->pluck('id')->unique()->toArray());
+                }
             }
-            $request['whereArray'] = ['column' => 'id', 'values' => $searchIds];
+            $requestData['whereArray'] = ['column' => 'id', 'values' => $searchIds];
         }
+
         $associated = [];
-        $filters = HelperFunctions::filterColumns($request, ['id', 'code']);
+        $filters = HelperFunctions::filterColumns($requestData, ['id', 'code']);
         $model = 'App\\Models\\SupplierOrder';
-        $request['inAccountUser'] = ['account_user_id', getAccountUser()->account_id];
-        $datas = FilterController::searchs(new Request($request), $model, ['id', 'code'], false, $associated);
-        $datas = $datas->map(function ($supplierOrder) {
+        $requestData['inAccountUser'] = ['account_user_id', getAccountUser()->account_id];
+
+        $datas = FilterController::searchs(new Request($requestData), $model, ['id', 'code'], false, $associated);
+
+        $datas = $datas->map(function (SupplierOrder $supplierOrder) {
             $productData = $supplierOrder->only('id', 'code', 'shipping_date', 'created_at', 'statut');
-            $productData['user'] = [
-                "id" => $supplierOrder->accountUser->user->id,
-                "firstname" => $supplierOrder->accountUser->user->firstname,
-                "lastname" => $supplierOrder->accountUser->user->lastname,
-                "images" => $supplierOrder->accountUser->user->images,
-            ];
-            $productData['time'] = ['statut' => 0, 'data' => "3 Days"];
-            $productData['quantity'] = array_sum($supplierOrder->supplierOrderPvas->pluck('quantity')->toArray());
-            $productData['reste'] = array_sum($supplierOrder->supplierOrderPvas->pluck('quantity')->toArray()) - array_sum($supplierOrder->supplierOrderPvas()->where('supplier_receipt_id', null)->get()->pluck('quantity')->toArray());
-            $productData['supplier'] = $supplierOrder->supplier;
-            $productData['supplier']['images'] = ($supplierOrder->supplier) ? $supplierOrder->supplier->images : [];
-            $productData['warehouse'] = $supplierOrder->warehouse;
+            $productData['user'] = $supplierOrder->accountUser && $supplierOrder->accountUser->user ? [
+                'id' => $supplierOrder->accountUser->user->id,
+                'firstname' => $supplierOrder->accountUser->user->firstname,
+                'lastname' => $supplierOrder->accountUser->user->lastname,
+                'images' => $supplierOrder->accountUser->user->images,
+            ] : null;
+
+            $productData['time'] = ['statut' => 0, 'data' => '3 Days'];
+
+            $orderLines = $supplierOrder->supplierOrderPvas()
+                ->whereNull('supplier_receipt_id')
+                ->with([
+                    'productVariationAttribute.product.images',
+                    'productVariationAttribute.variationAttribute.childVariationAttributes.attribute.typeAttribute',
+                    'orderAllocations.supplierReceipt',
+                ])
+                ->get();
+
+            $orderedQty = 0;
+            $receivedQty = 0;
+            $cancelledQty = 0;
             $total = 0;
-            $productData['productVariations'] = $supplierOrder->supplierOrderPvas->map(function ($supplierOrderPva) use (&$total) {
+            $receiptMap = [];
+
+            $productData['productVariations'] = $orderLines->map(function (SupplierOrderPva $supplierOrderPva) use (
+                &$orderedQty,
+                &$receivedQty,
+                &$cancelledQty,
+                &$total,
+                &$receiptMap
+            ) {
                 $pva = $supplierOrderPva->productVariationAttribute;
                 $product = $pva ? $pva->product : null;
                 $firstImage = $product && $product->images ? $product->images->sortByDesc('created_at')->first() : null;
                 $imagePath = $firstImage ? ($firstImage->photo_dir . $firstImage->photo) : null;
-                $pvaData["id"] = $pva ? $pva->id : $supplierOrderPva->id;
-                $pvaData["product_id"] = $product ? $product->id : null;
-                $pvaData["product"] = $product ? $product->reference : '';
-                $pvaData["product_title"] = $product ? $product->title : '';
-                $pvaData["title"] = $product ? $product->title : '';
-                $pvaData["sku"] = $product ? $product->reference : '';
-                $pvaData["images"] = $product && $product->images ? $product->images : [];
-                $pvaData["image"] = $imagePath;
-                $pvaData["thumbnail_url"] = $imagePath;
-                $pvaData["quantity"] = $supplierOrderPva->quantity;
-                $pvaData["arrived"] = ($supplierOrderPva->supplier_receipt_id == null) ? 0 : $supplierOrderPva->quantity;
-                $pvaData["price"] = $supplierOrderPva->price;
-                $total += $supplierOrderPva->quantity * $supplierOrderPva->price;
-                $pvaData['variations'] = ($pva && $pva->variationAttribute && $pva->variationAttribute->childVariationAttributes)
+
+                $lineQty = max(0, (int) $supplierOrderPva->quantity);
+                $lineReceived = min($lineQty, max(0, (int) $supplierOrderPva->received_quantity));
+                $lineCancelled = min(max(0, $lineQty - $lineReceived), max(0, (int) $supplierOrderPva->cancelled_quantity));
+                $lineRemaining = max(0, $lineQty - $lineReceived - $lineCancelled);
+
+                $orderedQty += $lineQty;
+                $receivedQty += $lineReceived;
+                $cancelledQty += $lineCancelled;
+                $total += $lineQty * (float) $supplierOrderPva->price;
+
+                $allocations = [];
+                foreach ($supplierOrderPva->orderAllocations as $alloc) {
+                    $rcpt = $alloc->supplierReceipt;
+                    if ($rcpt) {
+                        $allocations[] = [
+                            'receipt_id' => $rcpt->id,
+                            'receipt_code' => $rcpt->code,
+                            'allocated_quantity' => (int) $alloc->allocated_quantity,
+                            'created_at' => $rcpt->created_at,
+                        ];
+                        if (!isset($receiptMap[$rcpt->id])) {
+                            $receiptMap[$rcpt->id] = [
+                                'id' => $rcpt->id,
+                                'code' => $rcpt->code,
+                                'created_at' => $rcpt->created_at,
+                                'statut' => $rcpt->statut,
+                                'allocated_quantity' => 0,
+                            ];
+                        }
+                        $receiptMap[$rcpt->id]['allocated_quantity'] += (int) $alloc->allocated_quantity;
+                    }
+                }
+
+                $variations = ($pva && $pva->variationAttribute && $pva->variationAttribute->childVariationAttributes)
                     ? $pva->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
-                        if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute)
-                            return ["id" => $childVariationAttribute->id, "type" => $childVariationAttribute->attribute->typeAttribute->title, "value" => $childVariationAttribute->attribute->title];
+                        if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute) {
+                            return [
+                                'id' => $childVariationAttribute->id,
+                                'type' => $childVariationAttribute->attribute->typeAttribute->title,
+                                'value' => $childVariationAttribute->attribute->title,
+                            ];
+                        }
+                        return null;
                     })->filter()->values()
                     : [];
-                return $pvaData;
+
+                return [
+                    'id' => $pva ? $pva->id : $supplierOrderPva->id,
+                    'sop_id' => $supplierOrderPva->id,
+                    'product_id' => $product ? $product->id : null,
+                    'product' => $product ? $product->reference : '',
+                    'product_title' => $product ? $product->title : '',
+                    'title' => $product ? $product->title : '',
+                    'sku' => $product ? $product->reference : '',
+                    'images' => $product && $product->images ? $product->images : [],
+                    'image' => $imagePath,
+                    'thumbnail_url' => $imagePath,
+                    'quantity' => $lineQty,
+                    'received_quantity' => $lineReceived,
+                    'arrived' => $lineReceived,
+                    'cancelled_quantity' => $lineCancelled,
+                    'remaining_quantity' => $lineRemaining,
+                    'price' => $supplierOrderPva->price,
+                    'variations' => $variations,
+                    'allocations' => $allocations,
+                ];
             });
+
+            $remainingQty = max(0, $orderedQty - $receivedQty - $cancelledQty);
+
+            $productData['quantity'] = $orderedQty;
+            $productData['ordered_quantity'] = $orderedQty;
+            $productData['received_quantity'] = $receivedQty;
+            $productData['cancelled_quantity'] = $cancelledQty;
+            $productData['remaining_quantity'] = $remainingQty;
+            $productData['reste'] = $remainingQty;
+            $productData['progress_percent'] = $orderedQty > 0
+                ? (int) round(($receivedQty / $orderedQty) * 100)
+                : 0;
+            $productData['receipts'] = array_values($receiptMap);
+            $productData['supplier'] = $supplierOrder->supplier;
+            if ($productData['supplier']) {
+                $productData['supplier']['images'] = $supplierOrder->supplier->images ?? [];
+            }
+            $productData['warehouse'] = $supplierOrder->warehouse;
             $productData['total'] = $total;
 
             return $productData;
         });
-        $datas =  HelperFunctions::getPagination($datas, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
-        return $datas;
+
+        return HelperFunctions::getPagination($datas, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
     }
 
     public function generatePdf($id)
     {
         $supplierOrder = SupplierOrder::find($id);
-        $orderPvas = SupplierOrderPva::where('supplier_order_id', $id)->get();
+        $orderPvas = SupplierOrderPva::where('supplier_order_id', $id)->whereNull('supplier_receipt_id')->get();
         $datas = [];
         $pickUpTotal = 0;
-        foreach ($orderPvas as $key => $orderPva) {
+        foreach ($orderPvas as $orderPva) {
             $variations = $orderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVa) {
                 return $childVa->attribute->title;
             });
-            if ($orderPva->productVariationAttribute->product->images->sortByDesc('created_at')->first())
-                $datas['datas'][$orderPva->productVariationAttribute->product->id]["image"] = $orderPva->productVariationAttribute->product->images->sortByDesc('created_at')->first()->photo_dir . $orderPva->productVariationAttribute->product->images->sortByDesc('created_at')->first()->photo;
-            $datas['datas'][$orderPva->productVariationAttribute->product->id]["product"] = $orderPva->productVariationAttribute->product->title;
+            if ($orderPva->productVariationAttribute->product->images->sortByDesc('created_at')->first()) {
+                $datas['datas'][$orderPva->productVariationAttribute->product->id]['image'] =
+                    $orderPva->productVariationAttribute->product->images->sortByDesc('created_at')->first()->photo_dir .
+                    $orderPva->productVariationAttribute->product->images->sortByDesc('created_at')->first()->photo;
+            }
+            $datas['datas'][$orderPva->productVariationAttribute->product->id]['product'] = $orderPva->productVariationAttribute->product->title;
             $datas['datas'][$orderPva->productVariationAttribute->product->id]['pvas'][] = [
-                "variation" => implode(", ", $variations->toArray()),
-                "quantity" => $orderPva->quantity,
-                "price" => $orderPva->price,
-
+                'variation' => implode(', ', $variations->toArray()),
+                'quantity' => $orderPva->quantity,
+                'price' => $orderPva->price,
             ];
             $pickUpTotal += $orderPva->quantity * $orderPva->price;
         }
         $datas['total'] = $pickUpTotal;
-        $datas['datas'] = collect($datas['datas'])->values()->toArray();
+        $datas['datas'] = collect($datas['datas'] ?? [])->values()->toArray();
         $datas['orderFor'] = $supplierOrder->supplier->title;
-        $datas['account'] = $supplierOrder->supplier->account->name;
         $datas['account'] = $supplierOrder->supplier->account->name;
         $datas['code'] = $supplierOrder->code;
         $datas['countOrders'] = $orderPvas->count();
@@ -124,7 +210,7 @@ class SupplierOrderController extends Controller
 
         $mpdf = new \Mpdf\Mpdf([
             'mode' => 'utf-8',
-            'orientation' => 'P', // P for Portrait, L for Landscape
+            'orientation' => 'P',
             'margin_left' => 10,
             'margin_right' => 10,
             'margin_top' => 10,
@@ -134,60 +220,70 @@ class SupplierOrderController extends Controller
         ]);
 
         $mpdf->WriteHTML($html);
+        $pdfContent = $mpdf->Output('', 'S');
 
-        $pdfContent = $mpdf->Output('', 'S'); // Output as a string
-
-        // Encode PDF to Base64
-        $base64Pdf = base64_encode($pdfContent);
-
-        // Return JSON response with Base64 PDF
         return response()->json([
             'statut' => 1,
-            'data' => $base64Pdf,
+            'data' => base64_encode($pdfContent),
         ]);
     }
 
     public function create(Request $request)
     {
-        $request = collect($request->query())->toArray();
+        $requestData = collect($request->query())->toArray();
         $data = [];
-        if (isset($request['products']['inactive'])) {
+        if (isset($requestData['products']['inactive'])) {
             $model = 'App\\Models\\Product';
-            $supplierId = (isset($request['products']['inactive']['supplier'])) ? $request['products']['inactive']['supplier'] : 0;
-            $pvas = SupplierPva::where(['supplier_id' => $supplierId])->get()->pluck('product_variation_attribute_id')->toArray();
-            $productIds = ProductVariationAttribute::whereIn('id', $pvas)->get()->pluck('product_id')->toArray();
-            //permet de récupérer la liste des regions inactive filtrés
-            $filters = HelperFunctions::filterColumns($request['products']['inactive'], ['id', 'code']);
-            $request['products']['inactive']['inAccountUser'] = ['account_user_id', getAccountUser()->account_id];
-            $request['products']['inactive']['whereArray'] = ['column' => 'id', 'values' => $productIds];
-            $associated[] = [
-                'model' => 'App\\Models\\ProductVariationAttribute',
-                'title' => 'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute',
-                'search' => false
+            $supplierId = $requestData['products']['inactive']['supplier'] ?? 0;
+            $supplierPvaMap = SupplierPva::where(['supplier_id' => $supplierId])
+                ->pluck('price', 'product_variation_attribute_id')
+                ->toArray();
+            $pvas = array_keys($supplierPvaMap);
+            $productIds = ProductVariationAttribute::whereIn('id', $pvas)->pluck('product_id')->toArray();
+
+            $filters = HelperFunctions::filterColumns($requestData['products']['inactive'], ['id', 'code']);
+            $requestData['products']['inactive']['inAccountUser'] = ['account_user_id', getAccountUser()->account_id];
+            $requestData['products']['inactive']['whereArray'] = ['column' => 'id', 'values' => $productIds];
+            $associated = [
+                [
+                    'model' => 'App\\Models\\ProductVariationAttribute',
+                    'title' => 'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute',
+                    'search' => false,
+                ],
+                [
+                    'model' => 'App\\Models\\ProductVariationAttribute',
+                    'title' => 'productVariationAttributes.pvaPacks.childPvaPacks.ProductVariationAttribute.Product',
+                    'search' => false,
+                ],
             ];
-            $associated[] = [
-                'model' => 'App\\Models\\ProductVariationAttribute',
-                'title' => 'productVariationAttributes.pvaPacks.childPvaPacks.ProductVariationAttribute.Product',
-                'search' => false
-            ];
-            $products = FilterController::searchs(new Request($request['products']['inactive']), $model, ['id', 'title'], false, $associated)->map(function ($product) use ($pvas) {
-                $productData = $product->only('id', 'title');
-                $productData['productType'] = $product->productType;
-                $productData['productVariations'] = $product->activePvas->map(function ($productVariationAttribute) use ($product, $pvas) {
-                    if ($product->product_type_id == 1) {
-                        if (in_array($productVariationAttribute->id, $pvas)) {
-                            $pvaData = ["id" => $productVariationAttribute->id];
+            $products = FilterController::searchs(new Request($requestData['products']['inactive']), $model, ['id', 'title'], false, $associated)
+                ->map(function ($product) use ($pvas, $supplierPvaMap) {
+                    $productData = $product->only('id', 'title', 'reference');
+                    $productData['productType'] = $product->productType;
+                    $productData['images'] = $product->images ? [$product->images->sortByDesc('created_at')->first()] : [];
+                    $productData['productVariations'] = $product->activePvas->map(function ($productVariationAttribute) use ($product, $pvas, $supplierPvaMap) {
+                        if ($product->product_type_id == 1 && in_array($productVariationAttribute->id, $pvas)) {
+                            $pvaData = [
+                                'id' => $productVariationAttribute->id,
+                                'price' => $supplierPvaMap[$productVariationAttribute->id] ?? 0,
+                            ];
                             $pvaData['variations'] = $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
-                                if ($childVariationAttribute->attribute->typeAttribute)
-                                    return ["id" => $childVariationAttribute->id, "type" => $childVariationAttribute->attribute->typeAttribute->title, "value" => $childVariationAttribute->attribute->title];
-                            })->values();
+                                if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute) {
+                                    return [
+                                        'id' => $childVariationAttribute->id,
+                                        'type' => $childVariationAttribute->attribute->typeAttribute->title,
+                                        'value' => $childVariationAttribute->attribute->title,
+                                    ];
+                                }
+                                return null;
+                            })->filter()->values();
                             return $pvaData;
                         }
-                    }
-                })->filter()->values();
-                return $productData;
-            });
-            $data['products']['inactive'] =  HelperFunctions::getPagination($products, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+                        return null;
+                    })->filter()->values();
+                    return $productData;
+                });
+            $data['products']['inactive'] = HelperFunctions::getPagination($products, $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
 
         return response()->json([
@@ -199,74 +295,94 @@ class SupplierOrderController extends Controller
     public function store(Request $requests)
     {
         $validator = Validator::make($requests->except('_method'), [
-            '*.supplier_id' => [ // Validate title field
-                'required', // Title is required
-                function ($attribute, $value, $fail) { // Custom validation rule
-                    // Call the function to rename removed records
+            '*.supplier_id' => [
+                'required',
+                function ($attribute, $value, $fail) {
                     $account_id = getAccountUser()->account_id;
                     $titleModel = Supplier::where(['id' => $value])->where('account_id', $account_id)->first();
                     if (!$titleModel) {
-                        $fail("not exist");
+                        $fail('not exist');
                     }
                 },
             ],
-
             '*.productVariationAttributes.*.id' => [
-                'required', 'int',
+                'required',
+                'int',
                 function ($attribute, $value, $fail) use ($requests) {
-                    $supplier_id = $requests->toArray()[0]["supplier_id"];
+                    $supplier_id = $requests->toArray()[0]['supplier_id'] ?? null;
                     $account = getAccountUser()->account_id;
-                    $phone = SupplierPva::where(['product_variation_attribute_id' => $value, 'supplier_id' => $supplier_id])->first();
-                    if (!$phone) {
-                        $fail("not exist for this supplier");
+                    $pva = ProductVariationAttribute::where(['id' => $value, 'account_id' => $account])->first();
+                    if (!$pva) {
+                        $fail('not exist');
                     }
                 },
             ],
             '*.warehouse_id' => [
-                'required', 'int',
+                'required',
+                'int',
                 function ($attribute, $value, $fail) {
                     $account = getAccountUser()->account_id;
                     $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->first();
                     if (!$warehouse) {
-                        $fail("not exist");
+                        $fail('not exist');
                     }
                 },
             ],
-            '*.productVariationAttributes.*.quantity' => 'required|numeric',
+            '*.productVariationAttributes.*.quantity' => 'required|numeric|min:1',
             '*.productVariationAttributes.*.price' => 'numeric',
-            '*.shipping_date' => 'date',
+            '*.shipping_date' => 'nullable|date',
         ]);
+
         if ($validator->fails()) {
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
             ]);
-        };
+        }
+
         $supplierOrders = collect($requests->except('_method'))->map(function ($request) {
-            $request["account_user_id"] = getAccountUser()->id;
+            $request['account_user_id'] = getAccountUser()->id;
             $account_id = getAccountUser()->account_id;
             $request['code'] = DefaultCodeController::getAccountCode('SupplierOrder', $account_id);
+            $request['statut'] = isset($request['statut']) ? (int) $request['statut'] : SupplierOrder::STATUS_PENDING;
+
             $supplierOrder_only = collect($request)->only('code', 'shipping_date', 'warehouse_id', 'supplier_id', 'statut', 'account_user_id');
             $supplierOrder = SupplierOrder::create($supplierOrder_only->all());
 
             if (isset($request['productVariationAttributes'])) {
                 foreach ($request['productVariationAttributes'] as $pvaData) {
-                    $pva = SupplierPva::where(['supplier_id' => $supplierOrder->supplier_id, 'product_variation_attribute_id' => $pvaData['id']])->first();
+                    $pva = SupplierPva::firstOrCreate(
+                        [
+                            'supplier_id' => $supplierOrder->supplier_id,
+                            'product_variation_attribute_id' => $pvaData['id'],
+                        ],
+                        [
+                            'price' => $pvaData['price'] ?? 0,
+                            'statut' => 1,
+                            'account_id' => $account_id,
+                        ]
+                    );
+
                     SupplierOrderPva::create([
                         'product_variation_attribute_id' => $pva->product_variation_attribute_id,
                         'supplier_order_id' => $supplierOrder->id,
-                        'quantity' => $pvaData["quantity"],
-                        'price' => (isset($pvaData['price'])) ? $pvaData['price'] : $pva->price,
+                        'supplier_receipt_id' => null,
+                        'quantity' => (int) $pvaData['quantity'],
+                        'received_quantity' => 0,
+                        'cancelled_quantity' => 0,
+                        'hors_commande_quantity' => 0,
+                        'price' => isset($pvaData['price']) ? $pvaData['price'] : $pva->price,
                         'account_user_id' => getAccountUser()->id,
+                        'statut' => 1,
                         'created_at' => now(),
-                        'updated_at' => now()
+                        'updated_at' => now(),
                     ]);
                 }
             }
 
-            $supplierOrder = SupplierOrder::with('supplier')->find($supplierOrder->id);
-            return $supplierOrder;
+            return SupplierOrder::with('supplier')->find($supplierOrder->id);
         });
+
         return response()->json([
             'statut' => 1,
             'data' => $supplierOrders,
@@ -280,248 +396,240 @@ class SupplierOrderController extends Controller
 
     public function edit(Request $request, $id)
     {
-        $request = collect($request->query())->toArray();
+        $requestData = collect($request->query())->toArray();
         $data = [];
         $supplierOrder = SupplierOrder::with(['warehouse', 'supplier.warehouses', 'supplier.addresses.city', 'supplier.phones.PhoneTypes'])->find($id);
-        if (!$supplierOrder)
+        if (!$supplierOrder) {
             return response()->json([
                 'statut' => 0,
-                'data' => 'not exist'
+                'data' => 'not exist',
             ]);
-        if (isset($request['supplierOrderInfo'])) {
-            $data["supplierOrderInfo"]['data'] = $supplierOrder;
-            $data['supplierOrderInfo']['data']['principalImage'] = $supplierOrder->supplier->images;
         }
-        if (isset($request['products']['active'])) {
-            // Récupérer les produits du fournisseur avec leurs attributs de variation et types d'attributs
-            $filters = HelperFunctions::filterColumns($request['products']['active'], ['title', 'addresse', 'phone', 'products']);
-            $supplierProducts = SupplierOrder::with(['productVariationAttributes.product', 'productVariationAttributes.variationAttribute.childVariationAttributes.attribute.typeAttribute'])->find($id);
-            // Mapper les données des produits pour les formater correctement
-            $productDatas = $supplierProducts->productVariationAttributes->map(function ($productVariationAttribute) {
-                // Créer un tableau avec les données de base du produit
-                $pvaData = [
-                    "id" => $productVariationAttribute->id,
-                    "price" => $productVariationAttribute->pivot->price,
-                    "quantity" => $productVariationAttribute->pivot->quantity,
-                    "title" => $productVariationAttribute->product->title,
-                    "created_at" => $productVariationAttribute->product->created_at,
-                    "statut" => $productVariationAttribute->product->statut,
-                    "images" => $productVariationAttribute->product->images,
-                    "productType" => $productVariationAttribute->product->productType,
-                    "product_id" => $productVariationAttribute->product->id
-                ];
-                // Récupérer les variations d'attributs pour chaque produit
-                $pvaData['variations'] = $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
-                    // Vérifier si l'attribut a un type
-                    if ($childVariationAttribute->attribute->typeAttribute) {
-                        // Retourner les données formatées pour chaque attribut de variation
-                        return [
-                            "id" => $childVariationAttribute->id,
-                            "type" => $childVariationAttribute->attribute->typeAttribute->title,
-                            "value" => $childVariationAttribute->attribute->title
-                        ];
-                    }
-                })->filter(); // Filtrer les valeurs nulles (attributs sans type)
 
-                return $pvaData; // Retourner les données formatées du produit
-            });
-            $pvas = [];
-            foreach ($productDatas as $key => $productData) {
-                $pvas[$productData['product_id']][] = ["id" => $productData["id"], "price" => $productData["price"], "quantity" => $productData["quantity"], "variations" => $productData["variations"]];
-            }
-            $products = [];
-            foreach ($productDatas as $key => $productData) {
-                $products[$productData['product_id']]["id"] = $productData['product_id'];
-                $products[$productData['product_id']]["title"] = $productData['title'];
-                $products[$productData['product_id']]["created_at"] = $productData['created_at'];
-                $products[$productData['product_id']]["statut"] = $productData['statut'];
-                $products[$productData['product_id']]["images"] = $productData['images'];
-                $products[$productData['product_id']]["productType"] = $productData['productType'];
-                $products[$productData['product_id']]["productVariations"] = $pvas[$productData['product_id']];
-            }
-            $data['products']['active'] =  HelperFunctions::getPagination(collect($products), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+        if (isset($requestData['supplierOrderInfo'])) {
+            $data['supplierOrderInfo']['data'] = $supplierOrder;
+            $data['supplierOrderInfo']['data']['principalImage'] = $supplierOrder->supplier ? $supplierOrder->supplier->images : [];
         }
-        if (isset($request['products']['inactive'])) {
-            // Récupérer les produits du fournisseur avec leurs attributs de variation et types d'attributs
-            $filters = HelperFunctions::filterColumns($request['products']['inactive'], ['title', 'addresse', 'phone', 'products']);
-            $supplierProducts = ProductVariationAttribute::with(['product', 'variationAttribute.childVariationAttributes.attribute.typeAttribute'])->whereDoesntHave('supplierOrders', function ($query) use ($supplierOrder) {
-                $query->where('supplier_order_id', $supplierOrder->id);
-            })->get();
-            // Mapper les données des produits pour les formater correctement
-            $productDatas = $supplierProducts->map(function ($productVariationAttribute) {
-                // Créer un tableau avec les données de base du produit
-                $pvaData = [
-                    "id" => $productVariationAttribute->id,
-                    "title" => $productVariationAttribute->product->title,
-                    "created_at" => $productVariationAttribute->product->created_at,
-                    "statut" => $productVariationAttribute->product->statut,
-                    "images" => $productVariationAttribute->product->images,
-                    "productType" => $productVariationAttribute->product->productType,
-                    "product_id" => $productVariationAttribute->product->id
-                ];
-                if ($productVariationAttribute->variationAttribute) {
-                    // Récupérer les variations d'attributs pour chaque produit
-                    $pvaData['variations'] = $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
-                        // Vérifier si l'attribut a un type
-                        if ($childVariationAttribute->attribute->typeAttribute) {
-                            // Retourner les données formatées pour chaque attribut de variation
+
+        if (isset($requestData['products']['active'])) {
+            $filters = HelperFunctions::filterColumns($requestData['products']['active'], ['title', 'addresse', 'phone', 'products']);
+            $orderLines = SupplierOrderPva::where('supplier_order_id', $supplierOrder->id)
+                ->whereNull('supplier_receipt_id')
+                ->with([
+                    'productVariationAttribute.product.images',
+                    'productVariationAttribute.product.productType',
+                    'productVariationAttribute.variationAttribute.childVariationAttributes.attribute.typeAttribute',
+                ])
+                ->get();
+
+            $pvas = [];
+            $products = [];
+
+            foreach ($orderLines as $line) {
+                $pva = $line->productVariationAttribute;
+                if (!$pva || !$pva->product) {
+                    continue;
+                }
+                $product = $pva->product;
+                $variations = ($pva->variationAttribute && $pva->variationAttribute->childVariationAttributes)
+                    ? $pva->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
+                        if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute) {
                             return [
-                                "id" => $childVariationAttribute->id,
-                                "type" => $childVariationAttribute->attribute->typeAttribute->title,
-                                "value" => $childVariationAttribute->attribute->title
+                                'id' => $childVariationAttribute->id,
+                                'type' => $childVariationAttribute->attribute->typeAttribute->title,
+                                'value' => $childVariationAttribute->attribute->title,
                             ];
                         }
-                    })->filter(); // Filtrer les valeurs nulles (attributs sans type)
+                        return null;
+                    })->filter()->values()
+                    : [];
 
-                    return $pvaData;
-                } // Retourner les données formatées du produit
-            })->filter();
-            $pvas = [];
-            foreach ($productDatas as $key => $productData) {
-                $pvas[$productData['product_id']][] = ["id" => $productData["id"], "variations" => $productData["variations"]];
+                $pvas[$product->id][] = [
+                    'id' => $pva->id,
+                    'price' => $line->price,
+                    'quantity' => $line->quantity,
+                    'received_quantity' => (int) $line->received_quantity,
+                    'cancelled_quantity' => (int) $line->cancelled_quantity,
+                    'remaining_quantity' => max(0, (int) $line->quantity - (int) $line->received_quantity - (int) $line->cancelled_quantity),
+                    'variations' => $variations,
+                ];
+
+                $products[$product->id] = [
+                    'id' => $product->id,
+                    'title' => $product->title,
+                    'reference' => $product->reference,
+                    'created_at' => $product->created_at,
+                    'statut' => $product->statut,
+                    'images' => $product->images,
+                    'productType' => $product->productType,
+                    'productVariations' => $pvas[$product->id],
+                ];
             }
-            $products = [];
-            foreach ($productDatas as $key => $productData) {
-                $products[$productData['product_id']]["id"] = $productData['product_id'];
-                $products[$productData['product_id']]["title"] = $productData['title'];
-                $products[$productData['product_id']]["created_at"] = $productData['created_at'];
-                $products[$productData['product_id']]["statut"] = $productData['statut'];
-                $products[$productData['product_id']]["images"] = $productData['images'];
-                $products[$productData['product_id']]["productType"] = $productData['productType'];
-                $products[$productData['product_id']]["productVariations"] = $pvas[$productData['product_id']];
-            }
 
-            $data['products']['inactive'] =  HelperFunctions::getPagination(collect($products), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
+            $data['products']['active'] = HelperFunctions::getPagination(collect($products), $filters['pagination']['per_page'], $filters['pagination']['current_page']);
         }
-        if (isset($request['warehouses']['active'])) {
-            $model = 'App\\Models\\Warehouse';
-            //permet de récupérer la liste des regions inactive filtrés
-            $request['warehouses']['active']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['warehouses']['active']['whereIn'][0] = ['table' => 'suppliers', 'column' => 'supplier_id', 'value' => $supplierOrder->supplier_id];
-            $request['warehouses']['active']['where'] = ["column" => 'warehouse_type_id', "value" => 1];
-            $data['warehouses']['active'] = FilterController::searchs(new Request($request['warehouses']['active']), $model, ['id', 'title'], true);
-        }
-        if (isset($request['warehouses']['inactive'])) {
-            $model = 'App\\Models\\Warehouse';
-            //permet de récupérer la liste des regions inactive filtrés
-            $request['warehouses']['inactive']['inAccount'] = ['account_id', getAccountUser()->account_id];
-            $request['warehouses']['inactive']['whereNotIn'][0] = ['table' => 'suppliers', 'column' => 'supplier_id', 'value' => $supplierOrder->supplier_id];
-            $request['warehouses']['inactive']['where'] = ["column" => 'warehouse_type_id', "value" => 1];
-            $data['warehouses']['inactive'] = FilterController::searchs(new Request($request['warehouses']['inactive']), $model, ['id', 'title'], true);
-        }
-
-
 
         return response()->json([
             'statut' => 1,
-            'data' => $data
+            'data' => $data,
         ]);
     }
 
-    public function update(Request $requests)
+    public function update(Request $requests, SupplierProcurementService $procurementService)
     {
         $validator = Validator::make($requests->except('_method'), [
             '*.id' => 'required|exists:supplier_orders,id',
-            '*.supplier_id' => [ // Validate title field
-                'required', // Title is required
-                function ($attribute, $value, $fail) { // Custom validation rule
-                    // Call the function to rename removed records
+            '*.supplier_id' => [
+                'required',
+                function ($attribute, $value, $fail) {
                     $account_id = getAccountUser()->account_id;
                     $titleModel = Supplier::where(['id' => $value])->where('account_id', $account_id)->first();
                     if (!$titleModel) {
-                        $fail("not exist");
+                        $fail('not exist');
                     }
                 },
             ],
             '*.warehouse_id' => [
-                'required', 'int',
+                'required',
+                'int',
                 function ($attribute, $value, $fail) {
                     $account = getAccountUser()->account_id;
                     $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->first();
                     if (!$warehouse) {
-                        $fail("not exist");
+                        $fail('not exist');
                     }
                 },
             ],
             '*.productVariationAttributes.*.id' => [
-                'required', 'int',
+                'required',
+                'int',
                 function ($attribute, $value, $fail) {
                     $account = getAccountUser()->account_id;
-                    $phone = SupplierPva::where(['id' => $value, 'account_id' => $account])->first();
-                    if (!$phone) {
-                        $fail("not exist");
+                    $pva = ProductVariationAttribute::where(['id' => $value, 'account_id' => $account])->first();
+                    if (!$pva) {
+                        $fail('not exist');
                     }
                 },
             ],
-            '*.productVariationAttributes.*.quantity' => 'required|numeric',
+            '*.productVariationAttributes.*.quantity' => 'required|numeric|min:1',
             '*.productVariationAttributes.*.price' => 'numeric',
         ]);
+
         if ($validator->fails()) {
             return response()->json([
                 'statut' => 0,
                 'data' => $validator->errors(),
             ]);
-        };
+        }
 
-        $supplierOrders = collect($requests->except('_method'))->map(function ($request) {
-            $supplierOrder_only = collect($request)->only('id', 'shipping_date', 'warehouse_id', 'supplier_id', 'statut', 'statut');
-            $supplierOrder = supplierOrder::find($supplierOrder_only['id']);
-            $supplierOrder->update($supplierOrder_only->all());
+        $supplierOrders = collect($requests->except('_method'))->map(function ($request) use ($procurementService) {
+            $supplierOrder = SupplierOrder::find($request['id']);
+            $account_id = getAccountUser()->account_id;
+
+            $updateData = collect($request)->only('shipping_date', 'warehouse_id', 'supplier_id', 'statut')->toArray();
+            $supplierOrder->update($updateData);
 
             if (isset($request['productVariationAttributes'])) {
-                //récupérer les ids produits de la commandes 
-                $supplierOrderProducts = SupplierOrderPva::where('supplier_order_id', $request['id'])->get();
-                $supplierOrderProductIds = collect($request['productVariationAttributes'])->pluck('id')->toArray();
-                //récupérer les enregistrements a supprimée
-                $sopToDeletes = $supplierOrderProducts->map(function ($supporderproduct) use ($supplierOrderProductIds) {
-                    if (!in_array($supporderproduct->product_variation_attribute_id, $supplierOrderProductIds))
-                        return $supporderproduct->id;
-                })->filter();
-                //supprimer les produits manquant
-                $sopToDeletes->map(function ($sopToDelete) {
-                    $supplierOrderProduct = SupplierOrderPva::find($sopToDelete);
-                    $supplierOrderProduct->delete();
-                });
+                $existingOrderLines = SupplierOrderPva::where('supplier_order_id', $supplierOrder->id)
+                    ->whereNull('supplier_receipt_id')
+                    ->get();
+
+                $incomingPvaIds = collect($request['productVariationAttributes'])->pluck('id')->map(fn ($id) => (int) $id)->toArray();
+
+                // Only delete lines that were removed and have 0 received_quantity
+                foreach ($existingOrderLines as $existingLine) {
+                    if (!in_array((int) $existingLine->product_variation_attribute_id, $incomingPvaIds, true)) {
+                        if ((int) $existingLine->received_quantity === 0) {
+                            $existingLine->delete();
+                        }
+                    }
+                }
+
                 foreach ($request['productVariationAttributes'] as $pvaData) {
-                    $isExist = SupplierOrderPva::where(['product_variation_attribute_id' => $pvaData['id'], 'supplier_order_id' => $supplierOrder->id])->first();
+                    $isExist = SupplierOrderPva::where([
+                        'product_variation_attribute_id' => $pvaData['id'],
+                        'supplier_order_id' => $supplierOrder->id,
+                    ])->whereNull('supplier_receipt_id')->first();
+
                     if ($isExist) {
+                        $newQty = max((int) $isExist->received_quantity, (int) ($pvaData['quantity'] ?? $isExist->quantity));
                         $isExist->update([
-                            'quantity' => (isset($pvaData['quantity'])) ? $pvaData['quantity'] : $isExist->quantity,
-                            'price' => (isset($pvaData['price'])) ? $pvaData['price'] : $isExist->price,
+                            'quantity' => $newQty,
+                            'price' => isset($pvaData['price']) ? $pvaData['price'] : $isExist->price,
                         ]);
                     } else {
-                        $pva = SupplierPva::where(['supplier_id' => $supplierOrder->supplier_id, 'product_variation_attribute_id' => $pvaData['id']])->first();
-                        if ($pva) {
-                            SupplierOrderPva::create([
-                                'product_variation_attribute_id' => $pva->product_variation_attribute_id,
-                                'supplier_order_id' => $supplierOrder->id,
-                                'quantity' => $pvaData["quantity"],
-                                'price' => (isset($pvaData['price'])) ? $pvaData['price'] : $pva->price,
-                                'account_user_id' => getAccountUser()->id,
-                                'created_at' => now(),
-                                'updated_at' => now()
-                            ]);
-                        }
+                        $pva = SupplierPva::firstOrCreate(
+                            [
+                                'supplier_id' => $supplierOrder->supplier_id,
+                                'product_variation_attribute_id' => $pvaData['id'],
+                            ],
+                            [
+                                'price' => $pvaData['price'] ?? 0,
+                                'statut' => 1,
+                                'account_id' => $account_id,
+                            ]
+                        );
+                        SupplierOrderPva::create([
+                            'product_variation_attribute_id' => $pva->product_variation_attribute_id,
+                            'supplier_order_id' => $supplierOrder->id,
+                            'supplier_receipt_id' => null,
+                            'quantity' => (int) $pvaData['quantity'],
+                            'received_quantity' => 0,
+                            'cancelled_quantity' => 0,
+                            'hors_commande_quantity' => 0,
+                            'price' => isset($pvaData['price']) ? $pvaData['price'] : $pva->price,
+                            'account_user_id' => getAccountUser()->id,
+                            'statut' => 1,
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ]);
                     }
                 }
             }
 
-            $supplierOrder = SupplierOrder::with('supplier')->find($supplierOrder->id);
-            return $supplierOrder;
+            $procurementService->recalculateOrderStatus($supplierOrder->fresh());
+
+            return SupplierOrder::with('supplier')->find($supplierOrder->id);
         });
+
         return response()->json([
             'statut' => 1,
             'data' => $supplierOrders,
         ]);
     }
 
-    public function destroy($id)
+    /**
+     * Force-close remaining quantities on a SupplierOrder ("Clôturer le reste").
+     */
+    public function closeRemaining(Request $request, $id, SupplierProcurementService $procurementService)
     {
-        $SupplierOder = SupplierOrder::find($id);
-        $SupplierOder->delete();
+        $supplierOrder = SupplierOrder::find($id);
+        if (!$supplierOrder) {
+            return response()->json([
+                'statut' => 0,
+                'message' => 'Commande fournisseur introuvable',
+            ], 404);
+        }
+
+        $pvaId = $request->input('pva_id') ? (int) $request->input('pva_id') : null;
+        $updated = $procurementService->closeOrderRemaining($supplierOrder, $pvaId);
+
         return response()->json([
             'statut' => 1,
-            'data' => $SupplierOder,
+            'data' => $updated,
+            'message' => 'Reliquat clôturé avec succès',
+        ]);
+    }
+
+    public function destroy($id)
+    {
+        $supplierOrder = SupplierOrder::find($id);
+        if ($supplierOrder) {
+            $supplierOrder->delete();
+        }
+        return response()->json([
+            'statut' => 1,
+            'data' => $supplierOrder,
         ]);
     }
 }

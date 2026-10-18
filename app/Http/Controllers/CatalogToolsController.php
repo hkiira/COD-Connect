@@ -49,6 +49,7 @@ class CatalogToolsController extends Controller
         $data = $request->validate([
             'supplier_id' => ['required', 'integer'],
             'warehouse_id' => ['nullable', 'integer'],
+            'merge_open_order' => ['nullable', 'boolean'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.pva_id' => ['required', 'integer'],
             'items.*.quantity' => ['required', 'numeric', 'min:1'],
@@ -63,27 +64,58 @@ class CatalogToolsController extends Controller
         }
         $warehouseId = $warehouseId ?? Warehouse::where(['account_id' => $accountId, 'warehouse_type_id' => 1, 'statut' => 1])->value('id');
 
-        $order = SupplierOrder::create([
-            'code' => DefaultCodeController::getAccountCode('SupplierOrder', $accountId),
-            'supplier_id' => $data['supplier_id'],
-            'account_user_id' => $accountUserId,
-            'warehouse_id' => $warehouseId,
-            'statut' => 1,
-        ]);
+        $order = \Illuminate\Support\Facades\DB::transaction(function () use ($data, $accountId, $accountUserId, $warehouseId) {
+            $order = null;
+            if (!empty($data['merge_open_order'])) {
+                $order = SupplierOrder::where('supplier_id', $data['supplier_id'])
+                    ->where('warehouse_id', $warehouseId)
+                    ->where('statut', SupplierOrder::STATUS_PENDING)
+                    ->whereNull('deleted_at')
+                    ->orderByDesc('id')
+                    ->first();
+            }
 
-        foreach ($data['items'] as $item) {
-            SupplierOrderPva::create([
-                'supplier_order_id' => $order->id,
-                'product_variation_attribute_id' => $item['pva_id'],
-                'quantity' => $item['quantity'],
-                'price' => $item['price'] ?? 0,
-                'sop_type_id' => 1,
-                'statut' => 1,
-                'account_user_id' => $accountUserId,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-        }
+            if (!$order) {
+                $order = SupplierOrder::create([
+                    'code' => DefaultCodeController::getAccountCode('SupplierOrder', $accountId),
+                    'supplier_id' => $data['supplier_id'],
+                    'account_user_id' => $accountUserId,
+                    'warehouse_id' => $warehouseId,
+                    'statut' => SupplierOrder::STATUS_PENDING,
+                ]);
+            }
+
+            foreach ($data['items'] as $item) {
+                $existingLine = SupplierOrderPva::where('supplier_order_id', $order->id)
+                    ->where('product_variation_attribute_id', $item['pva_id'])
+                    ->whereNull('supplier_receipt_id')
+                    ->whereNull('deleted_at')
+                    ->first();
+
+                if ($existingLine) {
+                    $existingLine->update([
+                        'quantity' => (float) $existingLine->quantity + (float) $item['quantity'],
+                        'price' => isset($item['price']) && (float) $item['price'] > 0 ? $item['price'] : $existingLine->price,
+                    ]);
+                } else {
+                    SupplierOrderPva::create([
+                        'supplier_order_id' => $order->id,
+                        'supplier_receipt_id' => null,
+                        'product_variation_attribute_id' => $item['pva_id'],
+                        'quantity' => $item['quantity'],
+                        'received_quantity' => 0,
+                        'cancelled_quantity' => 0,
+                        'hors_commande_quantity' => 0,
+                        'price' => $item['price'] ?? 0,
+                        'sop_type_id' => 1,
+                        'statut' => 1,
+                        'account_user_id' => $accountUserId,
+                    ]);
+                }
+            }
+
+            return $order;
+        });
 
         return response()->json([
             'status' => 'success',

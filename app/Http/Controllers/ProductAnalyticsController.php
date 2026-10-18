@@ -53,7 +53,7 @@ class ProductAnalyticsController extends Controller
             ]);
         }
 
-        // 1. Fetch Movements from mouvement_pva
+        // 1. Fetch Movements from mouvement_pva (only active applied movements with statut = 1)
         $mvtQuery = DB::table('mouvement_pva as mp')
             ->join('mouvements as m', 'm.id', '=', 'mp.mouvement_id')
             ->join('product_variation_attribute as pva', 'pva.id', '=', 'mp.product_variation_attribute_id')
@@ -63,6 +63,12 @@ class ProductAnalyticsController extends Controller
             ->leftJoin('account_user as au', 'au.id', '=', 'mp.account_user_id')
             ->leftJoin('users as u', 'u.id', '=', 'au.user_id')
             ->whereIn('mp.product_variation_attribute_id', $pvaIds)
+            ->where('m.statut', 1)
+            ->where('mp.statut', 1)
+            ->where(function ($q) {
+                $q->whereNull('m.description')
+                    ->orWhere('m.description', 'NOT LIKE', "Ajustement d'inventaire:%");
+            })
             ->whereNull('mp.deleted_at')
             ->whereNull('m.deleted_at');
 
@@ -108,7 +114,10 @@ class ProductAnalyticsController extends Controller
             : collect();
 
         $receipts = !empty($movementIds)
-            ? SupplierReceipt::with('supplier:id,title')->whereIn('mouvement_id', $movementIds)->get()->keyBy('mouvement_id')
+            ? SupplierReceipt::with([
+                'supplier:id,title',
+                'supplierOrderPvas.orderAllocations.orderLine.supplierOrder:id,code',
+            ])->whereIn('mouvement_id', $movementIds)->get()->keyBy('mouvement_id')
             : collect();
 
         $shipments = !empty($movementIds)
@@ -125,6 +134,7 @@ class ProductAnalyticsController extends Controller
             $direction = 'neutral';
             $refCode = $row->mouvement_code;
             $entityName = null;
+            $notes = null;
             $qty = (float) $row->quantity;
 
             if ($receipt) {
@@ -133,6 +143,27 @@ class ProductAnalyticsController extends Controller
                 $direction = 'in';
                 $refCode = $receipt->code ?: $row->mouvement_code;
                 $entityName = $receipt->supplier?->title;
+
+                $pvaLine = $receipt->supplierOrderPvas->firstWhere('product_variation_attribute_id', $row->pva_id);
+                if ($pvaLine) {
+                    $orderCodes = $pvaLine->orderAllocations
+                        ->map(fn ($a) => $a->orderLine?->supplierOrder?->code)
+                        ->filter()
+                        ->unique()
+                        ->values()
+                        ->toArray();
+                    $horsCmd = (float) ($pvaLine->hors_commande_quantity ?? 0);
+                    $parts = [];
+                    if (!empty($orderCodes)) {
+                        $parts[] = 'Cmd: ' . implode(', ', $orderCodes);
+                    }
+                    if ($horsCmd > 0) {
+                        $parts[] = "+{$horsCmd} Hors cmd";
+                    }
+                    if (!empty($parts)) {
+                        $notes = implode(' · ', $parts);
+                    }
+                }
             } elseif ($pickup) {
                 $type = 'pickup';
                 $typeLabel = 'Bon de Ramassage';
@@ -179,7 +210,7 @@ class ProductAnalyticsController extends Controller
                 'reference' => $refCode,
                 'entity' => $entityName ?: '—',
                 'user' => $row->user_name ?: 'Système',
-                'notes' => null,
+                'notes' => $notes,
             ];
         });
 

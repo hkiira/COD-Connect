@@ -244,6 +244,10 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('type_offers', OfferTypeController::class);
     Route::resource('type_products', ProductTypeController::class);
     Route::resource('pva_packs', PVAPackController::class);
+    Route::post('supplier_orders/{id}/close-remaining', [SupplierOrderController::class, 'closeRemaining']);
+    Route::get('supplier_receipts/pending-items', [SupplierReceiptController::class, 'pendingItems']);
+    Route::post('supplier_receipts/{id}/validate', [SupplierReceiptController::class, 'validateReceiptAction']);
+    Route::post('supplier_receipts/{id}/unvalidate', [SupplierReceiptController::class, 'unvalidateReceiptAction']);
     Route::resource('supplier_orders', SupplierOrderController::class);
     Route::resource('supplier_receipts', SupplierReceiptController::class);
     Route::resource('type_mouvements', MouvementTypeController::class);
