@@ -411,10 +411,48 @@ class FilterController extends Controller
     private static function handleOrderCustomers($model, $id)
     {
         $object = "App\\Models\\Phone";
-        $results = $object::where('account_id', getAccountUser()->account_id)->where('title', 'like', "%{$id}%")->orderBy('created_at', 'desc')->get();
-        $datas = $results->flatMap(function ($result) {
-            return $result->customers->map(function ($customer) use ($result) {
-                $customerData = $customer->only('id', 'name');
+        $accountId = getAccountUser()->account_id;
+        $normPhone = \App\Services\CustomerIdentityService::normalizePhone((string) $id);
+        $results = $object::where('account_id', $accountId)
+            ->where(function ($q) use ($id, $normPhone) {
+                $q->where('title', 'like', "%{$id}%");
+                if ($normPhone !== '' && $normPhone !== (string) $id) {
+                    $q->orWhere('title', 'like', "%{$normPhone}%");
+                }
+            })
+            ->with(['customers.addresses.city', 'phoneTypes'])
+            ->orderBy('created_at', 'desc')
+            ->take(10)
+            ->get();
+
+        $allCustomerIds = $results->flatMap(fn ($r) => $r->customers->pluck('id'))->unique()->values()->all();
+        $customerMetrics = \App\Services\CustomerIdentityService::batchCustomerMetrics($allCustomerIds);
+
+        $datas = $results->flatMap(function ($result) use ($customerMetrics) {
+            return $result->customers->map(function ($customer) use ($result, $customerMetrics) {
+                $m = $customerMetrics[$customer->id] ?? [
+                    'delivered_count' => 0,
+                    'returned_count' => 0,
+                    'pending_count' => 0,
+                    'total_orders' => 0,
+                    'lifetime_value' => 0.0,
+                    'average_order_value' => 0.0,
+                    'delivery_rate' => null,
+                    'return_rate' => 0.0,
+                    'tier' => 'Regular',
+                    'trust_level' => 'new',
+                ];
+                $customerData = $customer->only('id', 'name', 'note');
+                $customerData['is_blacklisted'] = (bool) $customer->is_blacklisted;
+                $customerData['delivered_count'] = $m['delivered_count'];
+                $customerData['returned_count'] = $m['returned_count'];
+                $customerData['pending_count'] = $m['pending_count'];
+                $customerData['total_orders'] = $m['total_orders'];
+                $customerData['lifetime_value'] = $m['lifetime_value'];
+                $customerData['delivery_rate'] = $m['delivery_rate'];
+                $customerData['return_rate'] = $m['return_rate'];
+                $customerData['tier'] = $m['tier'];
+                $customerData['trust_level'] = $m['trust_level'];
                 $customerData['phone'] = $result->only('id', 'title');
                 if ($result->phoneTypes) {
                     $customerData['phone']['phoneTypes'] = $result->phoneTypes->map(function ($phoneType) {
@@ -425,11 +463,16 @@ class FilterController extends Controller
                 }
                 $customerData['addresses'] = $customer->addresses->map(function ($address) {
                     $addressData = $address->only('id', 'title');
+                    $addressData['city_id'] = $address->city_id;
+                    $addressData['city'] = $address->city ? [
+                        'id' => $address->city->id,
+                        'title' => $address->city->title . ($address->city->titlear ? " - " . $address->city->titlear : "")
+                    ] : null;
                     return $addressData;
-                });
+                })->values();
                 return $customerData;
             });
-        })->unique()->filter();
+        })->unique('id')->filter()->values();
         return ["statut" => 1, "type" => $model, "data" => $datas->toArray()];
     }
 
@@ -858,10 +901,48 @@ class FilterController extends Controller
                 break;
             case 'order_customers':
                 $object = "App\\Models\\Phone";
-                $results = $object::where('account_id', getAccountUser()->account_id)->where('title', 'like', "%{$id}%")->orderBy('created_at', 'desc')->take(10)->get();
-                $datas = $results->flatMap(function ($result) {
-                    return $result->customers->map(function ($customer) use ($result) {
-                        $customerData = $customer->only('id', 'name');
+                $accountId = getAccountUser()->account_id;
+                $normPhone = \App\Services\CustomerIdentityService::normalizePhone((string) $id);
+                $results = $object::where('account_id', $accountId)
+                    ->where(function ($q) use ($id, $normPhone) {
+                        $q->where('title', 'like', "%{$id}%");
+                        if ($normPhone !== '' && $normPhone !== (string) $id) {
+                            $q->orWhere('title', 'like', "%{$normPhone}%");
+                        }
+                    })
+                    ->with(['customers.addresses.city', 'phoneTypes'])
+                    ->orderBy('created_at', 'desc')
+                    ->take(10)
+                    ->get();
+
+                $allCustomerIds = $results->flatMap(fn ($r) => $r->customers->pluck('id'))->unique()->values()->all();
+                $customerMetrics = \App\Services\CustomerIdentityService::batchCustomerMetrics($allCustomerIds);
+
+                $datas = $results->flatMap(function ($result) use ($customerMetrics) {
+                    return $result->customers->map(function ($customer) use ($result, $customerMetrics) {
+                        $m = $customerMetrics[$customer->id] ?? [
+                            'delivered_count' => 0,
+                            'returned_count' => 0,
+                            'pending_count' => 0,
+                            'total_orders' => 0,
+                            'lifetime_value' => 0.0,
+                            'average_order_value' => 0.0,
+                            'delivery_rate' => null,
+                            'return_rate' => 0.0,
+                            'tier' => 'Regular',
+                            'trust_level' => 'new',
+                        ];
+                        $customerData = $customer->only('id', 'name', 'note');
+                        $customerData['is_blacklisted'] = (bool) $customer->is_blacklisted;
+                        $customerData['delivered_count'] = $m['delivered_count'];
+                        $customerData['returned_count'] = $m['returned_count'];
+                        $customerData['pending_count'] = $m['pending_count'];
+                        $customerData['total_orders'] = $m['total_orders'];
+                        $customerData['lifetime_value'] = $m['lifetime_value'];
+                        $customerData['delivery_rate'] = $m['delivery_rate'];
+                        $customerData['return_rate'] = $m['return_rate'];
+                        $customerData['tier'] = $m['tier'];
+                        $customerData['trust_level'] = $m['trust_level'];
                         $customerData['phone'] = $result->only('id', 'title');
                         if ($result->phoneTypes) {
                             $customerData['phone']['phoneTypes'] = $result->phoneTypes->map(function ($phoneType) {
@@ -872,9 +953,13 @@ class FilterController extends Controller
                         }
                         $customerData['addresses'] = $customer->addresses->map(function ($address) {
                             $addressData = $address->only('id', 'title');
-                            $addressData['city'] = ['id' => $address->city->id, 'title' => $address->city->title.($address->city->titlear ? " - ".$address->city->titlear : "")];
+                            $addressData['city_id'] = $address->city_id;
+                            $addressData['city'] = $address->city ? [
+                                'id' => $address->city->id,
+                                'title' => $address->city->title . ($address->city->titlear ? " - " . $address->city->titlear : "")
+                            ] : null;
                             return $addressData;
-                        });
+                        })->values();
                         $customerData['orders'] = $customer->orders->map(function ($data) {
                             $orderData = $data->only('id', 'code', 'shipping_code', 'note', 'order_id', 'created_at', 'updated_at');
                             // Calculate score dynamically from account_user_order_status and order_comment tables

@@ -8,6 +8,7 @@ use App\Models\WooCommerce\VariationLink;
 use App\Services\WooCommerce\VariationMatcher;
 use App\Services\WooCommerce\WooCommerceClient;
 use App\Services\WooCommerce\WooCommerceException;
+use App\Services\WooCommerce\WooCommerceSyncWorkspaceService;
 use App\Support\Orders\OrderOwnership;
 use App\Support\WooCommerce\StoreResolver;
 use Illuminate\Http\JsonResponse;
@@ -276,6 +277,74 @@ class WooCommerceProductController extends Controller
             'reference' => $group[0]->reference,
             'options' => $group->pluck('option')->filter()->values()->all(),
         ])->all();
+    }
+
+    public function syncWorkspaceAnalyze(Request $request, $id): JsonResponse
+    {
+        $store = StoreResolver::resolve($id);
+        $service = new WooCommerceSyncWorkspaceService();
+        try {
+            $data = $service->analyze($store);
+            return response()->json($data);
+        } catch (WooCommerceException $e) {
+            return $this->failed($e);
+        } catch (\Throwable $e) {
+            return response()->json(['statut' => 0, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function generateProduct(Request $request, $id): JsonResponse
+    {
+        $store = StoreResolver::resolve($id);
+        $wcProductId = (int) $request->input('wc_product_id');
+        if (! $wcProductId) {
+            return response()->json(['statut' => 0, 'message' => 'wc_product_id est requis.'], 422);
+        }
+
+        $service = new WooCommerceSyncWorkspaceService();
+        try {
+            $res = $service->generateProduct($store, $wcProductId);
+            return response()->json($res);
+        } catch (\Throwable $e) {
+            return response()->json(['statut' => 0, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function generateVariation(Request $request, $id): JsonResponse
+    {
+        $store = StoreResolver::resolve($id);
+        $wcProductId = (int) $request->input('wc_product_id');
+        $wcVariationId = (int) $request->input('wc_variation_id');
+        $localProductId = (int) $request->input('local_product_id');
+
+        if (! $wcProductId || ! $wcVariationId || ! $localProductId) {
+            return response()->json(['statut' => 0, 'message' => 'wc_product_id, wc_variation_id et local_product_id sont requis.'], 422);
+        }
+
+        $service = new WooCommerceSyncWorkspaceService();
+        try {
+            $res = $service->generateVariation($store, $wcProductId, $wcVariationId, $localProductId);
+            return response()->json($res);
+        } catch (\Throwable $e) {
+            return response()->json(['statut' => 0, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function bulkGenerate(Request $request, $id): JsonResponse
+    {
+        $store = StoreResolver::resolve($id);
+        $items = (array) $request->input('items', []);
+        if (empty($items)) {
+            return response()->json(['statut' => 0, 'message' => 'Aucun élément sélectionné.'], 422);
+        }
+
+        $service = new WooCommerceSyncWorkspaceService();
+        try {
+            $res = $service->bulkGenerate($store, $items);
+            return response()->json($res);
+        } catch (\Throwable $e) {
+            return response()->json(['statut' => 0, 'message' => $e->getMessage()], 500);
+        }
     }
 
     private function failed(WooCommerceException $e): JsonResponse

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Customer;
+use App\Services\CustomerIdentityService;
 use App\Support\Orders\ReturnRules;
 use App\Models\Address;
 use App\Models\Phone;
@@ -13,99 +14,260 @@ use Illuminate\Support\Facades\Validator;
 class CustomerController extends Controller
 {
     /**
+     * Apply a COD segment filter to a Customer query.
+     */
+    private static function applySegmentFilter($query, string $segment): void
+    {
+        switch ($segment) {
+            case 'repeat':
+            case 'multiple_orders':
+                $query->whereHas('orders', function ($q) {
+                    $q->where('type', 'sale')->whereIn('order_status_id', [7, 10]);
+                }, '>=', 2);
+                break;
+
+            case 'vip':
+            case 'loyal':
+                $query->where('customers.is_blacklisted', false)
+                    ->where(function ($q) {
+                        $q->whereHas('orders', function ($sub) {
+                            $sub->where('type', 'sale')->whereIn('order_status_id', [7, 10]);
+                        }, '>=', 3)
+                        ->orWhereRaw('(
+                            SELECT COALESCE(SUM(order_pva.price * order_pva.quantity), 0)
+                            FROM orders
+                            JOIN order_pva ON orders.id = order_pva.order_id
+                            WHERE orders.customer_id = customers.id
+                              AND orders.type = "sale"
+                              AND orders.order_status_id IN (7, 10)
+                              AND orders.deleted_at IS NULL
+                              AND order_pva.deleted_at IS NULL
+                              AND order_pva.order_status_id NOT IN (2, 3)
+                        ) >= 2500');
+                    });
+                break;
+
+            case 'dormant':
+                $cutoff = now()->subDays(45);
+                $query->where('customers.is_blacklisted', false)
+                    ->whereHas('orders', function ($q) {
+                        $q->where('type', 'sale')->whereIn('order_status_id', [7, 10]);
+                    }, '>=', 1)
+                    ->whereDoesntHave('orders', function ($q) use ($cutoff) {
+                        $q->where('type', 'sale')->where('created_at', '>=', $cutoff);
+                    });
+                break;
+
+            case 'risky':
+                $query->where(function ($q) {
+                    $q->whereHas('orders', function ($sub) {
+                        $sub->where('type', 'sale')->where('order_status_id', 11);
+                    }, '>=', 2)
+                    ->orWhere(function ($sub) {
+                        $sub->whereHas('orders', function ($r) {
+                            $r->where('type', 'sale')->where('order_status_id', 11);
+                        }, '>=', 1)
+                        ->whereDoesntHave('orders', function ($d) {
+                            $d->where('type', 'sale')->whereIn('order_status_id', [7, 10]);
+                        });
+                    });
+                });
+                break;
+
+            case 'blacklisted':
+                $query->where('customers.is_blacklisted', true);
+                break;
+        }
+    }
+
+    /**
+     * Normalize incoming customer payload keys from various frontend forms.
+     */
+    private static function normalizeCustomerItem(array $item): array
+    {
+        if (!isset($item['note']) && isset($item['notes'])) {
+            $item['note'] = $item['notes'];
+        }
+
+        if (!isset($item['customer_type_id']) && isset($item['customer_type'])) {
+            $ct = $item['customer_type'];
+            if (is_numeric($ct)) {
+                $item['customer_type_id'] = (int) $ct;
+            } elseif (is_string($ct)) {
+                $item['customer_type_id'] = strtolower($ct) === 'company' ? 2 : 1;
+            } elseif (is_array($ct) && isset($ct['id'])) {
+                $item['customer_type_id'] = (int) $ct['id'];
+            }
+        }
+
+        if (isset($item['phones']) && is_array($item['phones'])) {
+            $normalizedPhones = [];
+            foreach ($item['phones'] as $phoneData) {
+                if (!is_array($phoneData)) {
+                    continue;
+                }
+                $rawTitle = $phoneData['title'] ?? $phoneData['phone'] ?? '';
+                $normTitle = CustomerIdentityService::normalizePhone((string) $rawTitle);
+                if ($normTitle === '') {
+                    continue;
+                }
+                $phoneData['title'] = $normTitle;
+                $normalizedPhones[] = $phoneData;
+            }
+            $item['phones'] = $normalizedPhones;
+        }
+
+        if (isset($item['addresses']) && is_array($item['addresses'])) {
+            $normalizedAddresses = [];
+            foreach ($item['addresses'] as $addressData) {
+                if (!is_array($addressData)) {
+                    continue;
+                }
+                $title = trim((string) ($addressData['title'] ?? ''));
+                $detail = trim((string) ($addressData['address'] ?? ''));
+                if ($detail !== '' && $title !== '' && $detail !== $title && !str_contains($title, $detail)) {
+                    $addressData['title'] = $title . ' - ' . $detail;
+                } elseif ($title === '' && $detail !== '') {
+                    $addressData['title'] = $detail;
+                }
+                if (!empty($addressData['title'])) {
+                    $normalizedAddresses[] = $addressData;
+                }
+            }
+            $item['addresses'] = $normalizedAddresses;
+        }
+
+        return $item;
+    }
+
+    /**
      * Display a paginated and searchable list of customers.
      */
     public function index(Request $request)
     {
-        $perPage = $request->input('pagination.per_page', 15);
-        $currentPage = $request->input('pagination.current_page', 1);
+        $perPage = max(1, min(200, (int) $request->input('pagination.per_page', 15)));
+        $currentPage = max(1, (int) $request->input('pagination.page', $request->input('pagination.current_page', 1)));
 
-        $query = Customer::query()->where('customers.account_id', getAccountUser()->account_id);
+        $accountId = getAccountUser()->account_id;
+        $query = Customer::query()->where('customers.account_id', $accountId);
 
-        // Handle search
-        if ($request->has('search')) {
-            $searchTerm = $request->search;
-            $query->where(function ($q) use ($searchTerm) {
-                $q->where('name', 'like', "%{$searchTerm}%")
-                    ->orWhereHas('phones', function ($phoneQuery) use ($searchTerm) {
+        // Handle search (name, code, note, or raw/normalized phone)
+        if ($request->filled('search')) {
+            $searchTerm = trim((string) $request->search);
+            $normalizedPhoneSearch = CustomerIdentityService::normalizePhone($searchTerm);
+
+            $query->where(function ($q) use ($searchTerm, $normalizedPhoneSearch) {
+                $q->where('customers.name', 'like', "%{$searchTerm}%")
+                    ->orWhere('customers.code', 'like', "%{$searchTerm}%")
+                    ->orWhere('customers.note', 'like', "%{$searchTerm}%")
+                    ->orWhereHas('phones', function ($phoneQuery) use ($searchTerm, $normalizedPhoneSearch) {
                         $phoneQuery->where('title', 'like', "%{$searchTerm}%");
+                        if ($normalizedPhoneSearch !== '' && $normalizedPhoneSearch !== $searchTerm) {
+                            $phoneQuery->orWhere('title', 'like', "%{$normalizedPhoneSearch}%");
+                        }
                     });
             });
         }
 
-        // Handle is_blacklisted filter (When 1, only blacklisted; When 0, only non-blacklisted)
-        if ($request->has('is_blacklisted') && $request->input('is_blacklisted') !== null && $request->input('is_blacklisted') !== '') {
-            $query->where('customers.is_blacklisted', $request->input('is_blacklisted') == 1);
+        // Handle segment filter or legacy flags
+        $segment = (string) $request->input('segment', '');
+        if ($segment !== '' && $segment !== 'all') {
+            self::applySegmentFilter($query, $segment);
+        } else {
+            if ($request->has('is_blacklisted') && $request->input('is_blacklisted') !== null && $request->input('is_blacklisted') !== '') {
+                $query->where('customers.is_blacklisted', $request->input('is_blacklisted') == 1);
+            }
+            if ($request->input('has_multiple_orders') == 1) {
+                self::applySegmentFilter($query, 'repeat');
+            }
+            if ($request->input('is_loyal') == 1) {
+                self::applySegmentFilter($query, 'vip');
+            }
         }
 
-        // Handle has_multiple_orders filter (When 1, orders_count > 1)
-        if ($request->input('has_multiple_orders') == 1) {
-            $query->whereHas('orders', function ($q) {
-                $q->where('type', 'sale');
-            }, '>', 1);
-        }
-
-        // Handle is_loyal filter (When 1, orders_count > 5 OR lifetime value > 5000)
-        if ($request->input('is_loyal') == 1) {
-            $query->where(function ($q) {
-                $q->whereHas('orders', function ($sub) {
-                    $sub->where('type', 'sale');
-                }, '>', 5)
-                ->orWhere(function ($sub) {
-                    $sub->whereRaw('(
-                        SELECT COALESCE(SUM(order_pva.price * order_pva.quantity), 0)
-                        FROM orders
-                        JOIN order_pva ON orders.id = order_pva.order_id
-                        WHERE orders.customer_id = customers.id
-                          AND orders.type = "sale"
-                          AND orders.deleted_at IS NULL
-                    ) > 5000');
+        // Handle City filter
+        if ($request->filled('city_id')) {
+            $cityId = (int) $request->input('city_id');
+            if ($cityId > 0) {
+                $query->whereHas('addresses', function ($q) use ($cityId) {
+                    $q->where('addresses.city_id', $cityId);
                 });
-            });
+            }
         }
 
-        // Eager load relationships and calculate aggregates efficiently
+        // Handle Product Bought filter
+        if ($request->filled('product_id')) {
+            $productId = (int) $request->input('product_id');
+            if ($productId > 0) {
+                $query->whereHas('orders', function ($oq) use ($productId) {
+                    $oq->where('orders.type', 'sale')
+                        ->whereHas('orderPvas.productVariationAttribute', function ($pq) use ($productId) {
+                            $pq->where('product_id', $productId);
+                        });
+                });
+            }
+        }
+
+        // Eager load relationships and order by newest or latest activity
         $query->with(['phones', 'addresses.city', 'customerType', 'images'])
-            ->withCount([
-                'orders' => function ($query) {
-                    $query->where('type', 'sale');
-                }
-            ])
             ->with([
-                'latestOrder' => function ($query) {
-                    $query->where('type', 'sale');
+                'latestOrder' => function ($q) {
+                    $q->where('type', 'sale');
                 }
             ])
-            ->select('customers.*')
-            ->selectSub(
-                DB::table('orders')
-                    ->join('order_pva', 'orders.id', '=', 'order_pva.order_id')
-                    ->selectRaw('sum(order_pva.price * order_pva.quantity)')
-                    ->whereColumn('orders.customer_id', 'customers.id')
-                    ->where('orders.type', 'sale')
-                    ->whereNull('orders.deleted_at'),
-                'lifetime_value'
-            );
+            ->orderByDesc('customers.id');
 
         $paginator = $query->paginate($perPage, ['*'], 'page', $currentPage);
+        $customerIds = $paginator->getCollection()->pluck('id')->all();
+        $metricsMap = CustomerIdentityService::batchCustomerMetrics($customerIds);
 
-        $formattedData = $paginator->getCollection()->map(function ($customer) {
+        $formattedData = $paginator->getCollection()->map(function ($customer) use ($metricsMap) {
             $primaryAddress = $customer->addresses->first();
+            $m = $metricsMap[$customer->id] ?? [
+                'delivered_count' => 0,
+                'returned_count' => 0,
+                'pending_count' => 0,
+                'total_orders' => 0,
+                'lifetime_value' => 0.0,
+                'average_order_value' => 0.0,
+                'delivery_rate' => null,
+                'return_rate' => 0.0,
+                'tier' => 'Regular',
+                'trust_level' => 'new',
+            ];
 
             return [
                 'id' => $customer->id,
                 'name' => $customer->name,
                 'code' => $customer->code,
                 'note' => $customer->note,
+                'notes' => $customer->note,
+                'is_blacklisted' => (bool) $customer->is_blacklisted,
+                'tier' => $m['tier'],
+                'trust_level' => $m['trust_level'],
                 'customer_type' => $customer->customerType ? $customer->customerType->only('id', 'title') : null,
                 'primary_phone' => $customer->phones->first() ? $customer->phones->first()->title : null,
-                'primary_address' => $primaryAddress ? ($primaryAddress->title . ', ' . $primaryAddress->city->title) : null,
-                'city' => $primaryAddress ? $primaryAddress->city->title : null,
+                'primary_address' => $primaryAddress ? ($primaryAddress->title . ($primaryAddress->city ? ', ' . $primaryAddress->city->title : '')) : null,
+                'city' => $primaryAddress && $primaryAddress->city ? $primaryAddress->city->title : null,
+                'city_id' => $primaryAddress ? $primaryAddress->city_id : null,
                 'images' => $customer->images,
-                'orders_count' => $customer->orders->count(),
-                'lifetime_value' => (float) $customer->lifetime_value ?? 0,
+                'orders_count' => $m['total_orders'],
+                'delivered_count' => $m['delivered_count'],
+                'returned_count' => $m['returned_count'],
+                'pending_count' => $m['pending_count'],
+                'delivery_rate' => $m['delivery_rate'],
+                'return_rate' => $m['return_rate'],
+                'lifetime_value' => $m['lifetime_value'],
+                'average_order_value' => $m['average_order_value'],
                 'last_order_date' => $customer->latestOrder ? $customer->latestOrder->created_at->toIso8601String() : null,
-                'created_at' => $customer->created_at->toIso8601String(),
+                'created_at' => $customer->created_at ? $customer->created_at->toIso8601String() : null,
+                'phones' => $customer->phones->map(fn ($p) => ['id' => $p->id, 'title' => $p->title, 'phone' => $p->title])->values(),
+                'addresses' => $customer->addresses->map(fn ($a) => [
+                    'id' => $a->id,
+                    'title' => $a->title,
+                    'city_id' => $a->city_id,
+                    'city' => $a->city ? $a->city->only('id', 'title') : null,
+                ])->values(),
             ];
         });
 
@@ -119,15 +281,16 @@ class CustomerController extends Controller
     }
 
     /**
-     * Store a newly created customer in storage.
+     * Store a newly created customer in storage (or reuse/enrich existing customer if phone already exists).
      */
     public static function store(Request $request, $local = 0)
     {
-        $data = $request->all();
-        // If the request is a single associative array, wrap it in an array so we can process it uniformly.
+        $data = $request->except('_method');
         if (!isset($data[0]) || !is_array($data[0])) {
             $data = [$data];
         }
+
+        $data = array_values(array_map([self::class, 'normalizeCustomerItem'], $data));
 
         $validator = Validator::make($data, [
             '*.name' => 'required|string|max:255',
@@ -145,43 +308,88 @@ class CustomerController extends Controller
         ]);
 
         if ($validator->fails()) {
-            if ($local) {
-                // In local mode (called from another controller), throw an exception or return a response
-                return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
-            }
             return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
         }
 
-        $customers = DB::transaction(function () use ($data) {
+        $accountId = getAccountUser()->account_id;
+
+        $customers = DB::transaction(function () use ($data, $accountId) {
             $createdCustomers = [];
             foreach ($data as $item) {
-                $customerData = \Illuminate\Support\Arr::only($item, ['name', 'email', 'customer_type_id', 'note']);
-                $customerData['account_id'] = getAccountUser()->account_id;
-                $customerData['code'] = DefaultCodeController::getAccountCode('Customer', $customerData['account_id']);
+                $phoneTitles = collect($item['phones'] ?? [])->pluck('title')->filter()->all();
+                $existingCustomer = null;
 
-                $customer = Customer::create($customerData);
+                if (!empty($phoneTitles)) {
+                    $existingPhone = Phone::with('customers')
+                        ->where('account_id', $accountId)
+                        ->whereIn('title', $phoneTitles)
+                        ->whereHas('customers')
+                        ->orderBy('created_at', 'desc')
+                        ->first();
+                    $existingCustomer = $existingPhone?->customers?->first();
+                }
+
+                if ($existingCustomer) {
+                    $bestName = CustomerIdentityService::chooseBestName($existingCustomer->name, $item['name'] ?? null);
+                    $existingCustomer->update([
+                        'name' => $bestName,
+                        'customer_type_id' => $item['customer_type_id'] ?? $existingCustomer->customer_type_id ?? 1,
+                        'note' => !empty($item['note']) ? $item['note'] : $existingCustomer->note,
+                    ]);
+                    $customer = $existingCustomer;
+                } else {
+                    $customerData = \Illuminate\Support\Arr::only($item, ['name', 'email', 'customer_type_id', 'note']);
+                    $customerData['customer_type_id'] = $customerData['customer_type_id'] ?? 1;
+                    $customerData['account_id'] = $accountId;
+                    $customerData['code'] = DefaultCodeController::getAccountCode('Customer', $accountId);
+                    $customer = Customer::create($customerData);
+                }
 
                 if (isset($item['phones'])) {
                     foreach ($item['phones'] as $phoneData) {
-                        $customer->phones()->create([
-                            'title' => $phoneData['title'],
-                            'account_id' => $customerData['account_id']
-                        ]);
-                        // Note: Attaching phone types would require a many-to-many pivot table for phone_phone_type
+                        $normPhone = CustomerIdentityService::normalizePhone($phoneData['title'] ?? '');
+                        if ($normPhone === '') {
+                            continue;
+                        }
+                        $phoneModel = Phone::where('account_id', $accountId)->where('title', $normPhone)->first();
+                        if (!$phoneModel) {
+                            $phoneModel = Phone::create([
+                                'title' => $normPhone,
+                                'account_id' => $accountId,
+                            ]);
+                        }
+                        $customer->phones()->syncWithoutDetaching([$phoneModel->id]);
                     }
                 }
 
                 if (isset($item['addresses'])) {
-                    $customer->addresses()->createMany($item['addresses']);
+                    foreach ($item['addresses'] as $addressData) {
+                        $title = trim($addressData['title'] ?? '');
+                        $cityId = $addressData['city_id'] ?? null;
+                        if ($title === '') {
+                            continue;
+                        }
+                        $existingAddress = $customer->addresses()
+                            ->where('title', $title)
+                            ->when($cityId !== null, fn ($q) => $q->where('city_id', $cityId))
+                            ->first();
+                        if (!$existingAddress) {
+                            $customer->addresses()->create([
+                                'title' => $title,
+                                'city_id' => $cityId,
+                            ]);
+                        }
+                    }
                 }
 
-                $createdCustomers[] = $customer->load('phones', 'addresses');
+                $createdCustomers[] = $customer->load('phones', 'addresses.city');
             }
             return collect($createdCustomers);
         });
 
-        if ($local == 1)
+        if ($local == 1) {
             return $customers;
+        }
 
         return response()->json([
             'statut' => 1,
@@ -203,30 +411,19 @@ class CustomerController extends Controller
             return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
         }
 
-        // Calculate Stats
-        $stats = DB::table('orders')
-            ->selectRaw('COUNT(id) as total_valid_orders')
-            ->selectRaw('SUM(CASE WHEN order_status_id = 11 THEN 1 ELSE 0 END) as returned_orders')
-            ->where('customer_id', $id)
-            ->where('type', 'sale')
-            ->whereNull('deleted_at')
-            ->first();
-
-        $lifetimeValueResult = DB::table('orders')
-            ->join('order_pva', 'orders.id', '=', 'order_pva.order_id')
-            ->where('orders.customer_id', $id)
-            ->where('orders.type', 'sale')
-            ->whereIn('orders.order_status_id', [7, 10])
-            ->whereNull('orders.deleted_at')
-            ->sum(DB::raw('order_pva.price * order_pva.quantity'));
-
-        $lifetimeValue = (float) $lifetimeValueResult;
-        $totalOrders = (int) ($stats->total_valid_orders ?? 0);
-        $returnedOrders = (int) ($stats->returned_orders ?? 0);
-
-        $averageOrderValue = $totalOrders > 0 ? round($lifetimeValue / $totalOrders, 2) : 0;
-        $returnRate = $totalOrders > 0 ? round(($returnedOrders / $totalOrders) * 100, 2) : 0;
-        $tier = $lifetimeValue > 5000 ? 'VIP' : 'Regular';
+        $metricsMap = CustomerIdentityService::batchCustomerMetrics([$customer->id]);
+        $m = $metricsMap[$customer->id] ?? [
+            'delivered_count' => 0,
+            'returned_count' => 0,
+            'pending_count' => 0,
+            'total_orders' => 0,
+            'lifetime_value' => 0.0,
+            'average_order_value' => 0.0,
+            'delivery_rate' => null,
+            'return_rate' => 0.0,
+            'tier' => 'Regular',
+            'trust_level' => 'new',
+        ];
 
         // Manually paginate the orders to format them
         $ordersPaginator = $customer->orders()
@@ -292,6 +489,7 @@ class CustomerController extends Controller
             return [
                 'id' => $order->id,
                 'code' => $order->code,
+                'order_id' => $order->order_id,
                 'type' => $order->type,
                 'status' => $order->orderStatus ? $order->orderStatus->title : null,
                 'status_id' => (int) $order->order_status_id,
@@ -320,18 +518,30 @@ class CustomerController extends Controller
             'name' => $customer->name,
             'code' => $customer->code,
             'note' => $customer->note,
+            'notes' => $customer->note,
+            'primary_phone' => $customer->phones->first() ? $customer->phones->first()->title : null,
             'customer_type' => $customer->customerType ? $customer->customerType->only('id', 'title') : null,
-            'phones' => $customer->phones,
+            'phones' => $customer->phones->map(fn ($p) => [
+                'id' => $p->id,
+                'title' => $p->title,
+                'phone' => $p->title,
+            ])->values(),
             'addresses' => $customer->addresses,
             'images' => $customer->images,
             'wallet_balance' => (float) $customer->wallet_balance,
             'discount_percent' => (float) $customer->discount_percent,
             'is_blacklisted' => (bool) $customer->is_blacklisted,
             'tags' => $customer->tags,
-            'lifetime_value' => $lifetimeValue,
-            'average_order_value' => $averageOrderValue,
-            'return_rate' => $returnRate,
-            'tier' => $tier,
+            'orders_count' => $m['total_orders'],
+            'delivered_count' => $m['delivered_count'],
+            'returned_count' => $m['returned_count'],
+            'pending_count' => $m['pending_count'],
+            'delivery_rate' => $m['delivery_rate'],
+            'lifetime_value' => $m['lifetime_value'],
+            'average_order_value' => $m['average_order_value'],
+            'return_rate' => $m['return_rate'],
+            'tier' => $m['tier'],
+            'trust_level' => $m['trust_level'],
             'orders' => [
                 'data' => $formattedOrders,
                 'per_page' => $ordersPaginator->perPage(),
@@ -353,10 +563,12 @@ class CustomerController extends Controller
             return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
         }
 
-        $data = $request->all();
+        $data = $request->except('_method');
         if (!isset($data[0]) || !is_array($data[0])) {
             $data = [$data];
         }
+
+        $data = array_values(array_map([self::class, 'normalizeCustomerItem'], $data));
 
         $validator = Validator::make($data, [
             '*.name' => 'sometimes|required|string|max:255',
@@ -388,37 +600,58 @@ class CustomerController extends Controller
 
         DB::transaction(function () use ($data, $customer, $isOrder) {
             $item = $data[0];
-            $customer->update(\Illuminate\Support\Arr::only($item, ['name', 'email', 'customer_type_id', 'note']));
+            $updateFields = \Illuminate\Support\Arr::only($item, ['name', 'email', 'customer_type_id', 'note']);
+
+            // When called from order creation/update, never overwrite a real customer name with a placeholder
+            if ($isOrder && isset($updateFields['name'])) {
+                $updateFields['name'] = CustomerIdentityService::chooseBestName($customer->name, $updateFields['name']);
+            }
+
+            $customer->update($updateFields);
 
             // Sync Phones
             if (isset($item['phones'])) {
                 $phoneIds = [];
                 foreach ($item['phones'] as $phoneData) {
+                    $normPhone = CustomerIdentityService::normalizePhone($phoneData['title'] ?? '');
+                    if ($normPhone === '') {
+                        continue;
+                    }
+
                     if (isset($phoneData['id'])) {
                         $phone = Phone::find($phoneData['id']);
                         if ($phone) {
-                            $phone->update(['title' => $phoneData['title']]);
+                            $phone->update(['title' => $normPhone]);
                             $phoneIds[] = $phone->id;
                         }
                     } else {
                         $existingPhone = $customer->phones()
-                            ->where('title', $phoneData['title'])
+                            ->where('title', $normPhone)
                             ->first();
 
                         if ($existingPhone) {
                             $phoneIds[] = $existingPhone->id;
                         } else {
-                            $newPhone = $customer->phones()->create([
-                                'title' => $phoneData['title'],
-                                'account_id' => $customer->account_id,
-                            ]);
-                            $phoneIds[] = $newPhone->id;
+                            $accountPhone = Phone::where('account_id', $customer->account_id)
+                                ->where('title', $normPhone)
+                                ->first();
+
+                            if ($accountPhone) {
+                                $customer->phones()->syncWithoutDetaching([$accountPhone->id]);
+                                $phoneIds[] = $accountPhone->id;
+                            } else {
+                                $newPhone = $customer->phones()->create([
+                                    'title' => $normPhone,
+                                    'account_id' => $customer->account_id,
+                                ]);
+                                $phoneIds[] = $newPhone->id;
+                            }
                         }
                     }
                 }
                 // Remove any phones not in the request only when directly editing customer, never when placing an order
-                if (!$isOrder) {
-                    $customer->phones()->whereNotIn('phones.id', $phoneIds)->delete();
+                if (!$isOrder && !empty($phoneIds)) {
+                    $customer->phones()->whereNotIn('phones.id', $phoneIds)->detach();
                 }
             }
 
@@ -426,31 +659,47 @@ class CustomerController extends Controller
             if (isset($item['addresses'])) {
                 $addressIds = [];
                 foreach ($item['addresses'] as $addressData) {
+                    $title = trim($addressData['title'] ?? '');
+                    $cityId = $addressData['city_id'] ?? null;
+                    if ($title === '') {
+                        continue;
+                    }
+
                     if (isset($addressData['id'])) {
                         $address = Address::find($addressData['id']);
                         if ($address) {
-                            $address->update($addressData);
+                            $address->update([
+                                'title' => $title,
+                                'city_id' => $cityId ?? $address->city_id,
+                            ]);
                             $addressIds[] = $address->id;
                         }
                     } else {
-                        $title = trim($addressData['title'] ?? '');
-                        $cityId = $addressData['city_id'] ?? null;
                         $existingAddress = $customer->addresses()
                             ->where('title', $title)
                             ->when($cityId !== null, fn ($query) => $query->where('city_id', $cityId))
                             ->first();
 
                         if ($existingAddress) {
+                            // Touch pivot so the used address floats to the top as most recent
+                            DB::table('addressables')
+                                ->where('address_id', $existingAddress->id)
+                                ->where('addressable_id', $customer->id)
+                                ->where('addressable_type', Customer::class)
+                                ->update(['updated_at' => now(), 'created_at' => now()]);
                             $addressIds[] = $existingAddress->id;
                         } else {
-                            $newAddress = $customer->addresses()->create($addressData);
+                            $newAddress = $customer->addresses()->create([
+                                'title' => $title,
+                                'city_id' => $cityId,
+                            ]);
                             $addressIds[] = $newAddress->id;
                         }
                     }
                 }
                 // Remove addresses not in the request only when directly editing customer, never when placing an order
-                if (!$isOrder) {
-                    $customer->addresses()->whereNotIn('addresses.id', $addressIds)->delete();
+                if (!$isOrder && !empty($addressIds)) {
+                    $customer->addresses()->whereNotIn('addresses.id', $addressIds)->detach();
                 }
             }
         });
@@ -512,7 +761,7 @@ class CustomerController extends Controller
         return response()->json(['statut' => 1, 'message' => 'Call logged successfully', 'data' => $call]);
     }
 
-    public function toggleBlacklist($id)
+    public function toggleBlacklist(Request $request, $id)
     {
         $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
         if (!$customer) {
@@ -520,12 +769,22 @@ class CustomerController extends Controller
         }
 
         $customer->is_blacklisted = !$customer->is_blacklisted;
+
+        if ($customer->is_blacklisted && $request->filled('reason')) {
+            $reason = trim((string) $request->input('reason'));
+            $existingNote = trim((string) $customer->note);
+            if ($reason !== '' && !str_contains($existingNote, $reason)) {
+                $customer->note = $existingNote !== '' ? ($existingNote . ' | Blacklist: ' . $reason) : ('Blacklist: ' . $reason);
+            }
+        }
+
         $customer->save();
 
         return response()->json([
             'statut' => 1,
             'message' => 'Blacklist status toggled',
-            'is_blacklisted' => $customer->is_blacklisted
+            'is_blacklisted' => $customer->is_blacklisted,
+            'note' => $customer->note,
         ]);
     }
 
@@ -657,29 +916,7 @@ class CustomerController extends Controller
         DB::beginTransaction();
 
         try {
-            // Reassign Orders
-            \App\Models\Order::where('customer_id', $secondary->id)->update(['customer_id' => $primary->id]);
-
-            // Reassign Addresses
-            $secondaryAddresses = $secondary->addresses()->pluck('addresses.id')->toArray();
-            if (!empty($secondaryAddresses)) {
-                $primary->addresses()->syncWithoutDetaching($secondaryAddresses);
-                $secondary->addresses()->detach($secondaryAddresses);
-            }
-
-            // Reassign Phones
-            $secondaryPhones = $secondary->phones()->pluck('phones.id')->toArray();
-            if (!empty($secondaryPhones)) {
-                $primary->phones()->syncWithoutDetaching($secondaryPhones);
-                $secondary->phones()->detach($secondaryPhones);
-            }
-
-            // Reassign Calls
-            \App\Models\CustomerCall::where('customer_id', $secondary->id)->update(['customer_id' => $primary->id]);
-
-            // Soft Delete Secondary Customer
-            $secondary->delete();
-
+            CustomerIdentityService::mergeCustomerInto($primary, $secondary);
             DB::commit();
 
             return response()->json([
@@ -693,47 +930,51 @@ class CustomerController extends Controller
     }
 
     /**
-     * Get global count of customers in each segment.
+     * Normalize all phones and auto-merge duplicate customers sharing the same phone number.
+     */
+    public function deduplicate()
+    {
+        $accountId = getAccountUser()->account_id;
+        $stats = CustomerIdentityService::deduplicateAccount($accountId);
+
+        return response()->json([
+            'statut' => 1,
+            'data' => $stats,
+            'message' => 'Customer deduplication completed successfully.',
+        ]);
+    }
+
+    /**
+     * Get global count of customers in each COD segment.
      */
     public function counts(Request $request)
     {
         $accountId = getAccountUser()->account_id;
 
-        $all = Customer::where('account_id', $accountId)->count();
+        $countSegment = function (string $segment) use ($accountId): int {
+            $q = Customer::where('customers.account_id', $accountId);
+            if ($segment !== 'all') {
+                self::applySegmentFilter($q, $segment);
+            }
+            return $q->count();
+        };
 
-        $multiple_orders = Customer::where('account_id', $accountId)
-            ->whereHas('orders', function ($q) {
-                $q->where('type', 'sale');
-            }, '>', 1)
-            ->count();
-
-        $loyal = Customer::where('account_id', $accountId)
-            ->where(function ($q) {
-                $q->whereHas('orders', function ($sub) {
-                    $sub->where('type', 'sale');
-                }, '>', 5)
-                ->orWhere(function ($sub) {
-                    $sub->whereRaw('(
-                        SELECT COALESCE(SUM(order_pva.price * order_pva.quantity), 0)
-                        FROM orders
-                        JOIN order_pva ON orders.id = order_pva.order_id
-                        WHERE orders.customer_id = customers.id
-                          AND orders.type = "sale"
-                          AND orders.deleted_at IS NULL
-                    ) > 5000');
-                });
-            })
-            ->count();
-
-        $blacklisted = Customer::where('account_id', $accountId)
-            ->where('is_blacklisted', true)
-            ->count();
+        $all = $countSegment('all');
+        $repeat = $countSegment('repeat');
+        $vip = $countSegment('vip');
+        $dormant = $countSegment('dormant');
+        $risky = $countSegment('risky');
+        $blacklisted = $countSegment('blacklisted');
 
         return response()->json([
             'all' => $all,
-            'multiple_orders' => $multiple_orders,
-            'loyal' => $loyal,
-            'blacklisted' => $blacklisted
+            'repeat' => $repeat,
+            'multiple_orders' => $repeat,
+            'vip' => $vip,
+            'loyal' => $vip,
+            'dormant' => $dormant,
+            'risky' => $risky,
+            'blacklisted' => $blacklisted,
         ]);
     }
 }
