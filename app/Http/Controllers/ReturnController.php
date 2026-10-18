@@ -200,7 +200,7 @@ class ReturnController extends Controller
                 'required', 'int',
                 function ($attribute, $value, $fail) {
                     $account = getAccountUser()->account_id;
-                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->whereNot('warehouse_id', null)->first();
+                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->first();
                     if (!$warehouse) {
                         $fail("not exist");
                     }
@@ -209,15 +209,11 @@ class ReturnController extends Controller
             '*.productVariationAttributes.*.id' => [
                 'required', 'numeric',
                 function ($attribute, $value, $fail) use ($requests) {
-                    $keys = explode('.', $attribute); // Sépare la clé en segments
+                    $keys = explode('.', $attribute);
                     $firstIndex = $keys[0];
-                    $warehouseId = $requests[$firstIndex]['to_warehouse'];
+                    $warehouseId = $requests[$firstIndex]['to_warehouse'] ?? null;
                     if (!$warehouseId) {
                         $fail("Warehouse ID not found");
-                    }
-                    $warehousePva = WarehousePva::where(['product_variation_attribute_id' => $value, 'warehouse_id' => $warehouseId])->first();
-                    if (!$warehousePva) {
-                        $fail("Warehouse product not found");
                     }
                 },
             ],
@@ -235,6 +231,7 @@ class ReturnController extends Controller
             $account_id = getAccountUser()->account_id;
             $request['code'] = DefaultCodeController::getAccountCode('return', $account_id);
             $request['mouvement_type_id'] = 1;
+            $request['to_warehouse'] = app(\App\Services\StockMovementService::class)->resolveOperationalWarehouseId((int) $request['to_warehouse'], (int) $account_id);
             $return_only = collect($request)->only('code', 'mouvement_type_id', 'to_warehouse', 'description', 'statut', 'account_user_id');
             $return = Mouvement::create($return_only->all());
             if (isset($request['productVariationAttributes'])) {
@@ -344,7 +341,7 @@ class ReturnController extends Controller
                 'required', 'int',
                 function ($attribute, $value, $fail) {
                     $account = getAccountUser()->account_id;
-                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->whereNot('warehouse_id', null)->first();
+                    $warehouse = Warehouse::where(['id' => $value, 'account_id' => $account])->first();
                     if (!$warehouse) {
                         $fail("not exist");
                     }
@@ -353,15 +350,11 @@ class ReturnController extends Controller
             '*.productVariationAttributes.*.id' => [
                 'required', 'numeric',
                 function ($attribute, $value, $fail) use ($requests) {
-                    $keys = explode('.', $attribute); // Sépare la clé en segments
+                    $keys = explode('.', $attribute);
                     $firstIndex = $keys[0];
-                    $warehouseId = $requests[$firstIndex]['to_warehouse'];
+                    $warehouseId = $requests[$firstIndex]['to_warehouse'] ?? null;
                     if (!$warehouseId) {
                         $fail("Warehouse ID not found");
-                    }
-                    $warehousePva = WarehousePva::where(['product_variation_attribute_id' => $value, 'warehouse_id' => $warehouseId])->first();
-                    if (!$warehousePva) {
-                        $fail("Warehouse product not found");
                     }
                 },
             ],
@@ -376,6 +369,9 @@ class ReturnController extends Controller
             ]);
         };
         $returns = collect($requests->except('_method'))->map(function ($request) {
+            if (!empty($request['to_warehouse'])) {
+                $request['to_warehouse'] = app(\App\Services\StockMovementService::class)->resolveOperationalWarehouseId((int) $request['to_warehouse']);
+            }
             if (isset($request['validate']) && $request['validate'] == 1)
                 $request['statut'] = 2;
             $return_only = collect($request)->only('id', 'to_warehouse', 'description', 'statut');
@@ -441,7 +437,9 @@ class ReturnController extends Controller
     public function destroy($id)
     {
         $mouvement = Mouvement::find($id);
-        $mouvement->delete();
+        if ($mouvement) {
+            app(\App\Services\StockMovementService::class)->reverseAndDeleteMovement($mouvement);
+        }
         return response()->json([
             'statut' => 1,
             'data' => $mouvement,

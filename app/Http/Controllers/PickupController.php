@@ -370,37 +370,18 @@ class PickupController extends Controller
                 'data' => $validator->errors(),
             ], 422);
         };
-        $from_warehouse = $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first()->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first();
         // Pickup, order statuses, exit slip and stock move together or not at all.
-        $pickups = DB::transaction(fn () => collect($requests->except('_method'))->map(function ($request) use ($from_warehouse) {
+        $pickups = DB::transaction(fn () => collect($requests->except('_method'))->map(function ($request) {
             $request["account_user_id"] = getAccountUser()->id;
             $account_id = getAccountUser()->account_id;
             $request['code'] = (isset($request['code'])) ? $request['code'] : DefaultCodeController::getAccountCode('Pickup', $account_id);
             $pickup_only = collect($request)->only('code', 'title', 'warehouse_id', 'comment', 'carrier_id', 'statut', 'account_user_id', 'created_at', 'updated_at');
             $pickup = Pickup::create($pickup_only->all());
             if (isset($request['orders'])) {
-                $orderPvas = self::validatePickup(new Request($request['orders']), $pickup);
-                $productVariationAttributes = [];
-                collect($orderPvas)->flatten()->Map(function ($orderPva) use (&$productVariationAttributes) {
-                    if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
-                        $productVariationAttributes[$orderPva->product_variation_attribute_id]["quantity"] += $orderPva->quantity;
-                    } else {
-                        $productVariationAttributes[$orderPva->product_variation_attribute_id] = [
-                            "id" => $orderPva->product_variation_attribute_id,
-                            "quantity" => $orderPva->quantity,
-                        ];
-                    }
-                    $productVariationAttributes[$orderPva->product_variation_attribute_id]['orders'][] = $orderPva->id;
-                });
-                $pickupData = [
-                    'from_warehouse' => $from_warehouse->id,
-                    'statut' => 1,
-                    'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray()
-                ];
-                $exitslip = ExitslipController::store(new Request($pickupData));
-                $pickup->update(['mouvement_id' => $exitslip->id]);
+                self::validatePickup(new Request($request['orders']), $pickup);
+                app(\App\Services\StockMovementService::class)->syncPickupExitMovement($pickup);
             }
-            return $pickup;
+            return $pickup->fresh();
         }));
         return response()->json([
             'statut' => 1,
@@ -810,62 +791,27 @@ class PickupController extends Controller
             ], 422);
         };
         $pickups = collect($requests->except('_method'))->map(function ($request) {
-            $pickup_only = collect($request)->only('id', 'collector_id', 'title', 'comment', 'statut');
-            $pickup = Pickup::find($pickup_only['id']);
-            $pickup->update($pickup_only->all());
-            $this->validatePickup(new Request($pickup->orders->pluck('id')->toArray()), $pickup);
-            $warehouse = Warehouse::find($pickup->warehouse_id);
-            $fromWarehouseParent = $warehouse ? $warehouse->childWarehouses()->where('warehouse_type_id', 2)->first() : null;
-            $from_warehouse = $fromWarehouseParent ? $fromWarehouseParent->childWarehouses()->where(['warehouse_nature_id' => 1, 'warehouse_type_id' => 3])->first() : null;
+            return DB::transaction(function () use ($request) {
+                $pickup_only = collect($request)->only('id', 'collector_id', 'title', 'comment', 'statut', 'warehouse_id', 'carrier_id');
+                $pickup = Pickup::find($pickup_only['id']);
+                $pickup->update($pickup_only->all());
+                $this->validatePickup(new Request($pickup->orders->pluck('id')->toArray()), $pickup);
 
-            $productVariationAttributes = [];
-            if (isset($request['ordersToInactive'])) {
-                $this->validatePickup(new Request($request['ordersToInactive']), $pickup, $canceled = 1);
-            }
-
-            if (isset($request['ordersToActive'])) {
-                $this->validatePickup(new Request($request['ordersToActive']), $pickup);
-            }
-
-            // Keep one mouvement per pickup and sync it with the real current pickup stock.
-            if ((isset($request['ordersToInactive']) || isset($request['ordersToActive'])) && $from_warehouse) {
-                $pickup = Pickup::with('orders.activeOrderPvas')->find($pickup->id);
-                $productVariationAttributes = [];
-                $pickup->orders->each(function ($order) use (&$productVariationAttributes) {
-                    // cancelled / out-of-stock lines do not leave with the carrier
-                    $order->activeOrderPvas->each(function ($orderPva) use (&$productVariationAttributes) {
-                        if (isset($productVariationAttributes[$orderPva->product_variation_attribute_id])) {
-                            $productVariationAttributes[$orderPva->product_variation_attribute_id]["quantity"] += $orderPva->quantity;
-                        } else {
-                            $productVariationAttributes[$orderPva->product_variation_attribute_id] = [
-                                "id" => $orderPva->product_variation_attribute_id,
-                                "quantity" => $orderPva->quantity,
-                            ];
-                        }
-                        $productVariationAttributes[$orderPva->product_variation_attribute_id]['orders'][] = $orderPva->id;
-                    });
-                });
-
-                $pickupData = [
-                    'from_warehouse' => $from_warehouse->id,
-                    'statut' => 1,
-                    'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray()
-                ];
-
-                if ($pickup->mouvement_id) {
-                    app(ExitslipController::class)->update(new Request([[
-                        'id' => $pickup->mouvement_id,
-                        'from_warehouse' => $from_warehouse->id,
-                        'statut' => 1,
-                        'productVariationAttributes' => collect($productVariationAttributes)->values()->toArray(),
-                    ]]));
-                } elseif (count($pickupData['productVariationAttributes']) > 0) {
-                    $exitslip = ExitslipController::store(new Request($pickupData));
-                    $pickup->update(['mouvement_id' => $exitslip->id]);
+                if (isset($request['ordersToInactive']) && !empty($request['ordersToInactive'])) {
+                    $this->validatePickup(new Request($request['ordersToInactive']), $pickup, $canceled = 1);
                 }
-            }
 
-            return Pickup::with('orders')->find($pickup->id);
+                if (isset($request['ordersToActive']) && !empty($request['ordersToActive'])) {
+                    $this->validatePickup(new Request($request['ordersToActive']), $pickup);
+                }
+
+                // Always keep the pickup's exit movement synchronized with its active orders and warehouse
+                if (isset($request['ordersToInactive']) || isset($request['ordersToActive']) || isset($request['warehouse_id']) || !$pickup->mouvement_id) {
+                    app(\App\Services\StockMovementService::class)->syncPickupExitMovement($pickup);
+                }
+
+                return Pickup::with('orders')->find($pickup->id);
+            });
         });
         return response()->json([
             'statut' => 1,
@@ -877,11 +823,33 @@ class PickupController extends Controller
     public function destroy($id)
     {
         $pickup = Pickup::find($id);
-        $afraCodes = \App\Services\AfraShippingService::afraCodes($pickup->orders()->pluck('id')->all());
-        $pickup->delete();
+        if (!$pickup) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'not exist',
+            ], 404);
+        }
+
+        $orderIds = $pickup->orders()->pluck('id')->all();
+        $afraCodes = \App\Services\AfraShippingService::afraCodes($orderIds);
+
+        DB::transaction(function () use ($pickup, $orderIds) {
+            if (!empty($orderIds)) {
+                self::validatePickup(new Request($orderIds), $pickup, $canceled = 1);
+                Order::whereIn('id', $orderIds)->update(['pickup_id' => null]);
+            }
+
+            if ($pickup->mouvement_id) {
+                app(\App\Services\StockMovementService::class)->reverseAndDeleteMovement((int) $pickup->mouvement_id);
+            }
+
+            $pickup->delete();
+        });
+
         if ($afraCodes) {
             app(\App\Services\AfraShippingService::class)->cancelRemovedOrders($afraCodes, getAccountUser()->id);
         }
+
         return response()->json([
             'statut' => 1,
             'data' => $pickup,

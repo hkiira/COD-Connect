@@ -16,21 +16,37 @@ class SupplierOrderPva extends Model
         'product_variation_attribute_id',
         'receipt_id',
         'quantity',
+        'received_quantity',
+        'cancelled_quantity',
+        'hors_commande_quantity',
         'price',
         'account_user_id',
         'sop_type_id',
         'statut'
     ];
 
-    public function supplierOrder(){
+    public function supplierOrder()
+    {
         return $this->belongsTo(SupplierOrder::class);
     }
 
-    public function supplierReceipt(){
+    public function supplierReceipt()
+    {
         return $this->belongsTo(SupplierReceipt::class);
     }
 
-    public function productVariationAttribute(){
+    public function productVariationAttribute()
+    {
         return $this->belongsTo(ProductVariationAttribute::class, 'product_variation_attribute_id', 'id');
+    }
+
+    public function orderAllocations()
+    {
+        return $this->hasMany(SupplierOrderReceiptAllocation::class, 'supplier_order_pva_id');
+    }
+
+    public function receiptAllocations()
+    {
+        return $this->hasMany(SupplierOrderReceiptAllocation::class, 'supplier_receipt_pva_id');
     }
 }
