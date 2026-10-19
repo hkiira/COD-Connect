@@ -53,7 +53,7 @@ class OrderPva extends Model
     }
     public function productVariationAttribute()
     {
-        return $this->belongsTo(ProductVariationAttribute::class);
+        return $this->belongsTo(ProductVariationAttribute::class)->withTrashed();
     }
     public function mouvementPvas()
     {

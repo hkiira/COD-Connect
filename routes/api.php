@@ -17,6 +17,8 @@ use App\Http\Controllers\{
     CountryController,
     CityController,
     AccountController,
+    AccountMergeController,
+    AccountCleanupController,
     AttributeController,
     CategoryController,
     ProductController,
@@ -41,6 +43,7 @@ use App\Http\Controllers\{
     CommentController,
     SubCommentController,
     OrderController,
+    OrderDuplicateController,
     PermissionController,
     ImageController,
     FilterController,
@@ -238,6 +241,15 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('pvas', PVAController::class);
     Route::resource('users', UserController::class);
     Route::resource('accounts', AccountController::class);
+    Route::get('account-merge/accounts', [AccountMergeController::class, 'accounts']);
+    Route::get('account-merge/inspect', [AccountMergeController::class, 'inspect']);
+    Route::post('account-merge/draft', [AccountMergeController::class, 'saveDraft']);
+    Route::post('account-merge/preview', [AccountMergeController::class, 'preview']);
+    Route::post('account-merge/execute', [AccountMergeController::class, 'execute']);
+    Route::get('account-cleanup/accounts', [AccountCleanupController::class, 'index']);
+    Route::get('account-cleanup/inspect/{id}', [AccountCleanupController::class, 'inspect']);
+    Route::delete('account-cleanup/accounts/{id}', [AccountCleanupController::class, 'destroy']);
+    Route::post('account-cleanup/bulk-delete', [AccountCleanupController::class, 'bulkDelete']);
     Route::resource('compensationables', CompensationableController::class);
     Route::resource('default_codes', DefaultCodeController::class);
     Route::resource('measurements', MeasurementController::class);
@@ -277,6 +289,8 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('salaries', SalaryController::class);
     Route::resource('bonuses', BonusController::class);
     Route::get('orders/counts', [OrderController::class, 'counts']);
+    Route::get('orders/duplicates', [OrderDuplicateController::class, 'index']);
+    Route::post('orders/duplicates/bulk-delete', [OrderDuplicateController::class, 'bulkDelete']);
     // order workspaces: queue counters, assignment, focus mode, team figures, WhatsApp messages
     // (declared before the resource: PUT orders/message-templates must not reach PUT orders/{order})
     Route::get('orders/queues/counts', [OrderWorkspaceController::class, 'queueCounts']);
@@ -446,7 +460,25 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('next/getProduct', [NextController::class, 'getProduct']);
     Route::get('next/product_attributes/{id?}', [NextController::class, 'product_attributes']);
     Route::get('next/get_product_attributes/{id?}', [NextController::class, 'product_attributes']);
-    Route::get('next/get_customer', [NextController::class, 'get_customer']);
+    Route::get('next/get_customer/{id?}', [NextController::class, 'get_customer']);
+    Route::get('next/get_customer_details/{id?}', [NextController::class, 'get_customer']);
+    Route::get('next/customer/{id}', [NextController::class, 'get_customer']);
+    Route::get('next/get_customers', [NextController::class, 'get_customers']);
+    Route::get('next/customers', [NextController::class, 'get_customers']);
+    Route::get('next/get_customers_counts', [NextController::class, 'get_customers_counts']);
+    Route::get('next/customers/counts', [NextController::class, 'get_customers_counts']);
+    Route::post('next/create_customer', [NextController::class, 'create_customer']);
+    Route::post('next/customers', [NextController::class, 'create_customer']);
+    Route::post('next/update_customer/{id?}', [NextController::class, 'update_customer']);
+    Route::put('next/update_customer/{id}', [NextController::class, 'update_customer']);
+    Route::delete('next/delete_customer/{id?}', [NextController::class, 'delete_customer']);
+    Route::post('next/delete_customer/{id?}', [NextController::class, 'delete_customer']);
+    Route::post('next/log_customer_call/{id?}', [NextController::class, 'log_customer_call']);
+    Route::post('next/toggle_customer_blacklist/{id?}', [NextController::class, 'toggle_customer_blacklist']);
+    Route::get('next/get_customer_timeline/{id?}', [NextController::class, 'get_customer_timeline']);
+    Route::get('next/customer_timeline/{id?}', [NextController::class, 'get_customer_timeline']);
+    Route::post('next/merge_customers', [NextController::class, 'merge_customers']);
+    Route::post('next/deduplicate_customers', [NextController::class, 'deduplicate_customers']);
     Route::get('asap/asap-history/{start}/{end}', [AsapDeliveryController::class, 'asapHistory']);
     Route::get('asap/raw-html/{id}', [AsapDeliveryController::class, 'rawHtml']);
 

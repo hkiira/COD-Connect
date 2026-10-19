@@ -34,12 +34,12 @@ class ProductVariationAttribute extends Model
     }
     public function product()
     {
-        return $this->belongsTo(Product::class);
+        return $this->belongsTo(Product::class)->withTrashed();
     }
 
     public function variationAttribute()
     {
-        return $this->belongsTo(VariationAttribute::class);
+        return $this->belongsTo(VariationAttribute::class)->withTrashed();
     }
 
     public function account()
