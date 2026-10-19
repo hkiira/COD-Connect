@@ -16,7 +16,7 @@ class CustomerController extends Controller
     /**
      * Apply a COD segment filter to a Customer query.
      */
-    private static function applySegmentFilter($query, string $segment): void
+    public static function applySegmentFilter($query, string $segment): void
     {
         switch ($segment) {
             case 'repeat':
@@ -83,7 +83,7 @@ class CustomerController extends Controller
     /**
      * Normalize incoming customer payload keys from various frontend forms.
      */
-    private static function normalizeCustomerItem(array $item): array
+    public static function normalizeCustomerItem(array $item): array
     {
         if (!isset($item['note']) && isset($item['notes'])) {
             $item['note'] = $item['notes'];
@@ -618,10 +618,17 @@ class CustomerController extends Controller
                         continue;
                     }
 
+                    $phoneTypes = isset($phoneData['phoneTypes']) ? collect($phoneData['phoneTypes'])
+                        ->map(fn ($pt) => is_array($pt) ? ($pt['id'] ?? null) : (is_numeric($pt) ? (int) $pt : null))
+                        ->filter()->values()->all() : null;
+
                     if (isset($phoneData['id'])) {
                         $phone = Phone::find($phoneData['id']);
                         if ($phone) {
                             $phone->update(['title' => $normPhone]);
+                            if ($phoneTypes !== null) {
+                                $phone->phoneTypes()->sync($phoneTypes);
+                            }
                             $phoneIds[] = $phone->id;
                         }
                     } else {
@@ -630,6 +637,9 @@ class CustomerController extends Controller
                             ->first();
 
                         if ($existingPhone) {
+                            if ($phoneTypes !== null) {
+                                $existingPhone->phoneTypes()->sync($phoneTypes);
+                            }
                             $phoneIds[] = $existingPhone->id;
                         } else {
                             $accountPhone = Phone::where('account_id', $customer->account_id)
@@ -638,12 +648,18 @@ class CustomerController extends Controller
 
                             if ($accountPhone) {
                                 $customer->phones()->syncWithoutDetaching([$accountPhone->id]);
+                                if ($phoneTypes !== null) {
+                                    $accountPhone->phoneTypes()->sync($phoneTypes);
+                                }
                                 $phoneIds[] = $accountPhone->id;
                             } else {
                                 $newPhone = $customer->phones()->create([
                                     'title' => $normPhone,
                                     'account_id' => $customer->account_id,
                                 ]);
+                                if ($phoneTypes !== null) {
+                                    $newPhone->phoneTypes()->sync($phoneTypes);
+                                }
                                 $phoneIds[] = $newPhone->id;
                             }
                         }
@@ -651,7 +667,10 @@ class CustomerController extends Controller
                 }
                 // Remove any phones not in the request only when directly editing customer, never when placing an order
                 if (!$isOrder && !empty($phoneIds)) {
-                    $customer->phones()->whereNotIn('phones.id', $phoneIds)->detach();
+                    $toDetachPhones = $customer->phones()->whereNotIn('phones.id', $phoneIds)->pluck('phones.id')->all();
+                    if (!empty($toDetachPhones)) {
+                        $customer->phones()->detach($toDetachPhones);
+                    }
                 }
             }
 
@@ -692,6 +711,7 @@ class CustomerController extends Controller
                             $newAddress = $customer->addresses()->create([
                                 'title' => $title,
                                 'city_id' => $cityId,
+                                'account_id' => $customer->account_id,
                             ]);
                             $addressIds[] = $newAddress->id;
                         }
@@ -699,7 +719,10 @@ class CustomerController extends Controller
                 }
                 // Remove addresses not in the request only when directly editing customer, never when placing an order
                 if (!$isOrder && !empty($addressIds)) {
-                    $customer->addresses()->whereNotIn('addresses.id', $addressIds)->detach();
+                    $toDetachAddresses = $customer->addresses()->whereNotIn('addresses.id', $addressIds)->pluck('addresses.id')->all();
+                    if (!empty($toDetachAddresses)) {
+                        $customer->addresses()->detach($toDetachAddresses);
+                    }
                 }
             }
         });

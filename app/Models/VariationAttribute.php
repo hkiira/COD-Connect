@@ -39,7 +39,7 @@ class VariationAttribute extends Model
 
     public function attribute()
     {
-        return $this->belongsTo(Attribute::class, 'attribute_id');
+        return $this->belongsTo(Attribute::class, 'attribute_id')->withTrashed();
     }
     public function attributes(){
         return $this->belongsToMany( Attribute::class, 'variation_attributes');

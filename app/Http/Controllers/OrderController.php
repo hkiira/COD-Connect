@@ -146,7 +146,8 @@ class OrderController extends Controller
             return $pvas->pluck('product_variation_attribute_id');
         })->filter()->unique()->values()->all();
 
-        $pagePvaStocks = self::pvaStockAndTrouble($allPvaIds);
+        $accountId = getAccountUser()?->account_id;
+        $pagePvaStocks = self::pvaStockAndTrouble($allPvaIds, $accountId);
         $pageCustomerMetrics = \App\Services\CustomerIdentityService::batchCustomerMetrics(
             $orders->pluck('customer_id')->filter()->unique()->values()->all()
         );
@@ -257,11 +258,19 @@ class OrderController extends Controller
                     'arriving_stock' => 0,
                     'incoming_stock' => 0,
                 ];
-                $attributes = $actfOrderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
-                    return $child->attribute->code;
-                })->toArray();
+                $pva = $actfOrderPva->productVariationAttribute;
+                $variationAttribute = $pva?->variationAttribute;
+                $product = $pva?->product;
+
+                $attributes = $variationAttribute?->childVariationAttributes ? $variationAttribute->childVariationAttributes->map(function ($child) {
+                    return $child->attribute?->code;
+                })->filter()->toArray() : [];
+
+                $productTitle = $product?->title ?? 'Produit supprimé';
+                $productFullName = !empty($attributes) ? $productTitle . " " . implode('-', $attributes) : $productTitle;
+
                 $productInfo = [
-                    'id' => $actfOrderPva->productVariationAttribute->product->id,
+                    'id' => $product?->id,
                     'order_pva' => $actfOrderPva->id,
                     'product_variation_attribute_id' => $pvaId,
                     'price' => $actfOrderPva->price,
@@ -272,19 +281,19 @@ class OrderController extends Controller
                     'souffrance' => $pvaStockInfo['souffrance'],
                     'arriving_stock' => $pvaStockInfo['arriving_stock'],
                     'incoming_stock' => $pvaStockInfo['incoming_stock'],
-                    'images' => $actfOrderPva->productVariationAttribute->product->images->sortByDesc('created_at')->values(),
-                    'productType' => $actfOrderPva->productVariationAttribute->product->productType,
-                    'product' => $actfOrderPva->productVariationAttribute->product->title . " " . implode('-', $attributes),
-                    'name' => $actfOrderPva->productVariationAttribute->product->title . " " . implode('-', $attributes),
-                    'reference' => $actfOrderPva->productVariationAttribute->product->reference,
-                    'productsize' => $actfOrderPva->productVariationAttribute->variationAttribute->id,
-                    'attributes' => $actfOrderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($child) {
+                    'images' => $product?->images ? $product->images->sortByDesc('created_at')->values() : collect(),
+                    'productType' => $product?->productType,
+                    'product' => $productFullName,
+                    'name' => $productFullName,
+                    'reference' => $product?->reference ?? '',
+                    'productsize' => $variationAttribute?->id,
+                    'attributes' => $variationAttribute?->childVariationAttributes ? $variationAttribute->childVariationAttributes->map(function ($child) {
                         return [
-                            "id" => $child->attribute->id,
-                            "title" => $child->attribute->title,
-                            "typeAttribute" => $child->attribute->typeAttribute->title,
+                            "id" => $child->attribute?->id,
+                            "title" => $child->attribute?->title,
+                            "typeAttribute" => $child->attribute?->typeAttribute?->title,
                         ];
-                    }),
+                    }) : collect(),
                 ];
                 return $productInfo;
             });
@@ -588,17 +597,49 @@ class OrderController extends Controller
         $warehouseStocks = WarehousePva::whereIn('product_variation_attribute_id', $pvaIds)
             ->where('statut', 1)
             ->groupBy('product_variation_attribute_id')
-            ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as real_stock')
-            ->pluck('real_stock', 'product_variation_attribute_id');
+            ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as physical_stock')
+            ->pluck('physical_stock', 'product_variation_attribute_id');
 
-        // 2. Pending orders reserving stock before delivery (statuses 1: Pending, 4: Confirmed, 5: In preparation)
+        // 2. Confirmed products reserving real stock virtually before delivery/pickup (statuses 4: Confirmed, 5: In preparation)
+        $confirmedQuery = OrderPva::whereIn('product_variation_attribute_id', $pvaIds)
+            ->whereNull('deleted_at')
+            ->where(function ($q) {
+                $q->whereIn('order_status_id', [4, 5])
+                  ->orWhere(function ($sub) {
+                      $sub->whereNull('order_status_id')
+                          ->whereHas('order', fn ($oq) => $oq->whereIn('order_status_id', [4, 5]));
+                  })
+                  ->orWhereHas('order', function ($oq) {
+                      $oq->whereIn('order_status_id', [4, 5])
+                         ->whereNotIn('order_pva.order_status_id', [2, 3, 8]);
+                  });
+            })
+            ->whereHas('order', function ($oq) {
+                $oq->whereNull('pickup_id')->whereNull('shipment_id');
+            });
+        if ($accountId) {
+            $confirmedQuery->whereHas('order', fn ($oq) => $oq->where('account_id', $accountId));
+        }
+        $confirmedStocks = $confirmedQuery->groupBy('product_variation_attribute_id')
+            ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as confirmed_qty')
+            ->pluck('confirmed_qty', 'product_variation_attribute_id');
+
+        // 3. Open orders reserving stock before delivery (statuses 1: Pending, 4: Confirmed, 5: In preparation)
         $pendingQuery = OrderPva::whereIn('product_variation_attribute_id', $pvaIds)
             ->whereNull('deleted_at')
             ->where(function ($q) {
                 $q->whereIn('order_status_id', [1, 4, 5])
+                  ->orWhere(function ($sub) {
+                      $sub->whereNull('order_status_id')
+                          ->whereHas('order', fn ($oq) => $oq->whereIn('order_status_id', [1, 4, 5]));
+                  })
                   ->orWhereHas('order', function ($oq) {
-                      $oq->whereIn('order_status_id', [1, 4, 5]);
+                      $oq->whereIn('order_status_id', [1, 4, 5])
+                         ->whereNotIn('order_pva.order_status_id', [2, 3, 8]);
                   });
+            })
+            ->whereHas('order', function ($oq) {
+                $oq->whereNull('pickup_id')->whereNull('shipment_id');
             });
         if ($accountId) {
             $pendingQuery->whereHas('order', fn ($oq) => $oq->where('account_id', $accountId));
@@ -607,7 +648,7 @@ class OrderController extends Controller
             ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as pending_qty')
             ->pluck('pending_qty', 'product_variation_attribute_id');
 
-        // 3. En souffrance (trouble / delayed delivery: status 8 or 9)
+        // 4. En souffrance (trouble / delayed delivery: status 8 or 9)
         $troubleQuery = OrderPva::whereIn('product_variation_attribute_id', $pvaIds)
             ->whereNull('deleted_at')
             ->where(function ($q) {
@@ -623,7 +664,7 @@ class OrderController extends Controller
             ->selectRaw('product_variation_attribute_id, COALESCE(SUM(quantity), 0) as trouble_qty')
             ->pluck('trouble_qty', 'product_variation_attribute_id');
 
-        // 4. En attente d'arrivage men les supplier orders (supplier_order_pva where supplier_receipt_id is null)
+        // 5. En attente d'arrivage men les supplier orders (supplier_order_pva where supplier_receipt_id is null)
         $arrivingQuery = SupplierOrderPva::whereIn('product_variation_attribute_id', $pvaIds)
             ->whereNull('deleted_at')
             ->whereNull('supplier_receipt_id')
@@ -643,13 +684,19 @@ class OrderController extends Controller
 
         $result = [];
         foreach ($pvaIds as $id) {
-            $real = (int) ($warehouseStocks[$id] ?? 0);
+            $physical = (int) ($warehouseStocks[$id] ?? 0);
+            $confirmed = (int) ($confirmedStocks[$id] ?? 0);
             $pending = (int) ($pendingStocks[$id] ?? 0);
             $trouble = (int) ($troubleStocks[$id] ?? 0);
             $arriving = (int) ($arrivingStocks[$id] ?? 0);
-            $available = $real - $pending;
+
+            // Virtually decrement confirmed orders from real stock: real = physical - confirmed
+            $real = $physical - $confirmed;
+            $available = $physical - $pending;
 
             $result[$id] = [
+                'physical_stock' => $physical,
+                'confirmed_stock' => $confirmed,
                 'available_stock' => $available,
                 'real_stock' => $real,
                 'souffrance_quantity' => $trouble,
@@ -1535,14 +1582,18 @@ class OrderController extends Controller
                     'incoming_stock' => 0,
                 ];
 
+                $pva = $orderPva->productVariationAttribute;
+                $variationAttribute = $pva?->variationAttribute;
+                $product = $pva?->product;
+
                 if (!isset($orderDataProducts[$orderPva->id]))
                     $orderDataProducts[$orderPva->id] = [
-                        "id" => $orderPva->productVariationAttribute->product->id,
-                        "title" => $orderPva->productVariationAttribute->product->title,
-                        "reference" => $orderPva->productVariationAttribute->product->reference,
+                        "id" => $product?->id,
+                        "title" => $product?->title ?? 'Produit supprimé',
+                        "reference" => $product?->reference ?? '',
                         "created_at" => $orderPva->created_at,
-                        "principalImage" => $orderPva->productVariationAttribute->product->principalImage,
-                        "productType" => $orderPva->productVariationAttribute->product->productType ? $orderPva->productVariationAttribute->product->productType->only(['id', 'title']) : null,
+                        "principalImage" => $product?->principalImage,
+                        "productType" => $product?->productType ? $product->productType->only(['id', 'title']) : null,
                         "available_stock" => $pvaStockInfo['available_stock'],
                         "real_stock" => $pvaStockInfo['real_stock'],
                         "souffrance_quantity" => $pvaStockInfo['souffrance_quantity'],
@@ -1574,7 +1625,7 @@ class OrderController extends Controller
                         "id" => $orderPva->offerableVariation->childOfferableVariations->first()->offerable->offer->id,
                         "title" => $orderPva->offerableVariation->childOfferableVariations->first()->offerable->offer->title,
                     ];
-                $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedAttributes'] = $orderPva->productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
+                $orderDataProducts[$orderPva->id]['productVariations'][$orderPva->id]['selectedAttributes'] = $variationAttribute?->childVariationAttributes ? $variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
                     // Vérifier si l'attribut a un type
                     if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute) {
                         // Retourner les données formatées pour chaque attribut de variation
@@ -1584,10 +1635,10 @@ class OrderController extends Controller
                             "title" => $childVariationAttribute->attribute->title
                         ];
                     }
-                })->filter();
+                })->filter() : collect();
                 // Récupérer les variations d'attributs pour chaque produit
-                $orderDataProducts[$orderPva->id]['attributes'] = $orderPva->productVariationAttribute->product->productVariationAttributes->flatMap(function ($productVariationAttribute) {
-                    return $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
+                $orderDataProducts[$orderPva->id]['attributes'] = $product?->productVariationAttributes ? $product->productVariationAttributes->flatMap(function ($productVariationAttribute) {
+                    return $productVariationAttribute->variationAttribute?->childVariationAttributes ? $productVariationAttribute->variationAttribute->childVariationAttributes->map(function ($childVariationAttribute) {
                         // Vérifier si l'attribut a un type
                         if ($childVariationAttribute->attribute && $childVariationAttribute->attribute->typeAttribute) {
                             // Retourner les données formatées pour chaque attribut de variation
@@ -1597,8 +1648,8 @@ class OrderController extends Controller
                                 "title" => $childVariationAttribute->attribute->title
                             ];
                         }
-                    }); // Filtrer les valeurs nulles (attributs sans type)
-                })->unique()->values(); // Filtrer les valeurs nulles (attributs sans type)
+                    }) : [];
+                })->unique()->values() : collect();
             });
             $productDatas = collect($orderDataProducts)->map(function ($orderDataProduct) {
                 $orderDataProduct["productVariations"] = collect($orderDataProduct["productVariations"])->values();
