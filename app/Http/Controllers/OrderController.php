@@ -12,6 +12,8 @@ use App\Support\Orders\OrderListFilters;
 use App\Support\Orders\OrderQueues;
 use App\Support\Orders\OrderReasons;
 use App\Support\Orders\ReturnRules;
+use App\Support\Orders\OrderStatus as OrderStatusId;
+use App\Support\Orders\StatusTransitions;
 use App\Models\OrderComment;
 use Illuminate\Validation\ValidationException;
 use App\Models\Source;
@@ -2401,12 +2403,112 @@ class OrderController extends Controller
     }
 
     /**
+     * The parcels (in delivery / in trouble, with a pickup) this order can take over: same city and exactly
+     * the same products. The carrier can redirect such a parcel to another customer of the city.
+     */
+    public function swapCandidates($id)
+    {
+        $order = Order::where('account_id', getAccountUser()->account_id)
+            ->with(['activeOrderPvas', 'customer.addresses'])
+            ->find($id);
+        if (!$order) {
+            return response()->json(['statut' => 0, 'data' => 'Order not found'], 404);
+        }
+
+        $empty = response()->json(['statut' => 1, 'data' => [], 'city' => null]);
+
+        // only an order that has not left the shop can receive a parcel
+        if (!in_array((int) $order->order_status_id, [OrderStatusId::PENDING, OrderStatusId::CONFIRMED], true) || $order->pickup_id) {
+            return $empty;
+        }
+
+        $cityId = $order->city_id ?? $order->customer?->addresses->first()?->city_id;
+        $signature = self::productSignature($order->activeOrderPvas);
+        if (!$cityId || $signature === '') {
+            return $empty;
+        }
+
+        $candidates = Order::where('account_id', $order->account_id)
+            ->whereIn('order_status_id', [OrderStatusId::IN_DELIVERY, OrderStatusId::IN_TROUBLE])
+            ->whereNotNull('pickup_id')
+            ->where('id', '!=', $order->id)
+            ->where(function ($q) use ($cityId) {
+                $q->where('city_id', $cityId)
+                    ->orWhere(fn ($q2) => $q2->whereNull('city_id')
+                        ->whereHas('customer.addresses', fn ($a) => $a->where('city_id', $cityId)));
+            })
+            // narrows in SQL, the exact content is compared below
+            ->whereHas('activeOrderPvas', fn ($q) => $q->whereIn(
+                'product_variation_attribute_id',
+                $order->activeOrderPvas->pluck('product_variation_attribute_id')
+            ))
+            ->with([
+                'activeOrderPvas.productVariationAttribute.product',
+                'activeOrderPvas.productVariationAttribute.variationAttribute.childVariationAttributes.attribute',
+                'customer.addresses',
+                'customer.phones',
+                'pickup.carrier',
+                'orderStatus',
+            ])
+            ->orderByDesc('order_status_id') // in trouble first
+            ->orderBy('updated_at')          // the longest stuck first
+            ->limit(50)
+            ->get()
+            ->filter(fn ($candidate) => self::productSignature($candidate->activeOrderPvas) === $signature)
+            ->values()
+            ->map(fn ($candidate) => [
+                'id' => $candidate->id,
+                'code' => $candidate->code,
+                'shipping_code' => $candidate->shipping_code,
+                'status' => [
+                    'id' => (int) $candidate->order_status_id,
+                    'title' => $candidate->orderStatus?->title,
+                ],
+                'customer' => [
+                    'name' => $candidate->customer?->name,
+                    'phone' => $candidate->customer?->phones->first()?->title,
+                ],
+                'address' => $candidate->customer?->addresses->first()?->title,
+                'carrier' => $candidate->pickup?->carrier ? $candidate->pickup->carrier->only('id', 'title') : null,
+                'products' => $candidate->activeOrderPvas->map(function ($line) {
+                    $pva = $line->productVariationAttribute;
+                    $attributes = $pva?->variationAttribute?->childVariationAttributes
+                        ? $pva->variationAttribute->childVariationAttributes->map(fn ($child) => $child->attribute?->code)->filter()->toArray()
+                        : [];
+                    $title = $pva?->product?->title ?? 'Produit supprimé';
+
+                    return [
+                        'title' => $attributes ? $title . ' ' . implode('-', $attributes) : $title,
+                        'quantity' => (int) $line->quantity,
+                    ];
+                })->values(),
+                'updated_at' => $candidate->updated_at,
+            ]);
+
+        return response()->json([
+            'statut' => 1,
+            'data' => $candidates,
+            'city' => City::find($cityId)?->only('id', 'title'),
+        ]);
+    }
+
+    /** "pvaId:quantity" pairs, sorted: two orders hold the same parcel content when their signatures are equal. */
+    private static function productSignature($lines): string
+    {
+        return collect($lines)
+            ->groupBy('product_variation_attribute_id')
+            ->map(fn ($group, $pvaId) => $pvaId . ':' . $group->sum('quantity'))
+            ->sort()
+            ->implode('|');
+    }
+
+    /**
      * Swaps the delivery details from an in-transit order to a new confirmed order.
-     * This is used when a customer cancels an order that is already out for delivery,
-     * and a new customer order for the same item can take its place.
+     * This is used when a customer cancels an order that is already out for delivery (or in trouble),
+     * and a new customer order for the same item, in the same city, can take its place.
      *
-     * @param int $inTransitOrderId The ID of the order that is currently 'in transit' (e.g., status 6).
-     * @param int $newOrderId The ID of the new, confirmed order that will take over the delivery (e.g., status 4).
+     * @param int $inTransitOrderId The ID of the order whose parcel is with the carrier (status 6 or 9).
+     * @param int $newOrderId The ID of the order that takes over the parcel (status 1 or 4; confirmed by the swap).
      * @return \Illuminate\Http\JsonResponse
      */
     public function swapDelivery($inTransitOrderId, $newOrderId)
@@ -2419,25 +2521,27 @@ class OrderController extends Controller
         try {
             $response = DB::transaction(function () use ($inTransitOrderId, $newOrderId) {
                 // Lock the two order records to prevent any other processes from changing them during the swap.
-                $inTransitOrder = Order::lockForUpdate()->find($inTransitOrderId);
-                $newOrder = Order::lockForUpdate()->find($newOrderId);
+                // Only the account's own orders can be swapped.
+                $accountId = getAccountUser()->account_id;
+                $inTransitOrder = Order::where('account_id', $accountId)->lockForUpdate()->find($inTransitOrderId);
+                $newOrder = Order::where('account_id', $accountId)->lockForUpdate()->find($newOrderId);
 
                 if (!$inTransitOrder || !$newOrder) {
                     throw new \Exception('One or both orders could not be found.');
                 }
 
                 // --- Business Logic Validations ---
-                // 1. The original order MUST be "in transit" (we assume status 6) and have a pickup_id.
-                if ($inTransitOrder->order_status_id != 6) {
-                    throw new \Exception("The first order ({$inTransitOrder->code}) is not in transit.");
+                // 1. The original order MUST be with the carrier (in delivery or in trouble) and have a pickup_id.
+                if (!in_array((int) $inTransitOrder->order_status_id, [OrderStatusId::IN_DELIVERY, OrderStatusId::IN_TROUBLE], true)) {
+                    throw new \Exception("The first order ({$inTransitOrder->code}) is not in delivery or in trouble.");
                 }
                 if (is_null($inTransitOrder->pickup_id)) {
                     throw new \Exception("The first order ({$inTransitOrder->code}) does not have a pickup ID and cannot be swapped.");
                 }
 
-                // 2. The new order should be in a confirmed but not yet shipped state (we assume status 4).
-                if ($newOrder->order_status_id != 4) {
-                    throw new \Exception("The new order ({$newOrder->code}) is not in a confirmed state ready for shipping.");
+                // 2. The new order must not have left the shop: pending (confirmed by the swap) or confirmed.
+                if (!in_array((int) $newOrder->order_status_id, [OrderStatusId::PENDING, OrderStatusId::CONFIRMED], true)) {
+                    throw new \Exception("The new order ({$newOrder->code}) is not pending or confirmed.");
                 }
                 if (!is_null($newOrder->pickup_id)) {
                     throw new \Exception("The new order ({$newOrder->code}) already has a pickup assigned and cannot be swapped.");
@@ -2464,14 +2568,16 @@ class OrderController extends Controller
                 // 3. Link the new order to the original one for tracking.
                 $newOrder->update(['order_id' => $inTransitOrder->id]);
 
-                // 4. Add notes for historical tracking.
-                $inTransitOrder->update(['note' => "Delivery swapped to order {$newOrder->code}."]);
-                $newOrder->update(['note' => "Took over delivery from canceled order {$inTransitOrder->code}."]);
+                // 4. Add notes for historical tracking (appended: the existing notes are kept).
+                $inTransitOrder->update(['note' => trim("Delivery swapped to order {$newOrder->code}.\n" . ($inTransitOrder->note ?? ''))]);
+                $newOrder->update(['note' => trim("Took over delivery from canceled order {$inTransitOrder->code}.\n" . ($newOrder->note ?? ''))]);
 
 
                 // 5. Swap the statuses.
-                $newOrder->update(['order_status_id' => 6]); // New order is now "in transit"
-                $inTransitOrder->update(['order_status_id' => 3]); // Old order is now "Canceled" (or your preferred status)
+                StatusTransitions::guard($newOrder, OrderStatusId::IN_DELIVERY, ['source' => 'OrderController::swapDelivery']);
+                StatusTransitions::guard($inTransitOrder, OrderStatusId::CANCELLED, ['source' => 'OrderController::swapDelivery']);
+                $newOrder->update(['order_status_id' => OrderStatusId::IN_DELIVERY]); // New order is now "in delivery"
+                $inTransitOrder->update(['order_status_id' => OrderStatusId::CANCELLED]); // Old order is now "Canceled"
 
                 return [
                     'statut' => 1,

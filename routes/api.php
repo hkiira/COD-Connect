@@ -151,6 +151,8 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::get('supplier_receipts/print/{id}', [SupplierReceiptController::class, 'generatePdf']);
     Route::get('supplier_orders/print/{id}', [SupplierOrderController::class, 'generatePdf']);
     Route::post('orders/{inTransitOrderId}/swap-delivery/{newOrderId}', [OrderController::class, 'swapDelivery']);
+// the parcels of the same city and products this order can take over
+Route::get('orders/{id}/swap-candidates', [OrderController::class, 'swapCandidates']);
     Route::get('orders/print/{id}', [OrderController::class, 'generatePdf']);
     Route::get('pickups/tickets/{id}', [PickupController::class, 'generateTickets']);
     Route::get('pickups/print/{id}', [PickupController::class, 'generatePdf']);
