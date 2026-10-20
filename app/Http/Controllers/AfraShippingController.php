@@ -428,10 +428,16 @@ class AfraShippingController extends Controller
             'lines.*.new_price'    => 'nullable|numeric',
             'received'             => 'required|numeric|min:0',
             'title'                => 'nullable|string|max:255',
+            'file'                 => 'nullable|file|mimes:pdf|max:20480',
         ]);
 
         return $this->attempt(fn () => $operations->createPayment(
-            $this->accountId(), $data['warehouse_id'], $data['lines'], (float) $data['received'], $data['title'] ?? null
+            $this->accountId(),
+            (int) $data['warehouse_id'],
+            $data['lines'],
+            (float) $data['received'],
+            $data['title'] ?? null,
+            $request->file('file')
         ));
     }
 

@@ -14,6 +14,7 @@ class Shipment extends Model
         'shipment_id',
         'title',
         'comment',
+        'document_path',
         'warehouse_id',
         'shipment_type_id',
         'account_user_id',

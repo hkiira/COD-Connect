@@ -11,6 +11,7 @@ use App\Models\DefaultCarrier;
 use App\Models\Order;
 use App\Models\OrderComment;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -250,7 +251,7 @@ class AfraOperationsService
     }
 
     /** Creates the payment slip (FL): orders become Paid, the fees are recorded, plus the amount received. */
-    public function createPayment(int $accountId, int $warehouseId, array $lines, float $received, ?string $title = null): array
+    public function createPayment(int $accountId, int $warehouseId, array $lines, float $received, ?string $title = null, ?UploadedFile $file = null): array
     {
         $lineMap = collect($lines)->keyBy('id');
         $fees = $lineMap->mapWithKeys(fn ($l) => [(int) $l['id'] => round((float) ($l['fee'] ?? 0), 2)]);
@@ -311,9 +312,14 @@ class AfraOperationsService
             }
         }
 
+        $documentPath = null;
+        if ($file && $file->isValid()) {
+            $documentPath = $file->store('shipments/invoices', 'public');
+        }
+
         return $this->createSlip(self::SLIP_PAYMENT, $warehouseId, $title ?: 'Paiement Afra '.now()->format('d/m/Y'),
             $orders->map(fn ($o) => ['id' => $o->id, 'carrier_price' => $fees[$o->id]])->values()->all(),
-            $received, $orders->count());
+            $received, $orders->count(), $documentPath);
     }
 
     /** City id → our Afra fee: the account's special price, else the carrier's default price. */
@@ -335,7 +341,7 @@ class AfraOperationsService
     // endregion
 
     /** Same request as the ASAP synchronisation (AsapDeliveryController::runSyncInvoices / runSyncReturns). */
-    private function createSlip(int $type, int $warehouseId, string $title, array $orders, ?float $received, int $count): array
+    private function createSlip(int $type, int $warehouseId, string $title, array $orders, ?float $received, int $count, ?string $documentPath = null): array
     {
         $slip = [
             'carrier_id'       => AfraShippingClient::carrierId(),
@@ -347,6 +353,9 @@ class AfraOperationsService
         ];
         if ($received !== null) {
             $slip['given_amount'] = $received;
+        }
+        if ($documentPath) {
+            $slip['document_path'] = $documentPath;
         }
 
         $response = $this->storeSlip($slip);

@@ -11,6 +11,7 @@ use App\Models\Pickup;
 use App\Models\Shipment;
 use App\Models\Carrier;
 use App\Models\ShipmentType;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class ShipmentController extends Controller
@@ -85,6 +86,8 @@ class ShipmentController extends Controller
                 'code' => $shipment->code,
                 'title' => $shipment->title,
                 'statut' => $shipment->statut,
+                'document_path' => $shipment->document_path,
+                'has_document' => !empty($shipment->document_path),
                 'created_at' => $shipment->created_at,
                 'user' => [
                     'id' => $shipment->accountUser->id,
@@ -337,7 +340,7 @@ class ShipmentController extends Controller
                 $request["account_user_id"] = getAccountUser()->id;
                 $account_id = getAccountUser()->account_id;
                 $request['code'] = DefaultCodeController::getAccountCode('Shipment', $account_id);
-                $shipment_only = collect($request)->only('code', 'title', 'warehouse_id', 'comment', 'carrier_id', 'statut', 'account_user_id', 'shipment_type_id', 'created_at', 'updated_at');
+                $shipment_only = collect($request)->only('code', 'title', 'warehouse_id', 'comment', 'document_path', 'carrier_id', 'statut', 'account_user_id', 'shipment_type_id', 'created_at', 'updated_at');
                 $shipment = Shipment::create($shipment_only->all());
                 $shipmentType = ShipmentType::find($request['shipment_type_id']);
                 $shipmentChild = Shipment::create([
@@ -1253,6 +1256,30 @@ class ShipmentController extends Controller
         ]);
     }
 
+
+    public function downloadDocument($id)
+    {
+        $shipment = Shipment::where('id', $id)->first();
+        if (!$shipment) {
+            return response()->json([
+                'statut' => 0,
+                'message' => 'Règlement non trouvé'
+            ], 404);
+        }
+
+        if (!$shipment->document_path || !Storage::disk('public')->exists($shipment->document_path)) {
+            return response()->json([
+                'statut' => 0,
+                'message' => 'Aucune facture originale rattachée à ce règlement.'
+            ], 404);
+        }
+
+        $filename = 'Facture-' . ($shipment->code ?: $shipment->id) . '.pdf';
+        return Storage::disk('public')->response($shipment->document_path, $filename, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="' . $filename . '"',
+        ]);
+    }
 
     public function destroy($id)
     {

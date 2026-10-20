@@ -317,6 +317,7 @@ Route::middleware(['auth:api', 'VerifyDomain'])->group(function () {
     Route::resource('pickups', PickupController::class);
     Route::resource('transactions', TransactionController::class);
     Route::resource('shipments', ShipmentController::class);
+    Route::get('shipments/{id}/document', [ShipmentController::class, 'downloadDocument']);
     Route::get('shipments/print/{id}', [ShipmentController::class, 'printShipment']);
     Route::get('shipments/print/{id}/pdf', [ShipmentController::class, 'printShipmentPdf']);
     Route::resource('shipment_types', ShipmentTypeController::class);
