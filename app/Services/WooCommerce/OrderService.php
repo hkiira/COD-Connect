@@ -9,6 +9,7 @@ use App\Models\Warehouse;
 use App\Models\WooCommerce\OrderLink;
 use App\Models\WooCommerce\Store;
 use App\Models\WooCommerce\SyncLog;
+use App\Support\AccountContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -108,46 +109,49 @@ class OrderService
     {
         $wcUpdateStatus ??= $this->store->wc_status_after_import ?: 'completed';
         $accountId = (int) $this->store->account_id;
-        $results = [];
-        $toUpdate = [];
 
-        DB::beginTransaction();
-        try {
-            foreach ($inputs as $input) {
-                $wcOrderId = (int) $input['wc_order_id'];
-                $result = $this->importOne($input, $wcOrderId, $accountId);
-                $results[] = $result;
+        return AccountContext::run($accountId, function () use ($inputs, $wcUpdateStatus, $accountId) {
+            $results = [];
+            $toUpdate = [];
 
-                if ($result['success']) {
-                    $toUpdate[$wcOrderId] = $result['system_order_id'] ?? null;
+            DB::beginTransaction();
+            try {
+                foreach ($inputs as $input) {
+                    $wcOrderId = (int) $input['wc_order_id'];
+                    $result = $this->importOne($input, $wcOrderId, $accountId);
+                    $results[] = $result;
+
+                    if ($result['success']) {
+                        $toUpdate[$wcOrderId] = $result['system_order_id'] ?? null;
+                    }
                 }
+
+                DB::commit();
+            } catch (\Throwable $e) {
+                DB::rollBack();
+                Log::error('WooCommerce import failed: ' . $e->getMessage(), ['store_id' => $this->store->id, 'trace' => $e->getTraceAsString()]);
+                SyncLog::record($this->store, 'import', 'order', 'failed', 'Import aborted: ' . $e->getMessage());
+
+                throw $e;
             }
 
-            DB::commit();
-        } catch (\Throwable $e) {
-            DB::rollBack();
-            Log::error('WooCommerce import failed: ' . $e->getMessage(), ['store_id' => $this->store->id, 'trace' => $e->getTraceAsString()]);
-            SyncLog::record($this->store, 'import', 'order', 'failed', 'Import aborted: ' . $e->getMessage());
+            foreach ($results as $result) {
+                SyncLog::record(
+                    $this->store,
+                    'import',
+                    'order',
+                    $result['success'] ? 'success' : (($result['skipped'] ?? false) ? 'skipped' : 'failed'),
+                    $result['message'],
+                    ['wc_id' => $result['wc_order_id'], 'entity_id' => $result['system_order_id'] ?? null]
+                );
+            }
 
-            throw $e;
-        }
+            foreach ($toUpdate as $wcOrderId => $orderId) {
+                $this->markImported($wcOrderId, $wcUpdateStatus);
+            }
 
-        foreach ($results as $result) {
-            SyncLog::record(
-                $this->store,
-                'import',
-                'order',
-                $result['success'] ? 'success' : (($result['skipped'] ?? false) ? 'skipped' : 'failed'),
-                $result['message'],
-                ['wc_id' => $result['wc_order_id'], 'entity_id' => $result['system_order_id'] ?? null]
-            );
-        }
-
-        foreach ($toUpdate as $wcOrderId => $orderId) {
-            $this->markImported($wcOrderId, $wcUpdateStatus);
-        }
-
-        return $results;
+            return $results;
+        });
     }
 
     /**
@@ -367,6 +371,7 @@ class OrderService
         $warehouseId ??= $this->store->default_warehouse_id ?: Warehouse::where('account_id', $accountId)->value('id');
 
         $payload = [
+            'account_id' => $accountId,
             'warehouse_id' => $warehouseId,
             'brand_source_id' => $input['brand_source_id'] ?? $this->store->default_brand_source_id,
             'payment_type_id' => $input['payment_type_id'] ?? 1,
@@ -377,6 +382,7 @@ class OrderService
             'carrier_price' => $wcOrder['shipping_total'] ?? 0,
             'note' => $wcOrder['customer_note'] ?? null,
             'customer' => [
+                'account_id' => $accountId,
                 'name' => trim(($billing['first_name'] ?? '') . ' ' . ($billing['last_name'] ?? '')) ?: 'Client WebSite',
                 'customer_type_id' => 1,
                 'phones' => [['title' => $billing['phone'] ?? '', 'principal' => true, 'phoneTypes' => [1]]],
