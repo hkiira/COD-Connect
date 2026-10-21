@@ -148,7 +148,14 @@ class CustomerController extends Controller
         $perPage = max(1, min(200, (int) $request->input('pagination.per_page', 15)));
         $currentPage = max(1, (int) $request->input('pagination.page', $request->input('pagination.current_page', 1)));
 
-        $accountId = getAccountUser()->account_id;
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($data[0]['account_id'] ?? null)
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        if (!$accountId) {
+            return response()->json(['statut' => 0, 'data' => 'Account ID not found.'], 422);
+        }
         $query = Customer::query()->where('customers.account_id', $accountId);
 
         // Handle search (name, code, note, or raw/normalized phone)
@@ -311,7 +318,14 @@ class CustomerController extends Controller
             return response()->json(['statut' => 0, 'data' => $validator->errors()], 422);
         }
 
-        $accountId = getAccountUser()->account_id;
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($data[0]['account_id'] ?? null)
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        if (!$accountId) {
+            return response()->json(['statut' => 0, 'data' => 'Account ID not found.'], 422);
+        }
 
         $customers = DB::transaction(function () use ($data, $accountId) {
             $createdCustomers = [];
@@ -377,6 +391,7 @@ class CustomerController extends Controller
                             $customer->addresses()->create([
                                 'title' => $title,
                                 'city_id' => $cityId,
+                                'account_id' => $accountId,
                             ]);
                         }
                     }
@@ -558,7 +573,12 @@ class CustomerController extends Controller
      */
     public static function update(Request $request, $id, $isOrder = 0)
     {
-        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($request->input('0.account_id'))
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        $customer = $accountId ? Customer::where('account_id', $accountId)->find($id) : Customer::find($id);
         if (!$customer) {
             return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
         }
@@ -753,7 +773,12 @@ class CustomerController extends Controller
      */
     public function destroy($id)
     {
-        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($request->input('0.account_id'))
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        $customer = $accountId ? Customer::where('account_id', $accountId)->find($id) : Customer::find($id);
 
         if (!$customer) {
             return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
@@ -766,7 +791,12 @@ class CustomerController extends Controller
 
     public function logCall(Request $request, $id)
     {
-        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($request->input('0.account_id'))
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        $customer = $accountId ? Customer::where('account_id', $accountId)->find($id) : Customer::find($id);
         if (!$customer) {
             return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
         }
@@ -786,7 +816,12 @@ class CustomerController extends Controller
 
     public function toggleBlacklist(Request $request, $id)
     {
-        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($request->input('0.account_id'))
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        $customer = $accountId ? Customer::where('account_id', $accountId)->find($id) : Customer::find($id);
         if (!$customer) {
             return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
         }
@@ -813,7 +848,12 @@ class CustomerController extends Controller
 
     public function timeline($id)
     {
-        $customer = Customer::where('account_id', getAccountUser()->account_id)->find($id);
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($request->input('0.account_id'))
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        $customer = $accountId ? Customer::where('account_id', $accountId)->find($id) : Customer::find($id);
         if (!$customer) {
             return response()->json(['statut' => 0, 'message' => 'Customer not found'], 404);
         }
@@ -927,7 +967,14 @@ class CustomerController extends Controller
             'secondary_id' => 'required|exists:customers,id|different:primary_id',
         ]);
 
-        $accountId = getAccountUser()->account_id;
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($data[0]['account_id'] ?? null)
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        if (!$accountId) {
+            return response()->json(['statut' => 0, 'data' => 'Account ID not found.'], 422);
+        }
 
         $primary = Customer::where('account_id', $accountId)->find($request->primary_id);
         $secondary = Customer::where('account_id', $accountId)->find($request->secondary_id);
@@ -957,7 +1004,14 @@ class CustomerController extends Controller
      */
     public function deduplicate()
     {
-        $accountId = getAccountUser()->account_id;
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($data[0]['account_id'] ?? null)
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        if (!$accountId) {
+            return response()->json(['statut' => 0, 'data' => 'Account ID not found.'], 422);
+        }
         $stats = CustomerIdentityService::deduplicateAccount($accountId);
 
         return response()->json([
@@ -972,7 +1026,14 @@ class CustomerController extends Controller
      */
     public function counts(Request $request)
     {
-        $accountId = getAccountUser()->account_id;
+        $accountId = getAccountUser()?->account_id
+            ?? $request->input('account_id')
+            ?? ($data[0]['account_id'] ?? null)
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        if (!$accountId) {
+            return response()->json(['statut' => 0, 'data' => 'Account ID not found.'], 422);
+        }
 
         $countSegment = function (string $segment) use ($accountId): int {
             $q = Customer::where('customers.account_id', $accountId);

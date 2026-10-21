@@ -844,7 +844,21 @@ class OrderController extends Controller
 
         // Cache account context once to avoid repeated helper calls.
         $accountUser = getAccountUser();
-        $accountId = $accountUser->account_id;
+        $accountId = $accountUser?->account_id
+            ?? ($ordersPayload->first()['account_id'] ?? null)
+            ?? (class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null);
+
+        if (!$accountUser && $accountId) {
+            $accountUser = \App\Models\AccountUser::where('account_id', $accountId)->where('statut', 1)->first()
+                ?? \App\Models\AccountUser::where('account_id', $accountId)->first();
+        }
+
+        if (!$accountId) {
+            return response()->json([
+                'statut' => 0,
+                'data' => 'Compte introuvable pour cette commande (account_id manquant).',
+            ], 422);
+        }
 
         // This array stores the resolved PVA rows per order index.
         $resolvedPvas = [];
@@ -1131,7 +1145,11 @@ class OrderController extends Controller
                             }
                             $customer->load('addresses', 'phones');
                         } else {
-                            $customerData = new Request([$request['customer']]);
+                            $customerPayload = $request['customer'];
+                            if (!isset($customerPayload['account_id'])) {
+                                $customerPayload['account_id'] = $accountId;
+                            }
+                            $customerData = new Request([$customerPayload]);
                             $customerResult = CustomerController::store($customerData, 1);
                             // CustomerController::store returns a JsonResponse on validation failure even in local mode.
                             // Unwrap the collection or surface the validation message as an exception.
@@ -1251,7 +1269,7 @@ class OrderController extends Controller
                             'initial_price' => $initialPrice,
                             'discount' => $discount,
                             'order_status_id' => 1,
-                            'account_user_id' => $accountUser->id,
+                            'account_user_id' => $accountUser?->id,
                             'created_at' => now(),
                             'updated_at' => now(),
                         ]);
@@ -1281,7 +1299,7 @@ class OrderController extends Controller
                                 44 => [
                                     'title' => 'Sync with Google Sheets',
                                     'order_status_id' => 1,
-                                    'account_user_id' => $accountUser->id,
+                                    'account_user_id' => $accountUser?->id,
                                     'score' => 0,
                                     'created_at' => now(),
                                     'updated_at' => now(),

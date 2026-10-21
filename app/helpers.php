@@ -30,9 +30,26 @@ if (!function_exists('formatPhoneNumber')) {
 
 function getAccountUser()
 {
-    $user = Auth::user();
+    $user = Auth::user() ?? (Auth::guard('api')->check() ? Auth::guard('api')->user() : null);
+    $pinnedAccountId = class_exists(\App\Support\AccountContext::class) ? \App\Support\AccountContext::id() : null;
+
     if ($user) {
-        return $user->accountUsers()->first();
+        if ($pinnedAccountId) {
+            $pinnedAu = $user->accountUsers()->where('account_id', $pinnedAccountId)->first();
+            if ($pinnedAu) {
+                return $pinnedAu;
+            }
+        }
+        $au = $user->accountUsers()->first();
+        if ($au) {
+            return $au;
+        }
     }
+
+    if ($pinnedAccountId) {
+        return \App\Models\AccountUser::where('account_id', $pinnedAccountId)->where('statut', 1)->first()
+            ?? \App\Models\AccountUser::where('account_id', $pinnedAccountId)->first();
+    }
+
     return null;
 }
