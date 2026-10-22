@@ -65,8 +65,8 @@ echo "==> Installing PHP dependencies"
 run_composer install --no-dev --prefer-dist --no-interaction --no-progress --optimize-autoloader
 
 echo "==> Database migrations"
-"$PHP_BIN" artisan optimize:clear
 "$PHP_BIN" artisan migrate --force
+"$PHP_BIN" artisan optimize:clear || true
 
 [[ -e public/storage ]] || "$PHP_BIN" artisan storage:link
 
