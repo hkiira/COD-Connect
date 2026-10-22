@@ -839,8 +839,15 @@ class OrderController extends Controller
 
     public static function store(Request $requests, $isImport = 0)
     {
-        // Normalize incoming payload (array of orders) and remove method spoofing key.
-        $ordersPayload = collect($requests->except('_method'))->values();
+        $rootForceCreate = $requests->boolean('force_create')
+            || $requests->boolean('force')
+            || in_array($requests->input('force_create'), ['1', 'true', true], true)
+            || in_array($requests->input('force'), ['1', 'true', true], true);
+
+        // Normalize incoming payload (array of orders) and remove method spoofing key & non-order params.
+        $ordersPayload = collect($requests->except(['_method', 'force_create', 'force']))
+            ->filter(fn ($item) => is_array($item))
+            ->values();
 
         // Cache account context once to avoid repeated helper calls.
         $accountUser = getAccountUser();
@@ -1068,16 +1075,16 @@ class OrderController extends Controller
 
         try {
             // Create all orders in a single transaction to keep data consistent.
-            $orderIds = DB::transaction(function () use ($ordersPayload, $resolvedPvas, $isImport, $accountUser, $accountId, $generateOrderCode, $duplicateGuard) {
-                return $ordersPayload->map(function ($request, $index) use ($resolvedPvas, $isImport, $accountUser, $accountId, $generateOrderCode, $duplicateGuard) {
-                    $forceCreate = !empty($request['force_create']) || !empty($request['force'])
-                        || ($request['force_create'] ?? null) === '1' || ($request['force_create'] ?? null) === 'true'
-                        || ($request['force_create'] ?? null) === true;
+            $orderIds = DB::transaction(function () use ($ordersPayload, $resolvedPvas, $isImport, $accountUser, $accountId, $generateOrderCode, $duplicateGuard, $rootForceCreate) {
+                return $ordersPayload->map(function ($request, $index) use ($resolvedPvas, $isImport, $accountUser, $accountId, $generateOrderCode, $duplicateGuard, $rootForceCreate) {
+                    $forceCreate = $rootForceCreate
+                        || !empty($request['force_create']) || !empty($request['force'])
+                        || in_array(($request['force_create'] ?? null), ['1', 'true', true], true)
+                        || in_array(($request['force'] ?? null), ['1', 'true', true], true);
 
                     // Duplicate guard (non-import creation only): same phone, same products and quantities
-                    // within a few minutes. It runs before the customer is created or updated (an update can rewrite the
-                    // phone title). The lock makes the check and the insert one step for concurrent requests.
-                    if ($isImport == 0 && isset($request['customer']['phones']) && count($request['customer']['phones']) > 0) {
+                    // within a few minutes. If force_create is requested, skip duplicate check and locks entirely.
+                    if ($isImport == 0 && !$forceCreate && isset($request['customer']['phones']) && count($request['customer']['phones']) > 0) {
                         $phoneTitles = DuplicateOrderGuard::normalizePhones(collect($request['customer']['phones'])->pluck('title')->all());
 
                         if (count($phoneTitles) > 0) {
@@ -1087,11 +1094,9 @@ class OrderController extends Controller
                             // kept until the transaction ends, so a concurrent request sees our order
                             $duplicateGuard->releaseAfterTransaction();
 
-                            if (!$forceCreate) {
-                                $duplicate = $duplicateGuard->findDuplicate($accountId, $phoneTitles, $resolvedPvas[$index] ?? [], (int) config('orders.duplicate_window_minutes', 5));
-                                if ($duplicate) {
-                                    throw new \Exception('Duplicate order detected for phone number(s): ' . implode(', ', $phoneTitles) . ' (order ' . $duplicate->code . ')');
-                                }
+                            $duplicate = $duplicateGuard->findDuplicate($accountId, $phoneTitles, $resolvedPvas[$index] ?? [], (int) config('orders.duplicate_window_minutes', 5));
+                            if ($duplicate) {
+                                throw new \Exception('Duplicate order detected for phone number(s): ' . implode(', ', $phoneTitles) . ' (order ' . $duplicate->code . ')');
                             }
                         }
                     }
@@ -1169,7 +1174,7 @@ class OrderController extends Controller
                         throw new \Exception('Customer is required to create order.');
                     }
 
-                    if ($isImport == 0 && (bool) ($customer->is_blacklisted ?? false) && empty($request['force_create'])) {
+                    if ($isImport == 0 && (bool) ($customer->is_blacklisted ?? false) && !$forceCreate) {
                         throw new \Exception('BLACKLISTED_CUSTOMER: Ce client est sur liste noire. Veuillez confirmer explicitement la création de la commande.');
                     }
 
@@ -1195,7 +1200,7 @@ class OrderController extends Controller
                     // Persist the order row. A client-built order must not set fields the system owns
                     // (carrier links, billing, timestamps, sync flags); imports are trusted and keep them.
                     $orderData = $isImport == 0
-                        ? \Illuminate\Support\Arr::except($request, ['pickup_id', 'shipment_id', 'invoice_id', 'shipping_code', 'real_carrier_price', 'created_at', 'updated_at', 'sync', 'type', 'force_create'])
+                        ? \Illuminate\Support\Arr::except($request, ['pickup_id', 'shipment_id', 'invoice_id', 'shipping_code', 'real_carrier_price', 'created_at', 'updated_at', 'sync', 'type', 'force_create', 'force'])
                         : $request;
                     $order = Order::create($orderData);
 
