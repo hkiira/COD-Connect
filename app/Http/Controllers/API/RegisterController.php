@@ -185,9 +185,16 @@ class RegisterController extends BaseController
         }
         $token = auth()->user()->createToken('API Token')->accessToken;
 
+        $user = auth()->user();
+        $accountUser = getAccountUser();
+        $roles = $accountUser ? $accountUser->roles->pluck('name')->toArray() : [];
+
+        $userData = $user->toArray();
+        $userData['roles'] = $roles;
+
         return response()->json([
             'statut' => 1,
-            'user' => auth()->user(),
+            'user' => $userData,
             'token' => $token
         ]);
 

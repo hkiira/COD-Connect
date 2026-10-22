@@ -362,6 +362,21 @@ class PaymentController extends Controller
         $transaction = TransactionController::store(new Request($transactionData));
         return $transaction;
     }
+    private static function compareValues($left, string $operator, $right): bool
+    {
+        return match ($operator) {
+            '>' => $left > $right,
+            '>=' => $left >= $right,
+            '<' => $left < $right,
+            '<=' => $left <= $right,
+            '==' => $left == $right,
+            '!=' => $left != $right,
+            '===' => $left === $right,
+            '!==' => $left !== $right,
+            default => false,
+        };
+    }
+
     public function calculatePayment($payment)
     {
         $compensationables = [];
@@ -380,7 +395,7 @@ class PaymentController extends Controller
                 } else {
                     $commissionValidated = null;
                     foreach ($accountCompensation->defaultCompensations->sortby('amount') as $defaultCompensation) {
-                        if (eval("return \$nbrOfOrder {$defaultCompensation->comparisonOperator->symbol} \$defaultCompensation->amount;")) {
+                        if (self::compareValues($nbrOfOrder, $defaultCompensation->comparisonOperator->symbol, $defaultCompensation->amount)) {
                             $commissionValidated = $defaultCompensation->commission;
                             break;
                         }
@@ -390,7 +405,6 @@ class PaymentController extends Controller
                         $paymentableCommission->update(['commission' => $commissionValidated]);
                     });
                 }
-            } elseif ($accountCompensation->compensation_id == 4) {
             } elseif ($accountCompensation->compensation_id == 6) {
             } elseif ($accountCompensation->compensation_id == 7) {
             } elseif ($accountCompensation->compensation_id == 11) {
@@ -402,7 +416,7 @@ class PaymentController extends Controller
             } elseif ($accountCompensation->compensation_id == 17) {
             } elseif ($accountCompensation->compensation_id == 18) {
             } elseif ($accountCompensation->compensation_id == 19) {
-            } elseif ($accountCompensation->compensation_id == 20 || $accountCompensation->compensation_id == 21 || $accountCompensation->compensation_id == 22 || $accountCompensation->compensation_id == 23 || $accountCompensation->compensation_id == 24) {
+            } elseif (in_array($accountCompensation->compensation_id, [20, 21, 22, 23, 24])) {
                 $commissionValidated = Compensationable::find($compensationable['compensationable_id'])->amount;
                 $paymentableCommissions = Paymentable::whereIn('id', $compensationable['ids'])->get();
                 $paymentableCommissions->map(function ($paymentableCommission) use ($commissionValidated) {

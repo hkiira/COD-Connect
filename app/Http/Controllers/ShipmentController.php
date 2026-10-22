@@ -378,14 +378,24 @@ class ShipmentController extends Controller
                             "transaction_type_id" => 2,
                             "transaction_id" => $shipment->id
                         ];
-                        if (isset($request['given_amount']))
-                            if ($request['given_amount'] != 0)
-                                $transactionData[] = [
-                                    "type" => "shipment",
-                                    "amount" => $request['given_amount'],
-                                    "transaction_type_id" => 1,
-                                    "transaction_id" => $shipment->id
-                                ];
+                        if (isset($request['given_amount']) && $request['given_amount'] != 0) {
+                            $carrierModel = Carrier::find($shipment->carrier_id);
+                            $carrierTitle = $carrierModel ? $carrierModel->title : '';
+                            $txIn = [
+                                "type" => "shipment",
+                                "title" => "Encaissement " . $carrierTitle . " (" . $shipment->code . ")",
+                                "amount" => $request['given_amount'],
+                                "direction" => "in",
+                                "category" => "carrier_invoice",
+                                "carrier_id" => $shipment->carrier_id,
+                                "transaction_type_id" => 1,
+                                "transaction_id" => $shipment->id,
+                            ];
+                            if (!empty($request['cash_drawer_session_id'])) {
+                                $txIn['cash_drawer_session_id'] = $request['cash_drawer_session_id'];
+                            }
+                            $transactionData[] = $txIn;
+                        }
                         TransactionController::store(new Request($transactionData));
                     }
                 }
@@ -1003,14 +1013,24 @@ class ShipmentController extends Controller
                         "transaction_id" => $shipment->id
                     ];
                 }
-                if (isset($request['given_amount']))
-                    if ($request['given_amount'] != 0)
-                        $transactionData[] = [
-                            "type" => "shipment",
-                            "amount" => $request['given_amount'],
-                            "transaction_type_id" => 1,
-                            "transaction_id" => $shipment->id
-                        ];
+                if (isset($request['given_amount']) && $request['given_amount'] != 0) {
+                    $carrierModel = Carrier::find($shipment->carrier_id);
+                    $carrierTitle = $carrierModel ? $carrierModel->title : '';
+                    $txIn = [
+                        "type" => "shipment",
+                        "title" => "Encaissement " . $carrierTitle . " (" . $shipment->code . ")",
+                        "amount" => $request['given_amount'],
+                        "direction" => "in",
+                        "category" => "carrier_invoice",
+                        "carrier_id" => $shipment->carrier_id,
+                        "transaction_type_id" => 1,
+                        "transaction_id" => $shipment->id,
+                    ];
+                    if (!empty($request['cash_drawer_session_id'])) {
+                        $txIn['cash_drawer_session_id'] = $request['cash_drawer_session_id'];
+                    }
+                    $transactionData[] = $txIn;
+                }
                 TransactionController::store(new Request($transactionData));
             }
 

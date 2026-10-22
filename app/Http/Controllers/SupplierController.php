@@ -11,6 +11,8 @@ use App\Models\Warehouse;
 use App\Models\ProductVariationAttribute;
 use App\Models\Account;
 use App\Models\Image;
+use App\Models\SupplierReceipt;
+use App\Models\Transaction;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\HelperFunctions;
@@ -687,6 +689,84 @@ class SupplierController extends Controller
         return response()->json([
             'statut' => 1,
             'data' => $suppliers,
+        ]);
+    }
+
+    public function statement($id)
+    {
+        $supplier = Supplier::where('account_id', getAccountUser()->account_id)->find($id);
+        if (!$supplier) {
+            return response()->json(['statut' => 0, 'message' => 'Supplier not found'], 404);
+        }
+
+        // 1. Réceptions (marchandise livrée = dette)
+        $receipts = $supplier->supplierReceipts()
+            ->with(['warehouse', 'accountUser.user', 'supplierReceiptPvas'])
+            ->where('statut', SupplierReceipt::STATUS_VALIDATED)
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(function ($receipt) {
+                $totalAmount = $receipt->supplierReceiptPvas->sum(function ($line) {
+                    $qty = (float) $line->quantity + (float) $line->hors_commande_quantity;
+                    return $qty * (float) $line->price;
+                });
+                return [
+                    'id' => $receipt->id,
+                    'code' => $receipt->code,
+                    'date' => $receipt->created_at,
+                    'warehouse' => $receipt->warehouse ? $receipt->warehouse->title : null,
+                    'user' => $receipt->accountUser && $receipt->accountUser->user
+                        ? $receipt->accountUser->user->firstname . ' ' . $receipt->accountUser->user->lastname
+                        : null,
+                    'total_amount' => (float) $totalAmount,
+                    'items_count' => $receipt->supplierReceiptPvas->count(),
+                ];
+            });
+
+        // 2. Décaissements / Paiements effectués (sorties de caisse)
+        $payments = Transaction::where('supplier_id', $supplier->id)
+            ->where('direction', 'out')
+            ->where('statut', 1)
+            ->with(['accountUser.user', 'cashDrawer', 'cashDrawerSession'])
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(function ($tx) {
+                return [
+                    'id' => $tx->id,
+                    'code' => $tx->code,
+                    'title' => $tx->title,
+                    'notes' => $tx->notes,
+                    'amount' => (float) $tx->amount,
+                    'created_at' => $tx->created_at,
+                    'user' => $tx->accountUser && $tx->accountUser->user
+                        ? $tx->accountUser->user->firstname . ' ' . $tx->accountUser->user->lastname
+                        : null,
+                    'cash_drawer' => $tx->cashDrawer ? $tx->cashDrawer->only('id', 'code', 'title') : null,
+                    'cash_drawer_session' => $tx->cashDrawerSession ? $tx->cashDrawerSession->only('id', 'code') : null,
+                ];
+            });
+
+        $totalReceipts = $receipts->sum('total_amount');
+        $totalPaid = $payments->sum('amount');
+        $balanceDue = $totalReceipts - $totalPaid;
+
+        return response()->json([
+            'statut' => 1,
+            'data' => [
+                'supplier' => $supplier->only('id', 'code', 'title'),
+                'total_receipts' => (float) $totalReceipts,
+                'total_paid' => (float) $totalPaid,
+                'balance_due' => (float) $balanceDue,
+                'summary' => [
+                    'total_receipts' => (float) $totalReceipts,
+                    'total_paid' => (float) $totalPaid,
+                    'balance_due' => (float) $balanceDue,
+                    'receipts_count' => $receipts->count(),
+                    'payments_count' => $payments->count(),
+                ],
+                'receipts' => $receipts,
+                'payments' => $payments,
+            ]
         ]);
     }
 

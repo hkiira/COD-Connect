@@ -241,6 +241,10 @@ class FilterController extends Controller
                 $object = "App\\Models\\TransactionType";
                 $conditions[] = ['column' => 'statut', 'value' => 1];
                 break;
+            case 'expense_types':
+                $object = "App\\Models\\ExpenseType";
+                $conditions[] = ['column' => 'statut', 'value' => 1];
+                break;
             case 'transaction_model_types':
                 return [
                     "statut" => 1,
@@ -705,6 +709,10 @@ class FilterController extends Controller
 
             case 'transaction_types':
                 $object = "App\\Models\\TransactionType";
+                $conditions[] = ['column' => 'statut', 'value' => 1];
+                break;
+            case 'expense_types':
+                $object = "App\\Models\\ExpenseType";
                 $conditions[] = ['column' => 'statut', 'value' => 1];
                 break;
 

@@ -12,16 +12,32 @@ class Transaction extends Model
     protected $fillable = [
         'code',
         'cash_drawer_id',
+        'cash_drawer_session_id',
         'transaction_id',
         'title',
+        'notes',
         'amount',
+        'direction',
+        'category',
         'transaction_type',
         'transaction_type_id',
         'account_user_id',
+        'supplier_id',
+        'carrier_id',
         'created_at',
         'updated_at',
         'statut',
     ];
+    public function supplier()
+    {
+        return $this->belongsTo(Supplier::class);
+    }
+
+    public function carrier()
+    {
+        return $this->belongsTo(Carrier::class);
+    }
+
     public function accountCarrier()
     {
         return $this->belongsTo(AccountCarrier::class);
@@ -43,5 +59,10 @@ class Transaction extends Model
     public function cashDrawer()
     {
         return $this->belongsTo(CashDrawer::class);
+    }
+
+    public function cashDrawerSession()
+    {
+        return $this->belongsTo(CashDrawerSession::class);
     }
 }

@@ -107,7 +107,9 @@ use App\Http\Controllers\{
     AsapDeliveryWebhookController,
     WooCommerceWebhookController,
     NextController,
-    ProductAnalyticsController
+    ProductAnalyticsController,
+    CashDrawerController,
+    CashDrawerSessionController
 };
 use App\Http\Controllers\API\RegisterController;
 use App\Models\ExpenseType;
@@ -227,6 +229,7 @@ Route::get('orders/{id}/swap-candidates', [OrderController::class, 'swapCandidat
     Route::resource('attributes', AttributeController::class);
     Route::resource('categories', CategoryController::class);
     Route::resource('type_phones', PhoneTypesController::class);
+    Route::get('suppliers/{id}/statement', [SupplierController::class, 'statement']);
     Route::resource('suppliers', SupplierController::class);
     Route::resource('phones', PhoneController::class);
     Route::resource('addresses', AddressController::class);
@@ -318,6 +321,10 @@ Route::get('orders/{id}/swap-candidates', [OrderController::class, 'swapCandidat
     Route::resource('permission_types', PermissionTypeController::class);
     Route::resource('pickups', PickupController::class);
     Route::resource('transactions', TransactionController::class);
+    Route::middleware('check_role:admin,manager,comptable,caissier')->group(function () {
+        Route::resource('cash_drawers', CashDrawerController::class);
+        Route::resource('cash_drawer_sessions', CashDrawerSessionController::class);
+    });
     Route::resource('shipments', ShipmentController::class);
     Route::get('shipments/{id}/document', [ShipmentController::class, 'downloadDocument']);
     Route::get('shipments/print/{id}', [ShipmentController::class, 'printShipment']);
