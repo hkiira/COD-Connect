@@ -41,6 +41,9 @@ run_composer() {
     fi
 }
 
+# Automatically revert runtime-generated files in storage or bootstrap cache so they don't block deployment
+git checkout -- storage/ bootstrap/cache/ 2>/dev/null || true
+
 # do not overwrite changes made by hand on the server
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
     echo "Tracked files were edited on the server; deploy aborted:" >&2
