@@ -647,7 +647,7 @@ class CustomerController extends Controller
                         if ($phone) {
                             $phone->update(['title' => $normPhone]);
                             if ($phoneTypes !== null) {
-                                $phone->phoneTypes()->sync($phoneTypes);
+                                $phone->syncPhoneTypes($phoneTypes, $customer->account_id);
                             }
                             $phoneIds[] = $phone->id;
                         }
@@ -658,7 +658,7 @@ class CustomerController extends Controller
 
                         if ($existingPhone) {
                             if ($phoneTypes !== null) {
-                                $existingPhone->phoneTypes()->sync($phoneTypes);
+                                $existingPhone->syncPhoneTypes($phoneTypes, $customer->account_id);
                             }
                             $phoneIds[] = $existingPhone->id;
                         } else {
@@ -669,7 +669,7 @@ class CustomerController extends Controller
                             if ($accountPhone) {
                                 $customer->phones()->syncWithoutDetaching([$accountPhone->id]);
                                 if ($phoneTypes !== null) {
-                                    $accountPhone->phoneTypes()->sync($phoneTypes);
+                                    $accountPhone->syncPhoneTypes($phoneTypes, $customer->account_id);
                                 }
                                 $phoneIds[] = $accountPhone->id;
                             } else {
@@ -678,7 +678,7 @@ class CustomerController extends Controller
                                     'account_id' => $customer->account_id,
                                 ]);
                                 if ($phoneTypes !== null) {
-                                    $newPhone->phoneTypes()->sync($phoneTypes);
+                                    $newPhone->syncPhoneTypes($phoneTypes, $customer->account_id);
                                 }
                                 $phoneIds[] = $newPhone->id;
                             }

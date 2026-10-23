@@ -18,7 +18,17 @@ class Phone extends Model
 
     public function phoneTypes()
     {
-        return $this->belongsToMany(PhoneTypes::class,'phone_type','phone_id','phone_type_id');
+        return $this->belongsToMany(PhoneTypes::class,'phone_type','phone_id','phone_type_id')->withTimestamps();
+    }
+
+    // phone_type.account_id is NOT NULL, so a bare sync() of ids fails
+    public function syncPhoneTypes(array $phoneTypeIds, $accountId = null)
+    {
+        $pivot = ['account_id' => $this->account_id ?? $accountId, 'statut' => 1];
+
+        return $this->phoneTypes()->sync(
+            collect($phoneTypeIds)->mapWithKeys(fn ($id) => [$id => $pivot])->all()
+        );
     }
     public function accounts()
     {

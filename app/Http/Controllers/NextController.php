@@ -1055,7 +1055,7 @@ class NextController extends Controller
                 if ($accountPhone) {
                     $customer->phones()->syncWithoutDetaching([$accountPhone->id]);
                     if ($phoneTypes !== null) {
-                        $accountPhone->phoneTypes()->sync($phoneTypes);
+                        $accountPhone->syncPhoneTypes($phoneTypes, $accountId);
                     }
                 } else {
                     $newPhone = $customer->phones()->create([
@@ -1063,7 +1063,7 @@ class NextController extends Controller
                         'account_id' => $accountId,
                     ]);
                     if ($phoneTypes !== null) {
-                        $newPhone->phoneTypes()->sync($phoneTypes);
+                        $newPhone->syncPhoneTypes($phoneTypes, $accountId);
                     }
                 }
             }
@@ -1199,7 +1199,7 @@ class NextController extends Controller
                         if ($phone) {
                             $phone->update(['title' => $normPhone]);
                             if ($phoneTypes !== null) {
-                                $phone->phoneTypes()->sync($phoneTypes);
+                                $phone->syncPhoneTypes($phoneTypes, $accountId);
                             }
                             $phoneIds[] = $phone->id;
                         }
@@ -1207,7 +1207,7 @@ class NextController extends Controller
                         $existingPhone = $customer->phones()->where('phones.title', $normPhone)->first();
                         if ($existingPhone) {
                             if ($phoneTypes !== null) {
-                                $existingPhone->phoneTypes()->sync($phoneTypes);
+                                $existingPhone->syncPhoneTypes($phoneTypes, $accountId);
                             }
                             $phoneIds[] = $existingPhone->id;
                         } else {
@@ -1215,7 +1215,7 @@ class NextController extends Controller
                             if ($accountPhone) {
                                 $customer->phones()->syncWithoutDetaching([$accountPhone->id]);
                                 if ($phoneTypes !== null) {
-                                    $accountPhone->phoneTypes()->sync($phoneTypes);
+                                    $accountPhone->syncPhoneTypes($phoneTypes, $accountId);
                                 }
                                 $phoneIds[] = $accountPhone->id;
                             } else {
@@ -1224,7 +1224,7 @@ class NextController extends Controller
                                     'account_id' => $accountId,
                                 ]);
                                 if ($phoneTypes !== null) {
-                                    $newPhone->phoneTypes()->sync($phoneTypes);
+                                    $newPhone->syncPhoneTypes($phoneTypes, $accountId);
                                 }
                                 $phoneIds[] = $newPhone->id;
                             }
