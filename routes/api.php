@@ -66,6 +66,7 @@ use App\Http\Controllers\{
     TransfertController,
     ReturnController,
     CustomerTypeController,
+    LeadController,
     CommissionTypeController,
     CommissionController,
     AccountCarrierController,
@@ -284,6 +285,13 @@ Route::get('orders/{id}/swap-candidates', [OrderController::class, 'swapCandidat
     Route::get('customers/counts', [CustomerController::class, 'counts']);
 
     Route::apiResource('customers', CustomerController::class);
+
+    // Leads stay separate from customers until an order is created.
+    Route::get('leads', [LeadController::class, 'index']);
+    Route::patch('leads/{id}', [LeadController::class, 'update']);
+    Route::post('leads/import/preview', [LeadController::class, 'previewImport']);
+    Route::post('leads/import', [LeadController::class, 'import']);
+
     Route::resource('payment_types', PaymentTypeController::class);
     Route::resource('payment_methods', PaymentMethodController::class);
     Route::get('carriers/available/{cityId}', [CarrierController::class, 'availableForCity']);
