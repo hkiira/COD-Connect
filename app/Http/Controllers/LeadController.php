@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Lead;
+use App\Models\Warehouse;
 use App\Services\LeadImportService;
 use App\Support\AccountContext;
+use App\Support\Orders\OrderOwnership;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -92,6 +94,9 @@ class LeadController extends Controller
             'file' => ['required', 'file', 'max:10240', 'mimes:xlsx,xls,csv,txt'],
             'source' => ['required', 'string', Rule::in(['tiktok', 'facebook', 'instagram', 'other'])],
             'mapping' => ['nullable', 'string', 'max:10000'],
+            'product_mapping' => ['nullable', 'string', 'max:500000'],
+            'variant_mapping' => ['nullable', 'string', 'max:500000'],
+            'city_mapping' => ['nullable', 'string', 'max:100000'],
         ]);
 
         return $this->runImportAction($request, $validated, $imports, false);
@@ -103,6 +108,12 @@ class LeadController extends Controller
             'file' => ['required', 'file', 'max:10240', 'mimes:xlsx,xls,csv,txt'],
             'source' => ['required', 'string', Rule::in(['tiktok', 'facebook', 'instagram', 'other'])],
             'mapping' => ['nullable', 'string', 'max:10000'],
+            'product_mapping' => ['nullable', 'string', 'max:500000'],
+            'variant_mapping' => ['nullable', 'string', 'max:500000'],
+            'city_mapping' => ['nullable', 'string', 'max:100000'],
+            'brand_source_id' => ['required', 'integer'],
+            'warehouse_id' => ['required', 'integer'],
+            'carrier_price' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         return $this->runImportAction($request, $validated, $imports, true);
@@ -116,24 +127,54 @@ class LeadController extends Controller
             return response()->json(['message' => 'Account context was not found.'], 422);
         }
 
-        $mapping = null;
-        if (! empty($validated['mapping'])) {
-            $mapping = json_decode($validated['mapping'], true);
-            if (! is_array($mapping)) {
-                return response()->json(['message' => 'Column mapping is invalid.'], 422);
+        $decoded = [];
+        foreach (['mapping', 'product_mapping', 'variant_mapping', 'city_mapping'] as $key) {
+            if (empty($validated[$key])) {
+                $decoded[$key] = null;
+                continue;
+            }
+            $decoded[$key] = json_decode($validated[$key], true);
+            if (! is_array($decoded[$key])) {
+                return response()->json(['message' => ucfirst(str_replace('_', ' ', $key)) . ' is invalid.'], 422);
             }
         }
 
         try {
             if ($commit) {
+                if (! OrderOwnership::ownsBrandSource($validated['brand_source_id'])) {
+                    return response()->json(['message' => 'The selected source is not available for this account.'], 422);
+                }
+                if (! Warehouse::query()->where('account_id', $accountId)->whereKey($validated['warehouse_id'])->exists()) {
+                    return response()->json(['message' => 'The selected warehouse is not available for this account.'], 422);
+                }
+
                 return response()->json([
                     'statut' => 1,
-                    'data' => $imports->import($request->file('file'), $accountId, $validated['source'], $mapping),
-                    'message' => 'Leads imported.',
+                    'data' => $imports->import(
+                        $request->file('file'),
+                        $accountId,
+                        $validated['source'],
+                        $decoded['mapping'],
+                        $decoded['product_mapping'],
+                        $decoded['variant_mapping'],
+                        $decoded['city_mapping'],
+                        (int) $validated['brand_source_id'],
+                        (int) $validated['warehouse_id'],
+                        (float) ($validated['carrier_price'] ?? 0),
+                    ),
+                    'message' => 'Orders created from imported leads.',
                 ]);
             }
 
-            $preview = $imports->preview($request->file('file'), $accountId, $validated['source'], $mapping);
+            $preview = $imports->preview(
+                $request->file('file'),
+                $accountId,
+                $validated['source'],
+                $decoded['mapping'],
+                $decoded['product_mapping'],
+                $decoded['variant_mapping'],
+                $decoded['city_mapping'],
+            );
             unset($preview['_headers'], $preview['_fingerprint'], $preview['_records']);
 
             return response()->json(['statut' => 1, 'data' => $preview]);
