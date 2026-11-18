@@ -18,7 +18,18 @@ class OrderDuplicateService
         OrderStatus::PENDING,      // 1
         OrderStatus::ABANDONED,    // 2
         OrderStatus::OUT_OF_STOCK, // 3
+        OrderStatus::DELIVERED,    // 7
         OrderStatus::CANCELLED,    // 8
+        OrderStatus::PAID,         // 10
+        OrderStatus::RETURNED,     // 11
+    ];
+
+    /** Completed carrier cycles may be removed even when a pickup or shipment is attached. */
+    private const LINKED_DELETABLE_STATUSES = [
+        OrderStatus::DELIVERED,
+        OrderStatus::CANCELLED,
+        OrderStatus::PAID,
+        OrderStatus::RETURNED,
     ];
 
     /**
@@ -53,7 +64,7 @@ class OrderDuplicateService
         $search = trim($filters['search'] ?? '');
 
         $page = max(1, (int) ($filters['page'] ?? 1));
-        $perPage = max(1, min(50, (int) ($filters['per_page'] ?? 10)));
+        $perPage = max(1, min(100, (int) ($filters['per_page'] ?? 10)));
 
         // 1. Build subquery to find customer IDs who have duplicate orders
         $query = DB::table('orders as o1')
@@ -97,6 +108,8 @@ class OrderDuplicateService
 
         // Distinct customer IDs with duplicates
         $totalGroups = (clone $query)->distinct('o1.customer_id')->count('o1.customer_id');
+        $totalPages = (int) ceil($totalGroups / $perPage);
+        $page = min($page, max(1, $totalPages));
 
         $customerIds = (clone $query)
             ->select('o1.customer_id')
@@ -199,10 +212,7 @@ class OrderDuplicateService
                 $isRecommendedKeep = ($order->id === $recommendedKeepId);
 
                 // Check if eligible for deletion
-                $isDeletableStatus = in_array((int) $order->order_status_id, self::DELETABLE_STATUSES, true);
-                $hasNoShipment = empty($order->shipment_id);
-                $hasNoPickup = empty($order->pickup_id);
-                $canDelete = $isDeletableStatus && $hasNoShipment && $hasNoPickup;
+                $canDelete = $this->canDelete($order);
 
                 // Recommended action
                 $recommendedAction = $isRecommendedKeep ? 'keep' : ($canDelete ? 'delete' : 'keep_protected');
@@ -267,8 +277,6 @@ class OrderDuplicateService
             ];
         }
 
-        $totalPages = (int) ceil($totalGroups / $perPage);
-
         return [
             'groups' => $groups,
             'pagination' => [
@@ -321,12 +329,12 @@ class OrderDuplicateService
                 continue;
             }
 
-            if (!empty($order->shipment_id) || !empty($order->pickup_id)) {
+            if (!$this->canDelete($order)) {
                 $failedCount++;
                 $errors[] = [
                     'order_id' => $order->id,
                     'code' => $order->code,
-                    'reason' => 'La commande a une expédition ou un ramassage rattaché.',
+                    'reason' => 'La commande a une expédition ou un ramassage rattaché et son statut ne permet pas cette suppression.',
                 ];
                 continue;
             }
@@ -388,5 +396,20 @@ class OrderDuplicateService
         }
 
         return 'Commande protégée';
+    }
+
+    private function canDelete(Order $order): bool
+    {
+        $statusId = (int) $order->order_status_id;
+
+        if (!in_array($statusId, self::DELETABLE_STATUSES, true)) {
+            return false;
+        }
+
+        $hasNoShipment = empty($order->shipment_id);
+        $hasNoPickup = empty($order->pickup_id);
+
+        return ($hasNoShipment && $hasNoPickup)
+            || in_array($statusId, self::LINKED_DELETABLE_STATUSES, true);
     }
 }
