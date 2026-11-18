@@ -97,6 +97,7 @@ class LeadController extends Controller
             'product_mapping' => ['nullable', 'string', 'max:500000'],
             'variant_mapping' => ['nullable', 'string', 'max:500000'],
             'city_mapping' => ['nullable', 'string', 'max:100000'],
+            'row_overrides' => ['nullable', 'string', 'max:1000000'],
         ]);
 
         return $this->runImportAction($request, $validated, $imports, false);
@@ -111,6 +112,7 @@ class LeadController extends Controller
             'product_mapping' => ['nullable', 'string', 'max:500000'],
             'variant_mapping' => ['nullable', 'string', 'max:500000'],
             'city_mapping' => ['nullable', 'string', 'max:100000'],
+            'row_overrides' => ['nullable', 'string', 'max:1000000'],
             'brand_source_id' => ['required', 'integer'],
             'warehouse_id' => ['required', 'integer'],
             'carrier_price' => ['nullable', 'numeric', 'min:0'],
@@ -128,7 +130,7 @@ class LeadController extends Controller
         }
 
         $decoded = [];
-        foreach (['mapping', 'product_mapping', 'variant_mapping', 'city_mapping'] as $key) {
+        foreach (['mapping', 'product_mapping', 'variant_mapping', 'city_mapping', 'row_overrides'] as $key) {
             if (empty($validated[$key])) {
                 $decoded[$key] = null;
                 continue;
@@ -158,6 +160,7 @@ class LeadController extends Controller
                         $decoded['product_mapping'],
                         $decoded['variant_mapping'],
                         $decoded['city_mapping'],
+                        $decoded['row_overrides'],
                         (int) $validated['brand_source_id'],
                         (int) $validated['warehouse_id'],
                         (float) ($validated['carrier_price'] ?? 0),
@@ -174,6 +177,7 @@ class LeadController extends Controller
                 $decoded['product_mapping'],
                 $decoded['variant_mapping'],
                 $decoded['city_mapping'],
+                $decoded['row_overrides'],
             );
             unset($preview['_headers'], $preview['_fingerprint'], $preview['_records']);
 

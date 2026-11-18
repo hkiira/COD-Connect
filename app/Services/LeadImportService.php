@@ -65,6 +65,7 @@ class LeadImportService
         ?array $providedProductMapping = null,
         ?array $providedVariantMapping = null,
         ?array $providedCityMapping = null,
+        ?array $providedRowOverrides = null,
     ): array
     {
         [$headers, $rows] = $this->readFile($file);
@@ -96,7 +97,12 @@ class LeadImportService
 
         $records = [];
         foreach ($rows as $index => $values) {
-            $records[] = $this->mapRow($headers, $values, $mapping, $index + 2);
+            $record = $this->mapRow($headers, $values, $mapping, $index + 2);
+            $rowOverride = $providedRowOverrides[$record['row_number']] ?? $providedRowOverrides[(string) $record['row_number']] ?? null;
+            if (is_array($rowOverride)) {
+                $record = $this->applyRowOverrides($record, $rowOverride);
+            }
+            $records[] = $record;
         }
         $this->classifyRows($records, $accountId, $source);
 
@@ -126,6 +132,17 @@ class LeadImportService
             }
         }
 
+        $previewRecords = [];
+        foreach (array_slice($records, 0, 12) as $record) {
+            $previewRecords[$record['row_number']] = $record;
+        }
+        foreach ($records as $record) {
+            if ($record['state'] === 'invalid') {
+                $previewRecords[$record['row_number']] = $record;
+            }
+        }
+        ksort($previewRecords);
+
         return [
             'headers' => array_map(
                 fn (string $header, int $index) => ['index' => $index, 'label' => $header],
@@ -151,17 +168,22 @@ class LeadImportService
             'city_mapping' => $cityMapping,
             'preview_rows' => array_map(fn (array $record) => [
                 'row_number' => $record['row_number'],
-                'name' => $record['data']['name'],
-                'phone' => $record['data']['phone'],
-                'city' => $record['data']['city'],
+                'name' => $record['editable_values']['name'],
+                'phone' => $record['editable_values']['phone'],
+                'address' => $record['editable_values']['address'],
+                'city' => $record['editable_values']['city'],
                 'product_key' => $record['product_key'] ?? '',
                 'product_title' => $record['product_title'] ?? null,
+                'requested_size' => $record['editable_values']['requested_size'],
+                'requested_color' => $record['editable_values']['requested_color'],
                 'variant_label' => $record['variant_label'] ?? null,
+                'quantity' => $record['editable_values']['quantity'],
+                'price' => $record['editable_values']['price'],
                 'city_title' => $record['city_title'] ?? null,
                 'state' => $record['state'],
                 'message' => $record['message'],
                 'phone_duplicate_warning' => $record['phone_duplicate_warning'],
-            ], array_slice($records, 0, 12)),
+            ], array_values($previewRecords)),
             '_headers' => $headers,
             '_fingerprint' => $fingerprint,
             '_records' => $records,
@@ -177,6 +199,7 @@ class LeadImportService
         ?array $providedProductMapping,
         ?array $providedVariantMapping,
         ?array $providedCityMapping,
+        ?array $providedRowOverrides,
         int $brandSourceId,
         int $warehouseId,
         float $carrierPrice = 0,
@@ -189,11 +212,8 @@ class LeadImportService
             $providedProductMapping,
             $providedVariantMapping,
             $providedCityMapping,
+            $providedRowOverrides,
         );
-        if (($preview['mapping']['phone'] ?? null) === null) {
-            throw new \InvalidArgumentException('Map a phone number column before importing orders.');
-        }
-
         if (($preview['product_unresolved_count'] + $preview['variant_unresolved_count'] + $preview['city_unresolved_count']) > 0) {
             throw new \InvalidArgumentException('Resolve all products, variations, and cities in the preview before importing orders.');
         }
@@ -512,11 +532,7 @@ class LeadImportService
         }
 
         $phoneRaw = trim((string) ($mapped['phone'] ?? ''));
-        $phone = $phoneRaw !== '' ? CustomerIdentityService::normalizePhone($phoneRaw) : '';
-        $phoneDigits = preg_replace('/\D+/', '', $phone) ?? '';
-        if (strlen($phoneDigits) < 7 || strlen($phoneDigits) > 15) {
-            $phone = '';
-        }
+        $phone = $this->normalizeLeadPhone($phoneRaw);
 
         $metadata = [];
         foreach (self::FIELD_ALIASES as $field => $_aliases) {
@@ -579,6 +595,17 @@ class LeadImportService
             'product_key' => $productKey,
             'quantity' => $quantity,
             'price' => $price,
+            'editable_values' => [
+                'name' => $name,
+                'phone' => $phoneRaw,
+                'address' => $address,
+                'city' => $city,
+                'product_reference' => $productKey,
+                'requested_size' => (string) ($metadata['requested_size'] ?? ''),
+                'requested_color' => (string) ($metadata['requested_color'] ?? ''),
+                'quantity' => $quantityRaw !== '' ? $quantityRaw : '1',
+                'price' => $priceRaw,
+            ],
             'phone_duplicate_warning' => false,
             'data' => [
                 'external_id' => $externalId !== '' ? mb_substr($externalId, 0, 191) : null,
@@ -592,6 +619,89 @@ class LeadImportService
                 'raw_data' => $rawData ?: null,
             ],
         ];
+    }
+
+    /** Apply editable preview values to one imported row before duplicate checks and catalog matching. */
+    private function applyRowOverrides(array $record, array $overrides): array
+    {
+        $editable = $record['editable_values'];
+        foreach ([
+            'name',
+            'phone',
+            'address',
+            'city',
+            'product_reference',
+            'requested_size',
+            'requested_color',
+            'quantity',
+            'price',
+        ] as $field) {
+            if (array_key_exists($field, $overrides) && is_scalar($overrides[$field])) {
+                $editable[$field] = trim((string) $overrides[$field]);
+            }
+        }
+
+        $phoneRaw = $editable['phone'];
+        $phone = $this->normalizeLeadPhone($phoneRaw);
+        $address = trim($editable['address']);
+        $quantityRaw = trim($editable['quantity']);
+        $quantityValue = $quantityRaw === '' ? 0 : (is_numeric($quantityRaw) ? (float) $quantityRaw : 0);
+        $quantity = $quantityValue >= 1 && floor($quantityValue) === $quantityValue ? (int) $quantityValue : 0;
+        $priceRaw = trim($editable['price']);
+        $normalizedPrice = str_replace(',', '.', $priceRaw);
+        $priceInvalid = $priceRaw !== '' && ! is_numeric($normalizedPrice);
+        $price = $priceRaw !== '' && ! $priceInvalid ? (float) $normalizedPrice : null;
+
+        $record['editable_values'] = $editable;
+        $record['product_key'] = trim($editable['product_reference']);
+        $record['quantity'] = $quantity;
+        $record['price'] = $price;
+        $record['data']['name'] = trim($editable['name']) !== '' ? mb_substr(trim($editable['name']), 0, 255) : null;
+        $record['data']['phone'] = $phone !== '' ? $phone : null;
+        $record['data']['address'] = $address !== '' ? mb_substr($address, 0, 255) : null;
+        $record['data']['city'] = trim($editable['city']) !== '' ? mb_substr(trim($editable['city']), 0, 255) : null;
+
+        $metadata = $record['data']['metadata'] ?? [];
+        foreach ([
+            'product_reference' => trim($editable['product_reference']),
+            'requested_size' => trim($editable['requested_size']),
+            'requested_color' => trim($editable['requested_color']),
+            'quantity' => trim($editable['quantity']),
+            'price' => trim($editable['price']),
+        ] as $field => $value) {
+            if ($value === '') {
+                unset($metadata[$field]);
+            } else {
+                $metadata[$field] = $value;
+            }
+        }
+        $record['data']['metadata'] = $metadata ?: null;
+
+        $record['state'] = 'ready';
+        $record['message'] = 'ready';
+        if ($phone === '') {
+            $record['state'] = 'invalid';
+            $record['message'] = $phoneRaw === '' ? 'missing_phone' : 'invalid_phone';
+        } elseif ($address === '') {
+            $record['state'] = 'invalid';
+            $record['message'] = 'missing_address';
+        } elseif ($quantity < 1) {
+            $record['state'] = 'invalid';
+            $record['message'] = 'invalid_quantity';
+        } elseif ($priceInvalid || ($price !== null && $price < 0)) {
+            $record['state'] = 'invalid';
+            $record['message'] = 'invalid_price';
+        }
+
+        return $record;
+    }
+
+    private function normalizeLeadPhone(string $phoneRaw): string
+    {
+        $phone = $phoneRaw !== '' ? CustomerIdentityService::normalizePhone($phoneRaw) : '';
+        $phoneDigits = preg_replace('/\D+/', '', $phone) ?? '';
+
+        return strlen($phoneDigits) >= 7 && strlen($phoneDigits) <= 15 ? $phone : '';
     }
 
     private function parseDate(mixed $value): ?string
