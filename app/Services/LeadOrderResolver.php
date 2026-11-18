@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\AccountUser;
 use App\Models\City;
 use App\Models\Product;
+use App\Models\ProductVariationAttribute;
+use Illuminate\Support\Facades\DB;
 
 class LeadOrderResolver
 {
@@ -28,23 +30,44 @@ class LeadOrderResolver
                 ->get(['id', 'title', 'reference', 'code', 'account_user_id'])
                 ->keyBy('id');
 
+        $pvaIds = $products->flatMap(fn (Product $product) => $product->productVariationAttributes->pluck('id'))
+            ->unique()
+            ->values();
+        $variationPrices = $pvaIds->isEmpty()
+            ? collect()
+            : DB::table('offerables')
+                ->join('offers', 'offers.id', '=', 'offerables.offer_id')
+                ->where('offerables.offerable_type', ProductVariationAttribute::class)
+                ->whereIn('offerables.offerable_id', $pvaIds)
+                ->where('offerables.statut', 1)
+                ->whereNull('offerables.deleted_at')
+                ->where('offers.offer_type_id', 1)
+                ->where('offers.statut', 1)
+                ->whereNull('offers.deleted_at')
+                ->groupBy('offerables.offerable_id')
+                ->selectRaw('offerables.offerable_id, MAX(offers.price) as price')
+                ->pluck('price', 'offerables.offerable_id');
+
         $cities = City::query()->get(['id', 'title']);
         $productGroups = [];
         $variantGroups = [];
         $cityGroups = [];
 
         foreach ($records as &$record) {
-            if ($record['state'] !== 'ready') {
+            if ($record['state'] === 'duplicate') {
                 continue;
             }
 
+            $canResolveState = $record['state'] === 'ready';
             $cityName = trim((string) ($record['data']['city'] ?? ''));
             $record['city_key'] = $cityName;
+            $record['product_key'] = trim((string) ($record['product_key'] ?? ''));
+            $record['variant_key'] = $this->variantKey($record);
             $city = $this->resolveCity($cityName, $cities, $cityMappings);
             if ($city) {
                 $record['city_id'] = (int) $city->id;
                 $record['city_title'] = (string) $city->title;
-            } else {
+            } elseif ($canResolveState) {
                 $record['state'] = 'city_unresolved';
                 $record['message'] = $cityName === '' ? 'missing_city' : 'unmatched_city';
                 $cityGroups[$cityName] = [
@@ -53,21 +76,23 @@ class LeadOrderResolver
                     'city_id' => null,
                     'city_title' => null,
                 ];
-                continue;
             }
 
-            $productKey = trim((string) ($record['product_key'] ?? ''));
-            $record['product_key'] = $productKey;
+            $productKey = $record['product_key'];
             $product = $this->resolveProduct($productKey, $products, $productMappings);
             if (! $product) {
-                $record['state'] = 'product_unresolved';
-                $record['message'] = $productKey === '' ? 'missing_product' : 'unmatched_product';
-                $productGroups[$productKey] = [
-                    'key' => $productKey,
-                    'label' => $productKey !== '' ? $productKey : '(no product identifier)',
-                    'product' => null,
-                    'match' => $productKey === '' ? 'missing' : 'unmatched',
-                ];
+                if ($canResolveState) {
+                    if ($record['state'] === 'ready') {
+                        $record['state'] = 'product_unresolved';
+                        $record['message'] = $productKey === '' ? 'missing_product' : 'unmatched_product';
+                    }
+                    $productGroups[$productKey] = [
+                        'key' => $productKey,
+                        'label' => $productKey !== '' ? $productKey : '(no product identifier)',
+                        'product' => null,
+                        'match' => $productKey === '' ? 'missing' : 'unmatched',
+                    ];
+                }
                 continue;
             }
 
@@ -87,19 +112,30 @@ class LeadOrderResolver
                 'match' => isset($productMappings[$productKey]) ? 'manual' : 'automatic',
             ];
 
-            $variantSets = $this->variationSets($product);
-            $variantKey = $this->variantKey($product->id, $record);
-            $record['variant_key'] = $variantKey;
+            $variantSets = $this->variationSets($product, $variationPrices);
+            $variantKey = $record['variant_key'];
+            $legacyVariantKey = $this->legacyVariantKey((int) $product->id, $record);
             $selectedVariant = $this->resolveVariant(
                 $variantSets,
                 $record,
-                $variantMappings[$variantKey] ?? null,
+                $variantMappings[$variantKey] ?? $variantMappings[$legacyVariantKey] ?? null,
             );
 
             if ($selectedVariant) {
                 $record['variant_attribute_ids'] = $selectedVariant['ids'];
                 $record['variant_label'] = $selectedVariant['label'];
-            } else {
+                $record['variant_pva_id'] = $selectedVariant['pva_id'];
+                $record['catalog_price'] = $selectedVariant['price'];
+                $record['product_choice'] = [
+                    'product_id' => (int) $product->id,
+                    'title' => (string) $product->title,
+                    'reference' => (string) ($product->reference ?: $product->code ?: ''),
+                    'pva_id' => $selectedVariant['pva_id'],
+                    'ids' => $selectedVariant['ids'],
+                    'variant_label' => $selectedVariant['label'],
+                    'price' => $selectedVariant['price'],
+                ];
+            } elseif ($canResolveState && $record['state'] === 'ready') {
                 $record['state'] = 'variant_unresolved';
                 $record['message'] = 'unmatched_variant';
                 $variantGroups[$variantKey] = [
@@ -111,6 +147,7 @@ class LeadOrderResolver
                     'options' => array_map(fn (array $variant) => [
                         'ids' => $variant['ids'],
                         'label' => $variant['label'],
+                        'price' => $variant['price'],
                     ], $variantSets),
                 ];
             }
@@ -188,11 +225,12 @@ class LeadOrderResolver
         return count($best) === 1 ? $best[0]['product'] : null;
     }
 
-    /** @return array<int, array{ids: array<int, int>, attributes: array<int, array{id: int, title: string}>, label: string}> */
-    private function variationSets(Product $product): array
+    /** @return array<int, array{pva_id: int, ids: array<int, int>, attributes: array<int, array{id: int, title: string}>, label: string, price: float}> */
+    private function variationSets(Product $product, $variationPrices): array
     {
         $sets = [];
-        foreach ($product->productVariationAttributes as $productVariation) {
+        $productPrice = (float) ($product->price->first()?->price ?? 0);
+        foreach ($product->productVariationAttributes->sortBy('id') as $productVariation) {
             $variation = $productVariation->variationAttribute;
             if (! $variation) {
                 continue;
@@ -218,9 +256,11 @@ class LeadOrderResolver
             $ids = array_map('intval', array_keys($attributes));
             $key = implode(',', $ids);
             $sets[$key] = [
+                'pva_id' => (int) $productVariation->id,
                 'ids' => $ids,
                 'attributes' => array_values($attributes),
                 'label' => implode(' · ', array_column(array_values($attributes), 'title')),
+                'price' => (float) ($variationPrices->get($productVariation->id) ?? $productPrice),
             ];
         }
 
@@ -274,7 +314,16 @@ class LeadOrderResolver
         return count($matches) === 1 ? $matches[0] : null;
     }
 
-    private function variantKey(int $productId, array $record): string
+    private function variantKey(array $record): string
+    {
+        return hash('sha256', json_encode([
+            $this->normalizeText((string) ($record['product_key'] ?? '')),
+            $this->normalizeText((string) ($record['data']['metadata']['requested_size'] ?? '')),
+            $this->normalizeText((string) ($record['data']['metadata']['requested_color'] ?? '')),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '');
+    }
+
+    private function legacyVariantKey(int $productId, array $record): string
     {
         return hash('sha256', json_encode([
             $productId,

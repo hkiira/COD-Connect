@@ -174,11 +174,18 @@ class LeadImportService
                 'city' => $record['editable_values']['city'],
                 'product_key' => $record['product_key'] ?? '',
                 'product_title' => $record['product_title'] ?? null,
+                'product_mapping_key' => $record['product_key'] ?? '',
+                'variant_mapping_key' => $record['variant_key'] ?? null,
+                'city_mapping_key' => $record['city_key'] ?? $record['editable_values']['city'],
                 'requested_size' => $record['editable_values']['requested_size'],
                 'requested_color' => $record['editable_values']['requested_color'],
                 'variant_label' => $record['variant_label'] ?? null,
+                'variant_attribute_ids' => $record['variant_attribute_ids'] ?? [],
+                'product_choice' => $record['product_choice'] ?? null,
                 'quantity' => $record['editable_values']['quantity'],
-                'price' => $record['editable_values']['price'],
+                'price' => isset($record['catalog_price'])
+                    ? (string) $record['catalog_price']
+                    : (isset($record['product_price']) ? (string) $record['product_price'] : $record['editable_values']['price']),
                 'city_title' => $record['city_title'] ?? null,
                 'state' => $record['state'],
                 'message' => $record['message'],
@@ -289,7 +296,7 @@ class LeadImportService
                     'products' => [[
                         'id' => $record['product_id'],
                         'quantity' => $record['quantity'],
-                        'price' => $record['price'] ?? $record['product_price'],
+                        'price' => $record['catalog_price'] ?? $record['product_price'],
                         'attributes' => $record['variant_attribute_ids'],
                     ]],
                 ];
@@ -564,8 +571,7 @@ class LeadImportService
         $quantity = $quantityValue >= 1 && floor($quantityValue) === $quantityValue ? (int) $quantityValue : 0;
         $priceRaw = trim((string) ($mapped['price'] ?? ''));
         $normalizedPrice = str_replace(',', '.', $priceRaw);
-        $priceInvalid = $priceRaw !== '' && ! is_numeric($normalizedPrice);
-        $price = $priceRaw !== '' && ! $priceInvalid
+        $price = $priceRaw !== '' && is_numeric($normalizedPrice)
             ? (float) $normalizedPrice
             : null;
 
@@ -580,12 +586,6 @@ class LeadImportService
         } elseif ($quantity < 1) {
             $state = 'invalid';
             $message = 'invalid_quantity';
-        } elseif ($priceInvalid) {
-            $state = 'invalid';
-            $message = 'invalid_price';
-        } elseif ($price !== null && $price < 0) {
-            $state = 'invalid';
-            $message = 'invalid_price';
         }
 
         return [
@@ -649,8 +649,7 @@ class LeadImportService
         $quantity = $quantityValue >= 1 && floor($quantityValue) === $quantityValue ? (int) $quantityValue : 0;
         $priceRaw = trim($editable['price']);
         $normalizedPrice = str_replace(',', '.', $priceRaw);
-        $priceInvalid = $priceRaw !== '' && ! is_numeric($normalizedPrice);
-        $price = $priceRaw !== '' && ! $priceInvalid ? (float) $normalizedPrice : null;
+        $price = $priceRaw !== '' && is_numeric($normalizedPrice) ? (float) $normalizedPrice : null;
 
         $record['editable_values'] = $editable;
         $record['product_key'] = trim($editable['product_reference']);
@@ -688,9 +687,6 @@ class LeadImportService
         } elseif ($quantity < 1) {
             $record['state'] = 'invalid';
             $record['message'] = 'invalid_quantity';
-        } elseif ($priceInvalid || ($price !== null && $price < 0)) {
-            $record['state'] = 'invalid';
-            $record['message'] = 'invalid_price';
         }
 
         return $record;

@@ -295,6 +295,21 @@ class ProductController extends Controller
             return $product->activePvas->pluck('id');
         })->unique()->toArray();
 
+        $variationPrices = ! empty($pvaIds)
+            ? DB::table('offerables')
+                ->join('offers', 'offers.id', '=', 'offerables.offer_id')
+                ->where('offerables.offerable_type', ProductVariationAttribute::class)
+                ->whereIn('offerables.offerable_id', $pvaIds)
+                ->where('offerables.statut', 1)
+                ->whereNull('offerables.deleted_at')
+                ->where('offers.offer_type_id', 1)
+                ->where('offers.statut', 1)
+                ->whereNull('offers.deleted_at')
+                ->groupBy('offerables.offerable_id')
+                ->selectRaw('offerables.offerable_id, MAX(offers.price) as price')
+                ->pluck('price', 'offerables.offerable_id')
+            : collect();
+
         // Batch load all required data for PVAs
         $orderPvas = !empty($pvaIds) ? OrderPva::whereIn('product_variation_attribute_id', $pvaIds)
             ->whereIn('order_status_id', [1, 4, 5, 8, 9])
@@ -310,16 +325,17 @@ class ProductController extends Controller
             ->get()
             ->groupBy('product_variation_attribute_id') : collect();
 
-        $products['data'] = collect($products['data'])->map(function ($product) use ($account, $orderPvas, $supplierOrderPvas, $warehousePvas) {
+        $products['data'] = collect($products['data'])->map(function ($product) use ($account, $orderPvas, $supplierOrderPvas, $warehousePvas, $variationPrices) {
+            $productPrice = (float) ($product->price->first()?->price ?? 0);
             $productData = [
                 'id' => $product->id,
                 'title' => $product->title,
                 'statut' => $product->statut,
-                'price' => $product->price->first()->price,
+                'price' => $productPrice,
                 'image' => collect($product->principalImage->only('id', 'photo', 'photo_dir')),
                 'reference' => $product->reference,
                 'created_at' => $product->created_at,
-                'depot_attributes' => $product->activePvas->map(function ($pva) use ($orderPvas, $supplierOrderPvas, $warehousePvas) {
+                'depot_attributes' => $product->activePvas->map(function ($pva) use ($orderPvas, $supplierOrderPvas, $warehousePvas, $variationPrices, $productPrice) {
                     $pvaOrderPvas = $orderPvas->get($pva->id, collect());
                     $pvaSupplierOrderPvas = $supplierOrderPvas->get($pva->id, collect());
                     $pvaWarehousePvas = $warehousePvas->get($pva->id, collect());
@@ -335,6 +351,13 @@ class ProductController extends Controller
                     return [
                         'id' => $pva->id,
                         'variation_attributes_id' => $pva->variationAttribute->id ?? null,
+                        'attribute_ids' => $pva->variationAttribute?->childVariationAttributes
+                            ->pluck('attribute_id')
+                            ->map(fn ($id) => (int) $id)
+                            ->sort()
+                            ->values()
+                            ->all() ?? [],
+                        'price' => (float) ($variationPrices->get($pva->id) ?? $productPrice),
                         'delivery' => $delivery,
                         'real' => $realStock,
                         'available' => $realStock - $pending,
